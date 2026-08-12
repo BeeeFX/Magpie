@@ -24,6 +24,13 @@ asarUnpack:
   - '**/node_modules/@img/**'
   - '**/node_modules/ffmpeg-static/**'
 
+# L'icône est aussi lue au runtime pour la fenêtre et la zone de notification. Les
+# ressources de build servent normalement seulement à l'installateur, donc on l'embarque
+# explicitement à côté de l'application.
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+
 win:
   # Le nom doit rester strictement identique à celui écrit dans `latest.yml`. Les espaces
   # sont normalisés différemment par GitHub et casseraient le téléchargement automatique.

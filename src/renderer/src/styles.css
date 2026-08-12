@@ -1579,6 +1579,23 @@ h1, h2, h3 {
   transition: none;
 }
 
+/* AltDrag et les utilitaires similaires déplacent la fenêtre par une rafale de petites
+   opérations natives. Pendant cette rafale, les flous et ombres n'apportent rien à
+   l'image mais obligent Chromium à recomposer plusieurs couches à chaque pixel. */
+html.window-is-moving .app {
+  pointer-events: none;
+}
+
+html.window-is-moving .app,
+html.window-is-moving .app *,
+html.window-is-moving .app *::before,
+html.window-is-moving .app *::after {
+  animation: none !important;
+  transition: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
 /* ------------------------------------------------- carte de contenu (mode cartes)
 
    Reprend la logique de Dewey : l'auteur d'abord, le texte lisible en entier, le média

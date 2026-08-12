@@ -93,6 +93,9 @@ export function App(): React.JSX.Element {
       }
     })
     const offAi = magpieEvents.onAiTagProgress(setAiProgress)
+    const offWindowInteraction = magpieEvents.onWindowInteraction((active) => {
+      document.documentElement.classList.toggle('window-is-moving', active)
+    })
 
     return () => {
       if (refreshTimer.current !== null) clearTimeout(refreshTimer.current)
@@ -101,6 +104,8 @@ export function App(): React.JSX.Element {
       offTheme()
       offSync()
       offAi()
+      offWindowInteraction()
+      document.documentElement.classList.remove('window-is-moving')
     }
   }, [refresh, refreshPosts, loadSettings, loadAccounts, setCacheProgress, setIsDark, setSyncState, setAiProgress])
 

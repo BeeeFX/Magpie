@@ -139,6 +139,11 @@ const events: MagpieEvents = {
     const listener = (_e: unknown, progress: LibraryMoveProgress): void => cb(progress)
     ipcRenderer.on('library:moveProgress', listener)
     return () => ipcRenderer.removeListener('library:moveProgress', listener)
+  },
+  onWindowInteraction: (cb) => {
+    const listener = (_e: unknown, active: boolean): void => cb(active)
+    ipcRenderer.on('window:interaction', listener)
+    return () => ipcRenderer.removeListener('window:interaction', listener)
   }
 }
 

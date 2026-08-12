@@ -26,6 +26,11 @@ import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 
 const isDev = !app.isPackaged
+const APP_ID = 'tv.electrictheatre.magpie'
+
+// Le raccourci NSIS et le processus doivent annoncer exactement la même identité.
+// Sinon Windows peut créer un second bouton dans la barre des tâches au lancement.
+if (process.platform === 'win32') app.setAppUserModelId(APP_ID)
 
 // Les captures et tests visuels utilisent un profil jetable, jamais la bibliothèque du
 // développeur. Ces deux variables n'ont aucun effet dans l'application distribuée.
@@ -44,6 +49,9 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+let hiddenToTray = false
+let windowInteractionActive = false
+let windowInteractionTimer: NodeJS.Timeout | null = null
 let scheduleTimer: NodeJS.Timeout | null = null
 let lastScheduledSync = Date.now()
 let quitting = false
@@ -54,6 +62,25 @@ const syncStartedAt: Partial<Record<string, number>> = {}
 /** Hauteur de notre barre de titre ; les boutons système s'y superposent. Doit rester
  *  égale à la hauteur de `.topbar` côté CSS, sinon les boutons sont décalés. */
 const TITLE_BAR_HEIGHT = 52
+
+function appIconPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(app.getAppPath(), 'build', 'icon.png')
+}
+
+function markWindowInteraction(): void {
+  if (!windowInteractionActive) {
+    windowInteractionActive = true
+    mainWindow?.webContents.send('window:interaction', true)
+  }
+  if (windowInteractionTimer) clearTimeout(windowInteractionTimer)
+  windowInteractionTimer = setTimeout(() => {
+    windowInteractionTimer = null
+    windowInteractionActive = false
+    mainWindow?.webContents.send('window:interaction', false)
+  }, 140)
+}
 
 function overlayColors(isDark: boolean): { color: string; symbolColor: string } {
   // La couleur de fond doit correspondre exactement à celle de la barre côté CSS, sinon
@@ -74,7 +101,7 @@ function createWindow(): void {
     show: false,
     backgroundColor: isDark ? '#17171a' : '#ffffff',
     title: 'Magpie',
-    icon: join(app.getAppPath(), 'build', 'icon.png'),
+    icon: appIconPath(),
     // Le cadre natif est remplacé par le nôtre : c'est ce qui sépare une application de
     // bureau d'une page web dans une fenêtre. Sous Windows, `titleBarOverlay` laisse l'OS
     // dessiner ses propres boutons, aux couleurs qu'on lui donne ; sous macOS,
@@ -91,13 +118,21 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.once('ready-to-show', () => {
+    hiddenToTray = false
+    mainWindow?.show()
+    updateTray()
+  })
   mainWindow.on('close', (event) => {
     if (!quitting && readSettings().trayEnabled) {
       event.preventDefault()
+      hiddenToTray = true
       mainWindow?.hide()
+      updateTray()
     }
   })
+  mainWindow.on('move', markWindowInteraction)
+  mainWindow.on('resize', markWindowInteraction)
 
   // Un lien cliqué dans le renderer part dans le navigateur, jamais dans une fenêtre
   // Electron sans garde-fou.
@@ -123,40 +158,48 @@ function createWindow(): void {
 
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+  hiddenToTray = false
   mainWindow?.show()
   mainWindow?.focus()
+  updateTray()
 }
 
-function refreshBackgroundFeatures(): void {
-  const settings = readSettings()
-
-  if (settings.trayEnabled && !tray) {
-    const icon = nativeImage.createFromPath(join(app.getAppPath(), 'build', 'icon.png')).resize({
+function updateTray(): void {
+  const shouldShow = readSettings().trayEnabled && hiddenToTray
+  if (shouldShow && !tray) {
+    const icon = nativeImage.createFromPath(appIconPath()).resize({
       width: 18,
       height: 18
     })
     tray = new Tray(icon)
     tray.setToolTip('Magpie')
     tray.on('click', showMainWindow)
-  } else if (!settings.trayEnabled && tray) {
+  } else if (!shouldShow && tray) {
     tray.destroy()
     tray = null
   }
 
-  tray?.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Ouvrir Magpie', click: showMainWindow },
-      { label: 'Synchroniser maintenant', click: () => void syncEngine.syncAll() },
-      { type: 'separator' },
-      {
-        label: 'Quitter',
-        click: () => {
-          quitting = true
-          app.quit()
+  if (tray) {
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Ouvrir Magpie', click: showMainWindow },
+        { label: 'Synchroniser maintenant', click: () => void syncEngine.syncAll() },
+        { type: 'separator' },
+        {
+          label: 'Quitter',
+          click: () => {
+            quitting = true
+            app.quit()
+          }
         }
-      }
-    ])
-  )
+      ])
+    )
+  }
+}
+
+function refreshBackgroundFeatures(): void {
+  const settings = readSettings()
+  updateTray()
 
   if (scheduleTimer) clearInterval(scheduleTimer)
   scheduleTimer = null
@@ -366,6 +409,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   quitting = true
   if (scheduleTimer) clearInterval(scheduleTimer)
+  if (windowInteractionTimer) clearTimeout(windowInteractionTimer)
   stopUpdater()
   closeDb()
 })

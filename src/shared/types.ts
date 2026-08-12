@@ -385,6 +385,7 @@ export interface MagpieEvents {
   onAiTagProgress(cb: (progress: AiTagProgress) => void): () => void
   onUpdateState(cb: (state: UpdateState) => void): () => void
   onLibraryMoveProgress(cb: (progress: LibraryMoveProgress) => void): () => void
+  onWindowInteraction(cb: (active: boolean) => void): () => void
 }
 
 declare global {

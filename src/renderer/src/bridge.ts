@@ -160,19 +160,19 @@ const previewApi: MagpieApi = {
       demoPosts: posts.length,
       cacheBytes: 0,
       dataPath: 'aperçu navigateur',
-      version: '0.2.1'
+      version: '0.2.2'
     }
   },
   getUpdateState: async (): Promise<UpdateState> => ({
     phase: 'unsupported',
-    currentVersion: '0.2.1',
+    currentVersion: '0.2.2',
     availableVersion: null,
     percent: null,
     message: 'browser-preview'
   }),
   checkForUpdates: async (): Promise<UpdateState> => ({
     phase: 'unsupported',
-    currentVersion: '0.2.1',
+    currentVersion: '0.2.2',
     availableVersion: null,
     percent: null,
     message: 'browser-preview'
@@ -239,6 +239,7 @@ const previewEvents: MagpieEvents = {
   onAiTagProgress: () => () => {},
   onUpdateState: () => () => {},
   onLibraryMoveProgress: () => () => {},
+  onWindowInteraction: () => () => {},
   onThemeChanged: (cb) => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const resolve = (): void => {
