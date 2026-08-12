@@ -170,7 +170,15 @@ class AiTagger {
   }
 
   private async run(postIds?: string[]): Promise<AiTagProgress> {
-    const candidates = aiCandidates(postIds)
+    const candidates = postIds
+      ? postIds
+          .reduce<string[][]>((chunks, id, index) => {
+            if (index % 400 === 0) chunks.push([])
+            chunks[chunks.length - 1].push(id)
+            return chunks
+          }, [])
+          .flatMap((ids) => aiCandidates(ids, ids.length))
+      : aiCandidates()
     const progress: AiTagProgress = {
       done: 0,
       total: candidates.length,

@@ -22,8 +22,16 @@ import { syncEngine } from './sync/engine'
 import { repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
 import type { SyncPhase } from '@shared/types'
+import { initializeUpdater, stopUpdater } from './updater'
+import { seedIfEmpty } from './fixtures/seed'
 
 const isDev = !app.isPackaged
+
+// Les captures et tests visuels utilisent un profil jetable, jamais la bibliothèque du
+// développeur. Ces deux variables n'ont aucun effet dans l'application distribuée.
+if (isDev && process.env['MAGPIE_DEV_DATA_DIR']) {
+  app.setPath('userData', process.env['MAGPIE_DEV_DATA_DIR'])
+}
 
 // Doit être déclaré avant `app.whenReady()`. `magpie://` sert les médias en cache au
 // renderer sans avoir à ouvrir `file://`, ce qui permet de garder une CSP stricte.
@@ -233,6 +241,8 @@ async function drainMediaQueue(): Promise<void> {
 async function bootstrap(): Promise<void> {
   getDb()
 
+  if (isDev && process.env['MAGPIE_DEV_DEMO'] === '1') seedIfEmpty(false)
+
   // Aucune donnée de démonstration n'est chargée automatiquement : une application qui
   // s'ouvre sur des posts inventés ne montre pas ce qu'elle fait, elle le mime. La
   // bibliothèque de démonstration reste disponible à la demande depuis les réglages.
@@ -268,6 +278,13 @@ void app.whenReady().then(async () => {
   })
   createWindow()
   refreshBackgroundFeatures()
+  initializeUpdater({
+    getWindow: () => mainWindow,
+    beforeInstall: () => {
+      quitting = true
+    },
+    broadcast: (state) => mainWindow?.webContents.send('updates:state', state)
+  })
 
   // La progression du sync remonte en direct : la grille se remplit pendant le backfill
   // plutôt qu'à la fin. Le cache est sérialisé — chaque page ajoutée déclencherait sinon
@@ -320,5 +337,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   quitting = true
   if (scheduleTimer) clearInterval(scheduleTimer)
+  stopUpdater()
   closeDb()
 })

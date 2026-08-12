@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type {
+  AiProvider,
   LanguageChoice,
   LibraryInfo,
   PlaybackQuality,
+  SyncSchedule,
   ThemeChoice,
+  UpdateState,
   VideoQuality
-  ,SyncSchedule
-  ,AiProvider
 } from '@shared/types'
 import { ACCENTS, LANGUAGES } from '@shared/types'
-import { magpie } from '../bridge'
+import { magpie, magpieEvents } from '../bridge'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
@@ -35,7 +36,11 @@ function formatBytes(bytes: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} Go` : `${mb.toFixed(1)} Mo`
 }
 
-export function Settings(): React.JSX.Element | null {
+interface Props {
+  onOpenAiOrganizer(): void
+}
+
+export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null {
   const t = useT()
   const open = useStore((s) => s.settingsOpen)
   const setOpen = useStore((s) => s.setSettingsOpen)
@@ -75,14 +80,21 @@ export function Settings(): React.JSX.Element | null {
   const [clearing, setClearing] = useState(false)
   const [aiKey, setAiKey] = useState('')
   const [aiKeyStored, setAiKeyStored] = useState(false)
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!open) return
     void magpie.getLibraryInfo().then(setInfo)
+    void magpie.getUpdateState().then(setUpdateState)
     void loadAccounts()
   }, [open, loadAccounts])
+
+  useEffect(() => {
+    if (!open) return
+    return magpieEvents.onUpdateState(setUpdateState)
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -432,6 +444,68 @@ export function Settings(): React.JSX.Element | null {
 
           <section className="setting setting--stack">
             <div className="setting__label">
+              <h3>{t('settings.updates')}</h3>
+              <p>{t('settings.updatesHint')}</p>
+            </div>
+            <div className="update-card" aria-live="polite">
+              <div className="update-card__status">
+                <strong>
+                  {updateState
+                    ? t(`update.status.${updateState.phase}` as TranslationKey, {
+                        version: updateState.availableVersion ?? updateState.currentVersion,
+                        percent: Math.round(updateState.percent ?? 0)
+                      })
+                    : '…'}
+                </strong>
+                <span>
+                  {t('update.currentVersion', {
+                    version: updateState?.currentVersion ?? info?.version ?? '…'
+                  })}
+                </span>
+              </div>
+              {updateState?.phase === 'downloading' ? (
+                <div
+                  className="update-progress"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(updateState.percent ?? 0)}
+                >
+                  <span style={{ width: `${updateState.percent ?? 0}%` }} />
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className={`btn ${updateState?.phase === 'ready' ? 'btn--primary' : ''}`}
+                disabled={
+                  !updateState ||
+                  updateState.phase === 'checking' ||
+                  updateState.phase === 'available' ||
+                  updateState.phase === 'downloading' ||
+                  updateState.phase === 'unsupported'
+                }
+                onClick={() => {
+                  if (updateState?.phase === 'ready') void magpie.installUpdate()
+                  else void magpie.checkForUpdates().then(setUpdateState)
+                }}
+              >
+                {updateState?.phase === 'ready'
+                  ? t('update.install')
+                  : updateState?.phase === 'checking'
+                    ? t('update.checking')
+                    : updateState?.phase === 'downloading'
+                      ? t('update.downloading', {
+                          percent: Math.round(updateState.percent ?? 0)
+                        })
+                      : t('update.check')}
+              </button>
+            </div>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting setting--stack">
+            <div className="setting__label">
               <h3>{t('settings.guide')}</h3>
               <p>{t('settings.guideHint')}</p>
             </div>
@@ -530,6 +604,14 @@ export function Settings(): React.JSX.Element | null {
                 {aiProgress?.running
                   ? t('settings.aiProgress', { done: aiProgress.done, total: aiProgress.total })
                   : t('settings.aiRun')}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={!aiKeyStored || aiProgress?.running}
+                onClick={onOpenAiOrganizer}
+              >
+                {t('settings.aiOrganize')}
               </button>
             </div>
             <p className="setting__note">{t('settings.aiPrivacy')}</p>

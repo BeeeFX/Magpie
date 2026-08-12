@@ -1,11 +1,13 @@
 import type {
+  AiCollectionPlan,
   LibraryStats,
   MagpieApi,
   MagpieEvents,
   Platform,
   Post,
   Settings,
-  SyncState
+  SyncState,
+  UpdateState
 } from '@shared/types'
 import { idleSyncState, PLATFORMS } from '@shared/types'
 
@@ -94,9 +96,34 @@ const previewApi: MagpieApi = {
   toggleFavorite: async () => false,
   setFavoriteMany: async () => {},
   addTagMany: async () => {},
-  hasAiKey: async () => false,
+  // Une clé fictivement « présente » permet de tester le parcours d'organisation dans
+  // l'aperçu visuel ; aucune requête réseau n'est émise par les méthodes ci-dessous.
+  hasAiKey: async () => true,
   setAiKey: async () => {},
   startAiTagging: async () => ({ done: 0, total: 0, tagged: 0, failed: 0, running: false }),
+  proposeAiCollections: async (): Promise<AiCollectionPlan> => ({
+    analysedVideos: 18,
+    unassignedVideos: 2,
+    suggestions: [
+      {
+        id: 'music',
+        name: 'Music',
+        description: 'Guitar, DJ sets and music production.',
+        postIds: ['demo-music-1', 'demo-music-2', 'demo-music-3']
+      },
+      {
+        id: 'visual',
+        name: 'Visual inspiration',
+        description: 'Motion, photography and art direction.',
+        postIds: ['demo-visual-1', 'demo-visual-2']
+      }
+    ]
+  }),
+  applyAiCollections: async (choices) => ({
+    collections: choices.length,
+    added: choices.reduce((total, choice) => total + choice.postIds.length, 0),
+    alreadyThere: 0
+  }),
   copyToClipboard: async (text) => {
     await navigator.clipboard.writeText(text)
   },
@@ -123,9 +150,24 @@ const previewApi: MagpieApi = {
       demoPosts: posts.length,
       cacheBytes: 0,
       dataPath: 'aperçu navigateur',
-      version: '0.1.0'
+      version: '0.2.0'
     }
   },
+  getUpdateState: async (): Promise<UpdateState> => ({
+    phase: 'unsupported',
+    currentVersion: '0.2.0',
+    availableVersion: null,
+    percent: null,
+    message: 'browser-preview'
+  }),
+  checkForUpdates: async (): Promise<UpdateState> => ({
+    phase: 'unsupported',
+    currentVersion: '0.2.0',
+    availableVersion: null,
+    percent: null,
+    message: 'browser-preview'
+  }),
+  installUpdate: async () => {},
   clearMediaCache: async () => {},
   openDataFolder: async () => {},
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),
@@ -185,6 +227,7 @@ const previewEvents: MagpieEvents = {
   onLibraryUpdated: () => () => {},
   onSyncState: () => () => {},
   onAiTagProgress: () => () => {},
+  onUpdateState: () => () => {},
   onThemeChanged: (cb) => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const resolve = (): void => {

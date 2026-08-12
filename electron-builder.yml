@@ -25,6 +25,9 @@ asarUnpack:
   - '**/node_modules/ffmpeg-static/**'
 
 win:
+  # Le nom doit rester strictement identique à celui écrit dans `latest.yml`. Les espaces
+  # sont normalisés différemment par GitHub et casseraient le téléchargement automatique.
+  artifactName: ${productName}-Setup-${version}.${ext}
   target:
     - target: nsis
       arch: [x64]

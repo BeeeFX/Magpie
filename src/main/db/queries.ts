@@ -323,6 +323,53 @@ export interface AiCandidate {
   thumbPath: string | null
 }
 
+export interface VideoOrganizationItem {
+  id: string
+  text: string | null
+  description: string | null
+  tags: string[]
+}
+
+export function videoAiCandidateIds(): string[] {
+  return (
+    getDb()
+      .prepare(
+        `SELECT DISTINCT p.id
+           FROM posts p JOIN media m ON m.post_id = p.id
+          WHERE p.is_archived = 0 AND m.kind = 'video' AND p.tag_status <> 'ai'
+          ORDER BY p.discovered_at DESC`
+      )
+      .all() as { id: string }[]
+  ).map((row) => row.id)
+}
+
+export function videoOrganizationItems(): VideoOrganizationItem[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT p.id, p.text, p.ai_description,
+              GROUP_CONCAT(DISTINCT t.name) AS tags
+         FROM posts p
+         JOIN media m ON m.post_id = p.id AND m.kind = 'video'
+         LEFT JOIN post_tags pt ON pt.post_id = p.id
+         LEFT JOIN tags t ON t.id = pt.tag_id
+        WHERE p.is_archived = 0
+        GROUP BY p.id
+        ORDER BY p.discovered_at DESC`
+    )
+    .all() as {
+    id: string
+    text: string | null
+    ai_description: string | null
+    tags: string | null
+  }[]
+  return rows.map((row) => ({
+    id: row.id,
+    text: row.text,
+    description: row.ai_description,
+    tags: row.tags?.split(',').filter(Boolean) ?? []
+  }))
+}
+
 export function aiCandidates(postIds?: string[], limit = 500): AiCandidate[] {
   const db = getDb()
   const params: unknown[] = []

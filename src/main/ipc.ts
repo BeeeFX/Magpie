@@ -3,6 +3,8 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statS
 import { join, resolve, sep } from 'node:path'
 import type {
   AccountInfo,
+  AiCollectionApplyResult,
+  AiCollectionChoice,
   LabelColor,
   LibraryInfo,
   Platform,
@@ -40,6 +42,8 @@ import { cacheRequestedVideoQuality } from './media/cache'
 import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
+import { checkForUpdates, getUpdateState, installUpdate } from './updater'
+import { proposeVideoCollections } from './tagging/organize'
 
 function platformValue(value: unknown): Platform {
   if (!PLATFORMS.includes(value as Platform)) throw new Error('Plateforme invalide')
@@ -130,6 +134,44 @@ export function registerIpc({ onThemeChange, drainMedia, onSettingsChange }: Ipc
     }
     return aiTagger.start(postIds?.map(String))
   })
+  ipcMain.handle('ai:proposeCollections', () => proposeVideoCollections())
+  ipcMain.handle(
+    'ai:applyCollections',
+    (_event, choices: AiCollectionChoice[]): AiCollectionApplyResult => {
+      if (!Array.isArray(choices) || choices.length > 50) throw new Error('Plan de collections invalide')
+      const merged = new Map<string, { name: string; postIds: Set<string> }>()
+      for (const choice of choices) {
+        if (!choice || typeof choice.name !== 'string' || !Array.isArray(choice.postIds)) {
+          throw new Error('Catégorie invalide')
+        }
+        const name = choice.name.trim().slice(0, 80)
+        if (!name || choice.postIds.length > 5000) throw new Error('Catégorie invalide')
+        const key = name.toLocaleLowerCase()
+        const group = merged.get(key) ?? { name, postIds: new Set<string>() }
+        for (const id of choice.postIds) {
+          if (typeof id !== 'string' || id.length > 300) throw new Error('Post invalide')
+          group.postIds.add(id)
+        }
+        merged.set(key, group)
+      }
+
+      return getDb().transaction(() => {
+        const existing = new Map(
+          listCollections().map((collection) => [collection.name.toLocaleLowerCase(), collection])
+        )
+        let added = 0
+        let alreadyThere = 0
+        for (const [key, group] of merged) {
+          const collection = existing.get(key) ?? createCollection(group.name)
+          existing.set(key, collection)
+          const result = addToCollection(collection.id, [...group.postIds])
+          added += result.added
+          alreadyThere += result.alreadyThere.length
+        }
+        return { collections: merged.size, added, alreadyThere }
+      })()
+    }
+  )
 
   ipcMain.handle('clipboard:write', (_event, text: string) => {
     clipboard.writeText(String(text))
@@ -197,6 +239,10 @@ export function registerIpc({ onThemeChange, drainMedia, onSettingsChange }: Ipc
       version: app.getVersion()
     }
   })
+
+  ipcMain.handle('updates:state', () => getUpdateState())
+  ipcMain.handle('updates:check', () => checkForUpdates())
+  ipcMain.handle('updates:install', () => installUpdate())
 
   ipcMain.handle('library:clearCache', () => {
     // Les métadonnées, tags et collections survivent toujours à une purge de médias :

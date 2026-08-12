@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AccountInfo,
   AddToCollectionResult,
+  AiCollectionApplyResult,
+  AiCollectionChoice,
+  AiCollectionPlan,
   AiProvider,
   AiTagProgress,
   CollectionInfo,
@@ -15,6 +18,7 @@ import type {
   PostQuery,
   Settings,
   SyncState,
+  UpdateState,
   VideoQuality
 } from '@shared/types'
 
@@ -45,6 +49,10 @@ const api: MagpieApi = {
     ipcRenderer.invoke('ai:setKey', provider, key),
   startAiTagging: (postIds?: string[]): Promise<AiTagProgress> =>
     ipcRenderer.invoke('ai:start', postIds),
+  proposeAiCollections: (): Promise<AiCollectionPlan> =>
+    ipcRenderer.invoke('ai:proposeCollections'),
+  applyAiCollections: (choices: AiCollectionChoice[]): Promise<AiCollectionApplyResult> =>
+    ipcRenderer.invoke('ai:applyCollections', choices),
   copyToClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
   sendToNitrate: (url: string): Promise<void> => ipcRenderer.invoke('nitrate:send', url),
@@ -52,6 +60,9 @@ const api: MagpieApi = {
   setSettings: (patch: Partial<Settings>): Promise<Settings> =>
     ipcRenderer.invoke('settings:set', patch),
   getLibraryInfo: (): Promise<LibraryInfo> => ipcRenderer.invoke('library:info'),
+  getUpdateState: (): Promise<UpdateState> => ipcRenderer.invoke('updates:state'),
+  checkForUpdates: (): Promise<UpdateState> => ipcRenderer.invoke('updates:check'),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('updates:install'),
   clearMediaCache: (): Promise<void> => ipcRenderer.invoke('library:clearCache'),
   openDataFolder: (): Promise<void> => ipcRenderer.invoke('app:openDataFolder'),
   chooseLibraryFolder: (): Promise<{ moved: boolean; path: string }> =>
@@ -123,6 +134,11 @@ const events: MagpieEvents = {
     const listener = (_e: unknown, progress: AiTagProgress): void => cb(progress)
     ipcRenderer.on('ai:progress', listener)
     return () => ipcRenderer.removeListener('ai:progress', listener)
+  },
+  onUpdateState: (cb) => {
+    const listener = (_e: unknown, state: UpdateState): void => cb(state)
+    ipcRenderer.on('updates:state', listener)
+    return () => ipcRenderer.removeListener('updates:state', listener)
   }
 }
 

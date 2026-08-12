@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { magpie, magpieEvents } from './bridge'
 import { Detail } from './components/Detail'
 import { Grid } from './components/Grid'
@@ -6,6 +6,7 @@ import { Settings } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { Welcome } from './components/Welcome'
+import { AiOrganizer } from './components/AiOrganizer'
 import { useStore } from './store'
 
 export function App(): React.JSX.Element {
@@ -25,6 +26,12 @@ export function App(): React.JSX.Element {
   const onboardingDone = useStore((s) => s.onboardingDone)
   const settingsLoading = useStore((s) => s.settingsLoading)
   const lastRefresh = useRef(0)
+  const [aiOrganizerOpen, setAiOrganizerOpen] = useState(false)
+  const openAiOrganizer = useCallback(() => {
+    setSettingsOpen(false)
+    setAiOrganizerOpen(true)
+  }, [setSettingsOpen])
+  const closeAiOrganizer = useCallback(() => setAiOrganizerOpen(false), [])
 
   useEffect(() => {
     void refresh()
@@ -101,7 +108,8 @@ export function App(): React.JSX.Element {
           avec son état local — dont l'indicateur de fermeture, qui rendait le panneau
           invisible à la réouverture. Le démontage garantit un état propre à chaque fois. */}
       {detailIndex !== null ? <Detail /> : null}
-      <Settings />
+      <Settings onOpenAiOrganizer={openAiOrganizer} />
+      <AiOrganizer open={aiOrganizerOpen} onClose={closeAiOrganizer} />
     </div>
   )
 }

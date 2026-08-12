@@ -197,6 +197,26 @@ export interface LibraryInfo {
   version: string
 }
 
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'up-to-date'
+  | 'error'
+  | 'unsupported'
+
+export interface UpdateState {
+  phase: UpdatePhase
+  currentVersion: string
+  availableVersion: string | null
+  /** Progression du téléchargement, entre 0 et 100. */
+  percent: number | null
+  /** Diagnostic court ; jamais utilisé comme texte principal de l'interface. */
+  message: string | null
+}
+
 export interface PostQuery {
   /** Vide = toutes les plateformes. */
   platforms: Platform[]
@@ -245,12 +265,17 @@ export interface MagpieApi {
   hasAiKey(provider: AiProvider): Promise<boolean>
   setAiKey(provider: AiProvider, key: string): Promise<void>
   startAiTagging(postIds?: string[]): Promise<AiTagProgress>
+  proposeAiCollections(): Promise<AiCollectionPlan>
+  applyAiCollections(choices: AiCollectionChoice[]): Promise<AiCollectionApplyResult>
   copyToClipboard(text: string): Promise<void>
   openExternal(url: string): Promise<void>
   sendToNitrate(url: string): Promise<void>
   getSettings(): Promise<Settings>
   setSettings(patch: Partial<Settings>): Promise<Settings>
   getLibraryInfo(): Promise<LibraryInfo>
+  getUpdateState(): Promise<UpdateState>
+  checkForUpdates(): Promise<UpdateState>
+  installUpdate(): Promise<void>
   clearMediaCache(): Promise<void>
   openDataFolder(): Promise<void>
   chooseLibraryFolder(): Promise<{ moved: boolean; path: string }>
@@ -293,6 +318,31 @@ export interface AiTagProgress {
   running: boolean
 }
 
+export interface AiCollectionSuggestion {
+  id: string
+  name: string
+  /** Courte explication destinée à aider l'utilisateur à arbitrer ou fusionner. */
+  description: string
+  postIds: string[]
+}
+
+export interface AiCollectionPlan {
+  suggestions: AiCollectionSuggestion[]
+  analysedVideos: number
+  unassignedVideos: number
+}
+
+export interface AiCollectionChoice {
+  name: string
+  postIds: string[]
+}
+
+export interface AiCollectionApplyResult {
+  collections: number
+  added: number
+  alreadyThere: number
+}
+
 /** Événements poussés par le processus principal. Chaque abonnement rend son désabonnement. */
 export interface MagpieEvents {
   onCacheProgress(cb: (progress: CacheProgress) => void): () => void
@@ -301,6 +351,7 @@ export interface MagpieEvents {
   onThemeChanged(cb: (isDark: boolean) => void): () => void
   onSyncState(cb: (state: SyncState) => void): () => void
   onAiTagProgress(cb: (progress: AiTagProgress) => void): () => void
+  onUpdateState(cb: (state: UpdateState) => void): () => void
 }
 
 declare global {
