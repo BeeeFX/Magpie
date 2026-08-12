@@ -1,0 +1,53 @@
+{
+  "name": "magpie",
+  "version": "0.1.0",
+  "description": "Vos posts sauvegardés d'Instagram, X et Reddit dans un seul mur",
+  "author": "BeeeFX",
+  "license": "MIT",
+  "private": true,
+  "homepage": "https://github.com/BeeeFX/Magpie",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BeeeFX/Magpie.git"
+  },
+  "bugs": "https://github.com/BeeeFX/Magpie/issues",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "fixture": "tsx scripts/make-fixture.ts",
+    "check:layout": "tsx scripts/check-layout.ts",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "check:db": "tsx scripts/check-db.ts",
+    "logo": "tsx scripts/make-logo.ts",
+    "dist": "electron-vite build && electron-builder",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "better-sqlite3": "^13.0.3",
+    "ffmpeg-static": "^5.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sharp": "^0.35.3",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  }
+}

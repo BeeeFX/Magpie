@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Le renderer n'a le droit de charger que ce que nous produisons : notre bundle et
+         les vignettes servies par le protocole magpie://. Rien de distant. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' magpie: data:; media-src 'self' magpie:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' magpie: ws:"
+    />
+    <title>Magpie</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

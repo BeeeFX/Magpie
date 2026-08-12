@@ -1,0 +1,550 @@
+import { useEffect, useRef, useState } from 'react'
+import type {
+  LanguageChoice,
+  LibraryInfo,
+  PlaybackQuality,
+  ThemeChoice,
+  VideoQuality
+  ,SyncSchedule
+  ,AiProvider
+} from '@shared/types'
+import { ACCENTS, LANGUAGES } from '@shared/types'
+import { magpie } from '../bridge'
+import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
+import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
+import { Accounts } from './Accounts'
+import { IconCards, IconClose, IconMasonry } from './Icons'
+
+const THEMES: { key: ThemeChoice; label: TranslationKey }[] = [
+  { key: 'system', label: 'settings.system' },
+  { key: 'light', label: 'settings.light' },
+  { key: 'dark', label: 'settings.dark' }
+]
+
+const AI_DEFAULT_MODEL: Record<AiProvider, string> = {
+  openai: 'gpt-4.1-mini',
+  anthropic: 'claude-sonnet-4-5',
+  gemini: 'gemini-2.5-flash',
+  deepseek: 'deepseek-chat',
+  custom: ''
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 Mo'
+  const mb = bytes / 1024 / 1024
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} Go` : `${mb.toFixed(1)} Mo`
+}
+
+export function Settings(): React.JSX.Element | null {
+  const t = useT()
+  const open = useStore((s) => s.settingsOpen)
+  const setOpen = useStore((s) => s.setSettingsOpen)
+  const theme = useStore((s) => s.theme)
+  const setTheme = useStore((s) => s.setTheme)
+  const language = useStore((s) => s.language)
+  const setLanguage = useStore((s) => s.setLanguage)
+  const accent = useStore((s) => s.accent)
+  const setAccent = useStore((s) => s.setAccent)
+  const gridMode = useStore((s) => s.gridMode)
+  const setGridMode = useStore((s) => s.setGridMode)
+  const density = useStore((s) => s.density)
+  const setDensity = useStore((s) => s.setDensity)
+  const nitrateEnabled = useStore((s) => s.nitrateEnabled)
+  const setNitrateEnabled = useStore((s) => s.setNitrateEnabled)
+  const videoCacheQuality = useStore((s) => s.videoCacheQuality)
+  const setVideoCacheQuality = useStore((s) => s.setVideoCacheQuality)
+  const playbackQuality = useStore((s) => s.playbackQuality)
+  const setPlaybackQuality = useStore((s) => s.setPlaybackQuality)
+  const cacheLimitGb = useStore((s) => s.cacheLimitGb)
+  const setCacheLimitGb = useStore((s) => s.setCacheLimitGb)
+  const trayEnabled = useStore((s) => s.trayEnabled)
+  const setTrayEnabled = useStore((s) => s.setTrayEnabled)
+  const syncSchedule = useStore((s) => s.syncSchedule)
+  const setSyncSchedule = useStore((s) => s.setSyncSchedule)
+  const aiProvider = useStore((s) => s.aiProvider)
+  const aiModel = useStore((s) => s.aiModel)
+  const aiEndpoint = useStore((s) => s.aiEndpoint)
+  const autoTagEnabled = useStore((s) => s.autoTagEnabled)
+  const aiProgress = useStore((s) => s.aiProgress)
+  const setAiSettings = useStore((s) => s.setAiSettings)
+  const replayOnboarding = useStore((s) => s.replayOnboarding)
+  const loadAccounts = useStore((s) => s.loadAccounts)
+  const refresh = useStore((s) => s.refresh)
+
+  const [info, setInfo] = useState<LibraryInfo | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [aiKey, setAiKey] = useState('')
+  const [aiKeyStored, setAiKeyStored] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    void magpie.getLibraryInfo().then(setInfo)
+    void loadAccounts()
+  }, [open, loadAccounts])
+
+  useEffect(() => {
+    if (!open) return
+    void magpie.hasAiKey(aiProvider).then(setAiKeyStored)
+  }, [open, aiProvider])
+
+  useEffect(() => {
+    if (!open) return
+    returnFocusRef.current = document.activeElement as HTMLElement | null
+    const panel = panelRef.current
+    requestAnimationFrame(() => {
+      panel?.querySelector<HTMLElement>('button, input, select, [tabindex]:not([tabindex="-1"])')?.focus()
+    })
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Tab' && panel) {
+        const focusable = [...panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )]
+        if (focusable.length === 0) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      returnFocusRef.current?.focus()
+    }
+  }, [open, setOpen])
+
+  if (!open) return null
+
+  const clearCache = async (): Promise<void> => {
+    setClearing(true)
+    await magpie.clearMediaCache()
+    setInfo(await magpie.getLibraryInfo())
+    await refresh()
+    setClearing(false)
+  }
+
+  const languages: { key: LanguageChoice; label: string }[] = [
+    { key: 'system', label: t('settings.system') },
+    ...LANGUAGES.map((code) => ({ key: code as LanguageChoice, label: LANGUAGE_LABEL[code] }))
+  ]
+  const cacheQualities: VideoQuality[] = ['480p', '720p', '1080p', 'source']
+  const playbackQualities: PlaybackQuality[] = ['auto', ...cacheQualities]
+  const schedules: SyncSchedule[] = ['manual', 'hourly', '6h', 'daily']
+  const aiProviders: AiProvider[] = ['openai', 'anthropic', 'gemini', 'deepseek', 'custom']
+
+  return (
+    <div className="modal" onMouseDown={() => setOpen(false)}>
+      <div
+        ref={panelRef}
+        className="modal__panel"
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+      >
+        <header className="modal__head">
+          <h2 id="settings-title">{t('settings.title')}</h2>
+          <button
+            type="button"
+            className="icon-btn-ghost"
+            onClick={() => setOpen(false)}
+            aria-label={t('settings.close')}
+          >
+            <IconClose />
+          </button>
+        </header>
+
+        <div className="modal__body">
+          <section className="setting setting--stack">
+            <div className="setting__label">
+              <h3>{t('settings.accounts')}</h3>
+              <p>{t('settings.accountsHint')}</p>
+            </div>
+            <Accounts />
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting setting--stack">
+            <div className="setting__label">
+              <h3>{t('settings.background')}</h3>
+              <p>{t('settings.backgroundHint')}</p>
+            </div>
+            <div className="segmented segmented--wide">
+              {schedules.map((schedule) => (
+                <button
+                  key={schedule}
+                  type="button"
+                  className={syncSchedule === schedule ? 'is-active' : ''}
+                  onClick={() => void setSyncSchedule(schedule)}
+                >
+                  {t(`schedule.${schedule}` as TranslationKey)}
+                </button>
+              ))}
+            </div>
+            <div className="setting setting--compact">
+              <div className="setting__label">
+                <strong>{t('settings.tray')}</strong>
+                <span>{t('settings.trayHint')}</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={trayEnabled}
+                className={`switch ${trayEnabled ? 'is-on' : ''}`}
+                onClick={() => void setTrayEnabled(!trayEnabled)}
+              >
+                <span className="switch__knob" />
+              </button>
+            </div>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting setting--stack">
+            <div className="setting__label">
+              <h3>{t('settings.video')}</h3>
+              <p>{t('settings.videoHint')}</p>
+            </div>
+            <div className="setting setting--compact">
+              <div className="setting__label">
+                <strong>{t('settings.cacheQuality')}</strong>
+              </div>
+              <div className="segmented segmented--wide">
+                {cacheQualities.map((quality) => (
+                  <button
+                    key={quality}
+                    type="button"
+                    className={videoCacheQuality === quality ? 'is-active' : ''}
+                    onClick={() => void setVideoCacheQuality(quality)}
+                  >
+                    {t(`quality.${quality}` as TranslationKey)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="setting setting--compact">
+              <div className="setting__label">
+                <strong>{t('settings.playbackQuality')}</strong>
+              </div>
+              <div className="segmented segmented--wide">
+                {playbackQualities.map((quality) => (
+                  <button
+                    key={quality}
+                    type="button"
+                    className={playbackQuality === quality ? 'is-active' : ''}
+                    onClick={() => void setPlaybackQuality(quality)}
+                  >
+                    {t(`quality.${quality}` as TranslationKey)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="setting setting--compact">
+              <div className="setting__label">
+                <strong>{t('settings.cacheLimit')}</strong>
+                <span>{cacheLimitGb} Go</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                step={1}
+                value={cacheLimitGb}
+                onChange={(event) => void setCacheLimitGb(Number(event.target.value))}
+              />
+            </label>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting">
+            <div className="setting__label">
+              <h3>{t('settings.language')}</h3>
+              <p>{t('settings.languageHint')}</p>
+            </div>
+            <div className="segmented segmented--wide">
+              {languages.map((l) => (
+                <button
+                  key={l.key}
+                  type="button"
+                  className={language === l.key ? 'is-active' : ''}
+                  onClick={() => void setLanguage(l.key)}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="setting">
+            <div className="setting__label">
+              <h3>{t('settings.theme')}</h3>
+              <p>{t('settings.themeHint')}</p>
+            </div>
+            <div className="segmented segmented--wide">
+              {THEMES.map((th) => (
+                <button
+                  key={th.key}
+                  type="button"
+                  className={theme === th.key ? 'is-active' : ''}
+                  onClick={() => void setTheme(th.key)}
+                >
+                  {t(th.label)}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="setting">
+            <div className="setting__label">
+              <h3>{t('settings.accent')}</h3>
+              <p>{t('settings.accentHint')}</p>
+            </div>
+            <div className="swatches">
+              {ACCENTS.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className={`swatch swatch--${name} ${accent === name ? 'is-active' : ''}`}
+                  title={t(`accent.${name}` as TranslationKey)}
+                  aria-label={t(`accent.${name}` as TranslationKey)}
+                  onClick={() => void setAccent(name)}
+                />
+              ))}
+            </div>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting">
+            <div className="setting__label">
+              <h3>{t('settings.gridDisplay')}</h3>
+              <p>{t('settings.gridHint')}</p>
+            </div>
+            <div className="segmented">
+              <button
+                type="button"
+                className={gridMode === 'masonry' ? 'is-active' : ''}
+                onClick={() => setGridMode('masonry')}
+              >
+                <IconMasonry />
+                <span>{t('settings.masonry')}</span>
+              </button>
+              <button
+                type="button"
+                className={gridMode === 'cards' ? 'is-active' : ''}
+                onClick={() => setGridMode('cards')}
+              >
+                <IconCards />
+                <span>{t('settings.cards')}</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="setting">
+            <div className="setting__label">
+              <h3>{t('settings.density')}</h3>
+              <p>{t('settings.densityHint', { width: density })}</p>
+            </div>
+            <label className="density density--wide">
+              <span className="density__cap density__cap--lg" />
+              <input
+                type="range"
+                min={DENSITY_MIN}
+                max={DENSITY_MAX}
+                step={10}
+                value={DENSITY_MAX + DENSITY_MIN - density}
+                onChange={(e) => setDensity(DENSITY_MAX + DENSITY_MIN - Number(e.target.value))}
+              />
+              <span className="density__cap density__cap--sm" />
+            </label>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting">
+            <div className="setting__label">
+              <h3>{t('settings.nitrate')}</h3>
+              <p>
+                {t('settings.nitrateHint')}
+                {magpie.platform !== 'win32' ? t('settings.nitrateWindowsOnly') : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={nitrateEnabled}
+              className={`switch ${nitrateEnabled ? 'is-on' : ''}`}
+              onClick={() => void setNitrateEnabled(!nitrateEnabled)}
+            >
+              <span className="switch__knob" />
+            </button>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting setting--stack">
+            <div className="setting__label">
+              <h3>{t('settings.library')}</h3>
+              <p>
+                {info
+                  ? t('settings.libraryStats', {
+                      posts: info.posts,
+                      media: info.media,
+                      size: formatBytes(info.cacheBytes)
+                    })
+                  : '…'}
+              </p>
+            </div>
+            <div className="setting__actions">
+              <button type="button" className="btn" onClick={() => void magpie.openDataFolder()}>
+                {t('settings.openFolder')}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void magpie.chooseLibraryFolder()}
+              >
+                {t('settings.moveLibrary')}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void clearCache()}
+                disabled={clearing}
+              >
+                {clearing ? t('settings.clearing') : t('settings.clearCache')}
+              </button>
+            </div>
+            <p className="setting__note">{t('settings.cacheNote')}</p>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting setting--stack">
+            <div className="setting__label">
+              <h3>{t('settings.guide')}</h3>
+              <p>{t('settings.guideHint')}</p>
+            </div>
+            <div className="setting__actions">
+              <button type="button" className="btn" onClick={() => void replayOnboarding()}>
+                {t('settings.replayTour')}
+              </button>
+            </div>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting setting--stack">
+            <div className="setting__label">
+              <h3>{t('settings.ai')}</h3>
+              <p>{t('settings.aiHint')}</p>
+            </div>
+            <div className="segmented segmented--wide">
+              {aiProviders.map((provider) => (
+                <button
+                  key={provider}
+                  type="button"
+                  className={aiProvider === provider ? 'is-active' : ''}
+                  onClick={() =>
+                    void setAiSettings({ aiProvider: provider, aiModel: AI_DEFAULT_MODEL[provider] })
+                  }
+                >
+                  {t(`ai.${provider}` as TranslationKey)}
+                </button>
+              ))}
+            </div>
+            <label className="settings-field">
+              <span>{t('settings.aiModel')}</span>
+              <input
+                value={aiModel}
+                onChange={(event) => void setAiSettings({ aiModel: event.target.value })}
+                placeholder="gpt-4.1-mini"
+              />
+            </label>
+            {aiProvider === 'custom' ? (
+              <label className="settings-field">
+                <span>{t('settings.aiEndpoint')}</span>
+                <input
+                  value={aiEndpoint}
+                  onChange={(event) => void setAiSettings({ aiEndpoint: event.target.value })}
+                  placeholder="https://…/v1/chat/completions"
+                />
+              </label>
+            ) : null}
+            <label className="settings-field">
+              <span>{t('settings.aiKey')}</span>
+              <div className="settings-field__row">
+                <input
+                  type="password"
+                  value={aiKey}
+                  onChange={(event) => setAiKey(event.target.value)}
+                  placeholder={aiKeyStored ? t('settings.aiKeyStored') : 'sk-…'}
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!aiKey.trim()}
+                  onClick={() =>
+                    void magpie.setAiKey(aiProvider, aiKey).then(() => {
+                      setAiKey('')
+                      setAiKeyStored(true)
+                    })
+                  }
+                >
+                  {t('settings.save')}
+                </button>
+              </div>
+            </label>
+            <div className="setting setting--compact">
+              <div className="setting__label">
+                <strong>{t('settings.autoTag')}</strong>
+                <span>{t('settings.autoTagHint')}</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoTagEnabled}
+                className={`switch ${autoTagEnabled ? 'is-on' : ''}`}
+                onClick={() => void setAiSettings({ autoTagEnabled: !autoTagEnabled })}
+              >
+                <span className="switch__knob" />
+              </button>
+            </div>
+            <div className="setting__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!aiKeyStored || aiProgress?.running}
+                onClick={() => void magpie.startAiTagging()}
+              >
+                {aiProgress?.running
+                  ? t('settings.aiProgress', { done: aiProgress.done, total: aiProgress.total })
+                  : t('settings.aiRun')}
+              </button>
+            </div>
+            <p className="setting__note">{t('settings.aiPrivacy')}</p>
+          </section>
+        </div>
+
+        <footer className="modal__foot">
+          <span>
+            {t('app.name')} {info?.version ?? ''}
+          </span>
+          <span className="modal__path" title={info?.dataPath}>
+            {info?.dataPath}
+          </span>
+        </footer>
+      </div>
+    </div>
+  )
+}

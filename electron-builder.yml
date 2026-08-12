@@ -1,0 +1,62 @@
+appId: tv.electrictheatre.magpie
+productName: Magpie
+copyright: © 2026 BeeeFX
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - out/**/*
+  - package.json
+  # La fixture de démonstration n'a rien à faire dans une installation : elle ne sert
+  # qu'au développement, et elle pèse plus lourd que l'application elle-même.
+  - '!fixtures/**/*'
+  - '!src/**/*'
+  - '!scripts/**/*'
+  - '!icons/**/*'
+
+# `better-sqlite3` et `sharp` embarquent des binaires natifs, et `ffmpeg-static` un
+# exécutable : ils doivent rester hors de l'archive asar, dont on ne peut rien exécuter.
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+  - '**/node_modules/sharp/**'
+  - '**/node_modules/@img/**'
+  - '**/node_modules/ffmpeg-static/**'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Magpie
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  icon: build/icon.png
+  category: public.app-category.productivity
+  # Magpie ouvre des fenêtres de connexion vers des sites tiers : sans cette permission,
+  # le durcissement du runtime bloquerait le réseau sortant.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  icon: build/icon.png
+  category: Graphics
+
+publish:
+  provider: github
+  owner: BeeeFX
+  repo: Magpie

@@ -1,0 +1,18 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+*.tsbuildinfo
+.claude/
+.env
+.env.*
+ai-credentials.json
+library-location.json
+magpie.db*
+
+# Artefacts de développement, régénérables :
+#   fixtures/media   — `npm run fixture`
+#   fixtures/preview — écrit par le processus principal à chaque démarrage en dev
+fixtures/media/
+fixtures/preview/
