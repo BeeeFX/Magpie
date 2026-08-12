@@ -88,6 +88,8 @@ const api: MagpieApi = {
     ipcRenderer.invoke('accounts:disconnect', platform),
   startSync: (platforms?: Platform[]): Promise<SyncState> =>
     ipcRenderer.invoke('sync:start', platforms),
+  startFullSync: (platform: Platform): Promise<SyncState> =>
+    ipcRenderer.invoke('sync:full', platform),
   cancelSync: (platform?: Platform): Promise<void> => ipcRenderer.invoke('sync:cancel', platform),
   getSyncState: (): Promise<SyncState> => ipcRenderer.invoke('sync:state'),
   loadDemoData: (): Promise<number> => ipcRenderer.invoke('library:loadDemo'),

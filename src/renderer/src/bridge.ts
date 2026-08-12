@@ -166,6 +166,7 @@ const previewApi: MagpieApi = {
     lastSyncStatus: null
   }),
   startSync: async () => IDLE_SYNC,
+  startFullSync: async () => IDLE_SYNC,
   cancelSync: async () => {},
   getSyncState: async () => IDLE_SYNC,
   loadDemoData: async () => 0,

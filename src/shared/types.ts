@@ -270,6 +270,7 @@ export interface MagpieApi {
   connectAccount(platform: Platform): Promise<AccountInfo>
   disconnectAccount(platform: Platform): Promise<AccountInfo>
   startSync(platforms?: Platform[]): Promise<SyncState>
+  startFullSync(platform: Platform): Promise<SyncState>
   cancelSync(platform?: Platform): Promise<void>
   getSyncState(): Promise<SyncState>
   /** Charge la bibliothèque de démonstration. Outil de test, jamais automatique. */

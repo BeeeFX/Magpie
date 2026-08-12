@@ -2166,8 +2166,11 @@ h1, h2, h3 {
 }
 
 .account button {
-  margin-left: auto;
   flex: none;
+}
+
+.account__text + button {
+  margin-left: auto;
 }
 
 .account__error {

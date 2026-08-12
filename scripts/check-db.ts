@@ -5,14 +5,11 @@
  * triggers l'ont bien alimenté. Un index vide ne provoque aucune erreur — la recherche
  * renvoie simplement zéro résultat, ce qui passerait inaperçu.
  */
-import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import Database from 'better-sqlite3'
+import { libraryDbPath } from './library-path'
 
-const dbPath =
-  process.platform === 'win32'
-    ? join(process.env.APPDATA ?? '', 'magpie', 'magpie.db')
-    : join(process.env.HOME ?? '', 'Library/Application Support/magpie/magpie.db')
+const dbPath = libraryDbPath()
 
 if (!existsSync(dbPath)) {
   console.error(`Base introuvable : ${dbPath}\nLancez l'application une fois (\`npm run dev\`).`)

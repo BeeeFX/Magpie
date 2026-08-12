@@ -5,6 +5,7 @@ import { formatDateTime, formatTime, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
 import { PlatformIcon } from './PlatformIcon'
+import { magpie } from '../bridge'
 
 const STATUS_NOTE: Record<string, TranslationKey> = {
   challenge: 'accounts.statusChallenge',
@@ -88,6 +89,21 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
                 </div>
               ) : null}
             </div>
+            {connected ? (
+              <button
+                type="button"
+                className="btn btn--quiet"
+                disabled={isBusy || isSyncing}
+                title={t('accounts.fullSyncHint')}
+                onClick={() => {
+                  if (window.confirm(t('accounts.fullSyncConfirm', { platform: PLATFORM_LABEL[platform] }))) {
+                    void magpie.startFullSync(platform)
+                  }
+                }}
+              >
+                {t('accounts.fullSync')}
+              </button>
+            ) : null}
             <button
               type="button"
               className={`btn ${emphasise && !connected ? 'btn--primary' : ''}`}

@@ -323,6 +323,14 @@ export function registerIpc({ onThemeChange, drainMedia, onSettingsChange }: Ipc
     syncEngine.syncAll(platformValues(platforms))
   )
 
+  ipcMain.handle('sync:full', (_event, platform: Platform) => {
+    const target = platformValue(platform)
+    // `partial` désactive l'arrêt sur les pages déjà connues : toute la pagination est
+    // reparcourue, les doublons restant absorbés par les clés primaires SQLite.
+    writeAccount(target, { lastSyncStatus: 'partial', cursor: null })
+    return syncEngine.syncAll([target])
+  })
+
   ipcMain.handle('sync:cancel', (_event, platform?: Platform) =>
     syncEngine.cancel(platform === undefined ? undefined : platformValue(platform))
   )

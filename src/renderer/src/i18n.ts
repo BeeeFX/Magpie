@@ -120,6 +120,12 @@ const fr = {
   'accounts.privacy':
     'La connexion se fait dans une fenêtre affichant la vraie page de la plateforme : la double authentification fonctionne normalement, et Magpie ne voit jamais votre mot de passe — seulement le cookie de session déposé à l’arrivée, gardé sur votre machine.',
 
+  'accounts.fullSync': 'Tout revérifier',
+  'accounts.fullSyncHint':
+    'Reparcourt tout l’historique pour retrouver d’anciens éléments manquants.',
+  'accounts.fullSyncConfirm':
+    'Revérifier tout l’historique {platform} ? Cela peut prendre plusieurs minutes.',
+
   'settings.title': 'Réglages',
   'settings.close': 'Fermer les réglages',
   'settings.accounts': 'Comptes',
@@ -370,6 +376,11 @@ const en: Record<TranslationKey, string> = {
   'accounts.statusError': 'The last sync failed.',
   'accounts.privacy':
     'You sign in through a window showing the platform’s real login page: two-factor authentication works normally, and Magpie never sees your password — only the session cookie left behind, kept on your machine.',
+
+  'accounts.fullSync': 'Check all history',
+  'accounts.fullSyncHint': 'Scans the full history to recover older missing items.',
+  'accounts.fullSyncConfirm':
+    'Check the full {platform} history? This may take several minutes.',
 
   'settings.title': 'Settings',
   'settings.close': 'Close settings',

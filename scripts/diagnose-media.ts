@@ -6,13 +6,10 @@
  * immédiatement si le problème est à l'ingestion ou au téléchargement.
  */
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import Database from 'better-sqlite3'
+import { libraryDbPath } from './library-path'
 
-const dbPath =
-  process.platform === 'win32'
-    ? join(process.env.APPDATA ?? '', 'magpie', 'magpie.db')
-    : join(process.env.HOME ?? '', 'Library/Application Support/magpie/magpie.db')
+const dbPath = libraryDbPath()
 
 if (!existsSync(dbPath)) {
   console.error(`Base introuvable : ${dbPath}`)
