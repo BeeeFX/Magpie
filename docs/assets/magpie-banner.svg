@@ -7,11 +7,6 @@
       <stop offset="0.48" stop-color="#17131f"/>
       <stop offset="1" stop-color="#10171b"/>
     </linearGradient>
-    <linearGradient id="bird" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#9b7cff"/>
-      <stop offset="0.48" stop-color="#6e5bf6"/>
-      <stop offset="1" stop-color="#45d7df"/>
-    </linearGradient>
     <radialGradient id="glow" cx="50%" cy="50%" r="50%">
       <stop offset="0" stop-color="#7657ff" stop-opacity=".34"/>
       <stop offset="1" stop-color="#7657ff" stop-opacity="0"/>
@@ -21,24 +16,19 @@
   <rect width="1600" height="520" rx="42" fill="url(#bg)"/>
   <circle cx="245" cy="260" r="220" fill="url(#glow)" filter="url(#blur)"/>
   <circle cx="1390" cy="70" r="180" fill="#2ec8da" opacity=".08" filter="url(#blur)"/>
-  <g transform="translate(125 112)">
-    <path d="M210 70c-54-52-127-51-175-19 44 4 77 22 102 48-60-11-104 16-122 63 43-20 86-18 126 5-33 27-45 65-34 113 25-39 56-61 94-67l44 70 23-9-27-86c35-19 56-49 65-90-29 18-60 24-96-28Z" fill="url(#bird)"/>
-    <circle cx="240" cy="91" r="8" fill="#fff"/>
-    <path d="m274 88 55 18-56 12Z" fill="#ffb454"/>
-    <path d="m183 207 34 88-28-5-33-70Z" fill="#43d5dd" opacity=".8"/>
-  </g>
+  <image href="magpie-logo-transparent.png" x="105" y="82" width="360" height="360"/>
   <g font-family="Segoe UI, Inter, Arial, sans-serif" fill="#fff">
     <text x="520" y="196" font-size="92" font-weight="750" letter-spacing="-4">Magpie</text>
     <text x="524" y="263" font-size="32" fill="#d4cfdf">Your saved internet, beautifully organised.</text>
     <g transform="translate(524 320)" font-size="21" font-weight="600">
       <rect width="152" height="52" rx="26" fill="#26212f" stroke="#443a59"/>
-      <text x="28" y="34">Instagram</text>
+      <text x="76" y="34" text-anchor="middle">Instagram</text>
       <rect x="168" width="72" height="52" rx="26" fill="#26212f" stroke="#443a59"/>
-      <text x="195" y="34">X</text>
+      <text x="204" y="34" text-anchor="middle">X</text>
       <rect x="256" width="114" height="52" rx="26" fill="#26212f" stroke="#443a59"/>
-      <text x="280" y="34">Reddit</text>
-      <rect x="386" width="152" height="52" rx="26" fill="#6e5bf6"/>
-      <text x="418" y="34">One library</text>
+      <text x="313" y="34" text-anchor="middle">Reddit</text>
+      <rect x="386" width="140" height="52" rx="26" fill="#6e5bf6"/>
+      <text x="456" y="34" text-anchor="middle">One library</text>
     </g>
   </g>
   <path d="M0 455c314-42 540 38 806-2 252-38 473-103 794-50v117H0Z" fill="#745cf7" opacity=".08"/>
