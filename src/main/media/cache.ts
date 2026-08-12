@@ -67,7 +67,7 @@ function ensureQuota(bytes: number): void {
   if (cacheBytes() + bytes > limit) throw new CacheQuotaReached()
 }
 
-async function cacheAdaptiveVideo(source: string, target: string): Promise<void> {
+async function cacheAdaptiveVideo(source: string, target: string, signal?: AbortSignal): Promise<void> {
   const executable = ffmpegPath
   if (!executable) throw new Error('ffmpeg indisponible')
   await new Promise<void>((resolve, reject) => {
@@ -81,18 +81,25 @@ async function cacheAdaptiveVideo(source: string, target: string): Promise<void>
       if (error.length < 4000) error += String(chunk)
     })
     const timeout = setTimeout(() => child.kill(), 10 * 60 * 1000)
+    const abort = (): void => {
+      child.kill()
+    }
+    signal?.addEventListener('abort', abort, { once: true })
     child.on('error', (err: Error) => {
+      signal?.removeEventListener('abort', abort)
       rmSync(target, { force: true })
       reject(err)
     })
     child.on('close', (code: number | null) => {
       clearTimeout(timeout)
+      signal?.removeEventListener('abort', abort)
       if (code === 0) resolve()
       else {
         rmSync(target, { force: true })
         reject(new Error(error || `ffmpeg a quitté avec le code ${code}`))
       }
     })
+    if (signal?.aborted) abort()
   })
   const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
   if (cacheBytes() > limit) {
@@ -104,13 +111,14 @@ async function cacheAdaptiveVideo(source: string, target: string): Promise<void>
 async function loadSource(
   platform: Platform,
   sourcePath: string | null,
-  remoteUrl: string | null
+  remoteUrl: string | null,
+  signal?: AbortSignal
 ): Promise<Buffer> {
   if (sourcePath && existsSync(sourcePath)) {
     return sharp(sourcePath).toBuffer()
   }
   if (remoteUrl && /^https?:/.test(remoteUrl)) {
-    return fetchMedia(platform, remoteUrl)
+    return fetchMedia(platform, remoteUrl, 180000, signal)
   }
   throw new Error('Aucune source exploitable pour cette vignette')
 }
@@ -120,12 +128,13 @@ export async function buildThumbnail(
   postId: string,
   idx: number,
   sourcePath: string | null,
-  remoteUrl: string | null = null
+  remoteUrl: string | null = null,
+  signal?: AbortSignal
 ): Promise<void> {
   const name = thumbName(postId, idx)
   const target = join(mediaDir(), name)
 
-  const input = await loadSource(platform, sourcePath, remoteUrl)
+  const input = await loadSource(platform, sourcePath, remoteUrl, signal)
 
   const info = await sharp(input)
     .rotate() // respecte l'orientation EXIF avant de mesurer
@@ -154,7 +163,8 @@ export async function cacheVideo(
   platform: Platform,
   postId: string,
   idx: number,
-  source: string
+  source: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const name = videoName(postId, idx)
   const target = join(mediaDir(), name)
@@ -162,9 +172,9 @@ export async function cacheVideo(
   if (!existsSync(target)) {
     if (/^https?:/.test(source)) {
       if (/\.(?:m3u8|mpd)(?:\?|$)/i.test(source)) {
-        await cacheAdaptiveVideo(source, target)
+        await cacheAdaptiveVideo(source, target, signal)
       } else {
-        const data = await fetchMedia(platform, source)
+        const data = await fetchMedia(platform, source, 180000, signal)
         ensureQuota(data.length)
         writeFileSync(target, data)
       }
@@ -210,6 +220,7 @@ export async function cacheRequestedVideoQuality(
 export interface CacheProgress {
   done: number
   total: number
+  postIds?: string[]
 }
 
 /**
@@ -218,25 +229,46 @@ export interface CacheProgress {
  */
 export async function processPendingMedia(
   onProgress?: (progress: CacheProgress) => void,
-  concurrency = 4
+  concurrency = 4,
+  shouldPause?: () => boolean,
+  signal?: AbortSignal
 ): Promise<CacheProgress> {
   const thumbs = pendingThumbnails().map((t) => ({ type: 'thumb' as const, ...t }))
   const videos = pendingVideos().map((v) => ({ type: 'video' as const, ...v }))
-  const pending = [...thumbs, ...videos]
+  // Trois affiches puis un clip : auparavant, les milliers de vignettes bloquaient toute
+  // la file vidéo jusqu'à leur achèvement. L'entrelacement fait progresser les deux sans
+  // laisser les gros fichiers ralentir l'apparition du mur.
+  const pending: Array<(typeof thumbs)[number] | (typeof videos)[number]> = []
+  let thumbCursor = 0
+  let videoCursor = 0
+  while (thumbCursor < thumbs.length || videoCursor < videos.length) {
+    for (let i = 0; i < 3 && thumbCursor < thumbs.length; i++) {
+      pending.push(thumbs[thumbCursor++])
+    }
+    if (videoCursor < videos.length) pending.push(videos[videoCursor++])
+  }
   const total = pending.length
   let done = 0
+  const changedPostIds = new Set<string>()
 
   if (total === 0) return { done: 0, total: 0 }
 
   let cursor = 0
   const worker = async (): Promise<void> => {
-    while (cursor < pending.length) {
+    while (cursor < pending.length && !shouldPause?.()) {
       const item = pending[cursor++]
       try {
         if (item.type === 'thumb') {
-          await buildThumbnail(item.platform, item.post_id, item.idx, item.source_path, item.remote_url)
+          await buildThumbnail(
+            item.platform,
+            item.post_id,
+            item.idx,
+            item.source_path,
+            item.remote_url,
+            signal
+          )
         } else if (item.video_source) {
-          await cacheVideo(item.platform, item.post_id, item.idx, item.video_source)
+          await cacheVideo(item.platform, item.post_id, item.idx, item.video_source, signal)
         }
       } catch (err) {
         if (item.type === 'video') {
@@ -249,10 +281,15 @@ export async function processPendingMedia(
         console.warn(`[magpie] Média impossible pour ${item.post_id}#${item.idx}:`, err)
       }
       done++
-      if (done % 10 === 0 || done === total) onProgress?.({ done, total })
+      changedPostIds.add(item.post_id)
+      if (done === 1 || done % 10 === 0 || done === total) {
+        onProgress?.({ done, total, postIds: [...changedPostIds] })
+        changedPostIds.clear()
+      }
     }
   }
 
   await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker))
+  if (changedPostIds.size > 0) onProgress?.({ done, total, postIds: [...changedPostIds] })
   return { done, total }
 }

@@ -209,6 +209,21 @@ function registerMediaProtocol(): void {
 
 let mediaDraining = false
 let mediaQueuedAgain = false
+let mediaPaused = false
+let mediaPauseWaiters: Array<() => void> = []
+let mediaAbortController: AbortController | null = null
+
+async function pauseMediaQueue(): Promise<void> {
+  mediaPaused = true
+  mediaAbortController?.abort()
+  if (!mediaDraining) return
+  await new Promise<void>((resolve) => mediaPauseWaiters.push(resolve))
+}
+
+function resumeMediaQueue(): void {
+  mediaPaused = false
+  void drainMediaQueue()
+}
 
 /**
  * Traite les médias en attente, une passe à la fois. Une demande arrivée pendant une
@@ -216,6 +231,10 @@ let mediaQueuedAgain = false
  * reste sans vignette.
  */
 async function drainMediaQueue(): Promise<void> {
+  if (mediaPaused) {
+    mediaQueuedAgain = true
+    return
+  }
   if (mediaDraining) {
     mediaQueuedAgain = true
     return
@@ -225,15 +244,23 @@ async function drainMediaQueue(): Promise<void> {
   try {
     do {
       mediaQueuedAgain = false
-      const result = await processPendingMedia((progress) => {
-        mainWindow?.webContents.send('cache:progress', progress)
-      })
+      mediaAbortController = new AbortController()
+      const result = await processPendingMedia(
+        (progress) => mainWindow?.webContents.send('cache:progress', progress),
+        4,
+        () => mediaPaused,
+        mediaAbortController.signal
+      )
       if (result.total > 0) mainWindow?.webContents.send('library:updated')
-    } while (mediaQueuedAgain)
+    } while (mediaQueuedAgain && !mediaPaused)
   } catch (err) {
     console.error('[magpie] Cache média :', err)
   } finally {
+    mediaAbortController = null
     mediaDraining = false
+    const waiters = mediaPauseWaiters
+    mediaPauseWaiters = []
+    for (const resolve of waiters) resolve()
     mainWindow?.webContents.send('library:updated')
   }
 }
@@ -274,6 +301,8 @@ void app.whenReady().then(async () => {
   registerIpc({
     onThemeChange: syncTheme,
     drainMedia: () => void drainMediaQueue(),
+    pauseMedia: pauseMediaQueue,
+    resumeMedia: resumeMediaQueue,
     onSettingsChange: refreshBackgroundFeatures
   })
   createWindow()

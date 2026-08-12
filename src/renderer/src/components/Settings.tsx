@@ -3,6 +3,7 @@ import type {
   AiProvider,
   LanguageChoice,
   LibraryInfo,
+  LibraryMoveProgress,
   PlaybackQuality,
   SyncSchedule,
   ThemeChoice,
@@ -81,6 +82,9 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
   const [aiKey, setAiKey] = useState('')
   const [aiKeyStored, setAiKeyStored] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
+  const [libraryMove, setLibraryMove] = useState<LibraryMoveProgress | null>(null)
+  const [choosingLibrary, setChoosingLibrary] = useState(false)
+  const [libraryMoveError, setLibraryMoveError] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
@@ -95,6 +99,13 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
     if (!open) return
     return magpieEvents.onUpdateState(setUpdateState)
   }, [open])
+
+  useEffect(() => {
+    return magpieEvents.onLibraryMoveProgress((progress) => {
+      setLibraryMove(progress)
+      if (progress.phase === 'error') setLibraryMoveError(progress.message)
+    })
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -141,6 +152,19 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
     setInfo(await magpie.getLibraryInfo())
     await refresh()
     setClearing(false)
+  }
+
+  const moveLibrary = async (): Promise<void> => {
+    setChoosingLibrary(true)
+    setLibraryMoveError(null)
+    try {
+      const result = await magpie.chooseLibraryFolder()
+      if (!result.moved) setLibraryMove(null)
+    } catch (error) {
+      setLibraryMoveError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setChoosingLibrary(false)
+    }
   }
 
   const languages: { key: LanguageChoice; label: string }[] = [
@@ -417,22 +441,70 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
                   : '…'}
               </p>
             </div>
+            <div className="library-location">
+              <span>{t('settings.libraryLocation')}</span>
+              <code title={info?.dataPath}>{info?.dataPath ?? '…'}</code>
+            </div>
+            {libraryMove && libraryMove.phase !== 'error' ? (
+              <div className="library-move" aria-live="polite">
+                <div className="library-move__status">
+                  <span className="spinner" />
+                  <strong>
+                    {t(`settings.libraryMove.${libraryMove.phase}` as TranslationKey)}
+                  </strong>
+                  {libraryMove.total > 0 ? (
+                    <span>{Math.min(100, Math.round((libraryMove.done / libraryMove.total) * 100))}%</span>
+                  ) : null}
+                </div>
+                <div
+                  className="library-move__progress"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={
+                    libraryMove.total > 0
+                      ? Math.min(100, Math.round((libraryMove.done / libraryMove.total) * 100))
+                      : undefined
+                  }
+                >
+                  <span
+                    style={{
+                      width: `${
+                        libraryMove.total > 0
+                          ? Math.min(100, (libraryMove.done / libraryMove.total) * 100)
+                          : 8
+                      }%`
+                    }}
+                  />
+                </div>
+                <code title={libraryMove.path}>{libraryMove.path}</code>
+              </div>
+            ) : null}
+            {libraryMoveError ? (
+              <p className="setting__error" role="alert">{libraryMoveError}</p>
+            ) : null}
             <div className="setting__actions">
-              <button type="button" className="btn" onClick={() => void magpie.openDataFolder()}>
+              <button
+                type="button"
+                className="btn"
+                disabled={choosingLibrary || (libraryMove !== null && libraryMove.phase !== 'error')}
+                onClick={() => void magpie.openDataFolder()}
+              >
                 {t('settings.openFolder')}
               </button>
               <button
                 type="button"
                 className="btn"
-                onClick={() => void magpie.chooseLibraryFolder()}
+                disabled={choosingLibrary || (libraryMove !== null && libraryMove.phase !== 'error')}
+                onClick={() => void moveLibrary()}
               >
-                {t('settings.moveLibrary')}
+                {choosingLibrary ? t('settings.choosingLibrary') : t('settings.moveLibrary')}
               </button>
               <button
                 type="button"
                 className="btn"
                 onClick={() => void clearCache()}
-                disabled={clearing}
+                disabled={clearing || choosingLibrary || (libraryMove !== null && libraryMove.phase !== 'error')}
               >
                 {clearing ? t('settings.clearing') : t('settings.clearCache')}
               </button>

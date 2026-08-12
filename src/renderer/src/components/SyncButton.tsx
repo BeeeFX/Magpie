@@ -1,7 +1,8 @@
-import { PLATFORMS } from '@shared/types'
+import { useEffect, useRef, useState } from 'react'
+import { PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
 import { PLATFORM_LABEL } from '../format'
 import { useStore, useT } from '../store'
-import { IconSync } from './Icons'
+import { IconChevronRight, IconSync } from './Icons'
 import { PlatformIcon } from './PlatformIcon'
 
 /** Bouton de synchronisation et progression détaillée de chaque plateforme. */
@@ -12,6 +13,28 @@ export function SyncButton(): React.JSX.Element {
   const startSync = useStore((s) => s.startSync)
   const cancelSync = useStore((s) => s.cancelSync)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const [expanded, setExpanded] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!sync.running) setExpanded(false)
+  }, [sync.running])
+
+  useEffect(() => {
+    if (!expanded) return
+    const closeOutside = (event: PointerEvent): void => {
+      if (!wrapRef.current?.contains(event.target as Node)) setExpanded(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setExpanded(false)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [expanded])
 
   const connected = accounts.filter((a) => a.connected)
 
@@ -32,23 +55,42 @@ export function SyncButton(): React.JSX.Element {
     const active = PLATFORMS.filter((p) => sync.byPlatform[p].phase === 'running')
 
     return (
-      <div className="sync-control-wrap">
-        <button
-          type="button"
-          className="control control--primary"
-          onClick={() => void cancelSync()}
-          title={t('sync.stop')}
-        >
-          <span className="spinner" />
-          <span>
-            {active.length === 1 ? PLATFORM_LABEL[active[0]] : t('sync.syncing')}
-            {sync.fetched > 0 ? ` · ${sync.fetched}` : ''}
-          </span>
-        </button>
+      <div className="sync-control-wrap" ref={wrapRef}>
+        <div className="sync-control">
+          <button
+            type="button"
+            className="control control--primary sync-control__main"
+            onClick={() => void cancelSync()}
+            title={t('sync.stop')}
+          >
+            <span className="spinner" />
+            <span>
+              {active.length === 1 ? PLATFORM_LABEL[active[0]] : t('sync.syncing')}
+              {sync.fetched > 0 ? ` · ${sync.fetched}` : ''}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="sync-control__toggle"
+            aria-expanded={expanded}
+            aria-label={t(expanded ? 'sync.hideDetails' : 'sync.showDetails')}
+            title={t(expanded ? 'sync.hideDetails' : 'sync.showDetails')}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <IconChevronRight
+              size={14}
+              className={`sync-control__chevron ${expanded ? 'is-open' : ''}`}
+            />
+          </button>
+        </div>
 
-        <div className="sync-progress" aria-live="polite">
+        {expanded ? <div className="sync-progress" aria-live="polite">
           {active.map((platform) => {
             const progress = sync.byPlatform[platform]
+            const percent = Math.min(
+              96,
+              Math.max(5, (progress.page / SYNC_PAGE_LIMITS[platform]) * 100)
+            )
             return (
               <div className="sync-progress__row" key={platform}>
                 <PlatformIcon platform={platform} size={17} coloured />
@@ -63,8 +105,17 @@ export function SyncButton(): React.JSX.Element {
                       })}
                     </span>
                   </div>
-                  <span className="sync-progress__track" aria-hidden="true">
-                    <span className="sync-progress__bar" />
+                  <span
+                    className="sync-progress__track"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={SYNC_PAGE_LIMITS[platform]}
+                    aria-valuenow={progress.page}
+                  >
+                    <span
+                      className="sync-progress__bar"
+                      style={{ '--sync-progress': `${percent}%` } as React.CSSProperties}
+                    />
                   </span>
                 </div>
                 <button
@@ -79,7 +130,7 @@ export function SyncButton(): React.JSX.Element {
               </div>
             )
           })}
-        </div>
+        </div> : null}
       </div>
     )
   }

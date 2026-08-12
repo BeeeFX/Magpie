@@ -104,7 +104,10 @@ function CardImpl({
   const stop = (e: React.MouseEvent): void => e.stopPropagation()
 
   const mediaBlock = hasMedia ? (
-    <div className="card__media" style={{ background: post.dominantColor ?? 'var(--field)' }}>
+    <div
+      className={`card__media ${current?.thumbUrl ? '' : 'is-pending'}`}
+      style={{ background: post.dominantColor ?? 'var(--field)' }}
+    >
       {current?.thumbUrl ? (
         <img
           src={post.thumbUrl ?? undefined}
@@ -115,6 +118,13 @@ function CardImpl({
           className={loaded ? 'is-loaded' : ''}
           onLoad={() => setLoaded(true)}
         />
+      ) : null}
+
+      {!current?.thumbUrl ? (
+        <span className="card__media-pending" aria-label={t('card.preparingMedia')}>
+          <span className="spinner" />
+          <span>{t('card.preparingMedia')}</span>
+        </span>
       ) : null}
 
       {/* Vue courante du carrousel, superposée en fondu. Les suivantes ne sont chargées
@@ -292,6 +302,7 @@ function CardImpl({
                 }}
                 aria-label={t('toolbar.previewVolume')}
               />
+              <span>{Math.round((muted ? 0 : volume) * 100)}%</span>
             </div>
           </div>
         ) : null}

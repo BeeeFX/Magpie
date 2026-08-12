@@ -5,6 +5,7 @@ import type {
   MagpieEvents,
   Platform,
   Post,
+  PostPage,
   Settings,
   SyncState,
   UpdateState
@@ -92,6 +93,15 @@ function previewSettings(): Settings {
 
 const previewApi: MagpieApi = {
   listPosts: () => previewPosts(),
+  listPostPage: async (_query, offset, limit): Promise<PostPage> => {
+    const posts = await previewPosts()
+    const page = posts.slice(offset, offset + limit)
+    return { posts: page, total: posts.length, offset, hasMore: offset + page.length < posts.length }
+  },
+  getPostsByIds: async (ids) => {
+    const wanted = new Set(ids)
+    return (await previewPosts()).filter((post) => wanted.has(post.id))
+  },
   getStats: async () => previewStats(await previewPosts()),
   toggleFavorite: async () => false,
   setFavoriteMany: async () => {},
@@ -150,19 +160,19 @@ const previewApi: MagpieApi = {
       demoPosts: posts.length,
       cacheBytes: 0,
       dataPath: 'aperçu navigateur',
-      version: '0.2.0'
+      version: '0.2.1'
     }
   },
   getUpdateState: async (): Promise<UpdateState> => ({
     phase: 'unsupported',
-    currentVersion: '0.2.0',
+    currentVersion: '0.2.1',
     availableVersion: null,
     percent: null,
     message: 'browser-preview'
   }),
   checkForUpdates: async (): Promise<UpdateState> => ({
     phase: 'unsupported',
-    currentVersion: '0.2.0',
+    currentVersion: '0.2.1',
     availableVersion: null,
     percent: null,
     message: 'browser-preview'
@@ -177,10 +187,10 @@ const previewApi: MagpieApi = {
 
   // Les mutations n'ont pas de base derrière elles en aperçu : elles renvoient l'état
   // courant sans rien modifier, plutôt que de simuler une persistance qui mentirait.
-  setLabel: () => previewPosts(),
+  setLabel: async () => {},
   setCollectionColor: async () => {},
-  addTag: () => previewPosts(),
-  removeTag: () => previewPosts(),
+  addTag: async () => {},
+  removeTag: async () => {},
   listCollections: async () => [],
   createCollection: async (name) => ({ id: 0, name, count: 0, color: null }),
   addToCollection: async () => ({ added: 0, alreadyThere: [], collectionName: '' }),
@@ -228,6 +238,7 @@ const previewEvents: MagpieEvents = {
   onSyncState: () => () => {},
   onAiTagProgress: () => () => {},
   onUpdateState: () => () => {},
+  onLibraryMoveProgress: () => () => {},
   onThemeChanged: (cb) => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const resolve = (): void => {

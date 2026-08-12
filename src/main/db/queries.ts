@@ -4,6 +4,7 @@ import type {
   Platform,
   Post,
   PostKind,
+  PostPage,
   PostQuery,
   TagSource,
   VideoQuality
@@ -44,8 +45,10 @@ const SELECT_POST = /* sql */ `
   FROM posts p
 `
 
-export function listPosts(query: PostQuery): Post[] {
+export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): PostPage {
   const db = getDb()
+  const offset = Math.max(0, Math.floor(rawOffset))
+  const limit = Math.min(500, Math.max(1, Math.floor(rawLimit)))
   const where: string[] = ['p.is_archived = 0']
   const params: unknown[] = []
 
@@ -55,8 +58,18 @@ export function listPosts(query: PostQuery): Post[] {
   }
 
   if (query.kinds.length > 0) {
-    where.push(`p.kind IN (${query.kinds.map(() => '?').join(', ')})`)
-    params.push(...query.kinds)
+    const kindClauses: string[] = []
+    const directKinds = query.kinds.filter((kind) => kind !== 'video')
+    if (directKinds.length > 0) {
+      kindClauses.push(`p.kind IN (${directKinds.map(() => '?').join(', ')})`)
+      params.push(...directKinds)
+    }
+    // Un carrousel peut contenir un clip. Le filtre « Vidéos » doit montrer le contenu
+    // réellement regardable, pas seulement les posts dont le type principal est vidéo.
+    if (query.kinds.includes('video')) {
+      kindClauses.push("EXISTS (SELECT 1 FROM media vm WHERE vm.post_id = p.id AND vm.kind = 'video')")
+    }
+    where.push(`(${kindClauses.join(' OR ')})`)
   }
 
   if (query.favoritesOnly) where.push('p.is_favorite = 1')
@@ -91,28 +104,63 @@ export function listPosts(query: PostQuery): Post[] {
     params.push(match)
   }
 
-  const sql = `${SELECT_POST} WHERE ${where.join(' AND ')} ORDER BY ${orderBy(query.sort)}`
-  const rows = db.prepare(sql).all(...params) as PostRow[]
+  const condition = where.join(' AND ')
+  const total = (
+    db.prepare(`SELECT COUNT(*) AS n FROM posts p WHERE ${condition}`).get(...params) as { n: number }
+  ).n
+  const sql = `${SELECT_POST} WHERE ${condition} ORDER BY ${orderBy(query.sort, query.randomSeed)} LIMIT ? OFFSET ?`
+  const rows = db.prepare(sql).all(...params, limit, offset) as PostRow[]
 
   const posts = rows.map(toPost)
   attachMedia(posts)
   attachTags(posts)
 
-  // SQLite n'a pas de random ensemencé : on mélange côté JS pour que l'ordre reste
-  // stable tant que la graine ne change pas, donc pendant tout le scroll.
-  return query.sort === 'random' ? shuffle(posts, query.randomSeed) : posts
+  return {
+    posts,
+    total,
+    offset,
+    hasMore: offset + posts.length < total
+  }
 }
 
-function orderBy(sort: PostQuery['sort']): string {
+/** Lecture exhaustive réservée aux outils hors interface, notamment l'instantané visuel. */
+export function listPosts(query: PostQuery): Post[] {
+  const posts: Post[] = []
+  let hasMore = true
+  while (hasMore) {
+    const page = listPostPage(query, posts.length, 500)
+    posts.push(...page.posts)
+    hasMore = page.hasMore
+  }
+  return posts
+}
+
+/** Actualisation ciblée utilisée quand des vignettes viennent d'être préparées. */
+export function getPostsByIds(rawIds: string[]): Post[] {
+  const ids = [...new Set(rawIds)].slice(0, 100)
+  if (ids.length === 0) return []
+  const placeholders = ids.map(() => '?').join(',')
+  const rows = getDb()
+    .prepare(`${SELECT_POST} WHERE p.is_archived = 0 AND p.id IN (${placeholders})`)
+    .all(...ids) as PostRow[]
+  const posts = rows.map(toPost)
+  attachMedia(posts)
+  attachTags(posts)
+  return posts
+}
+
+function orderBy(sort: PostQuery['sort'], randomSeed: number): string {
   switch (sort) {
     case 'published':
       return 'COALESCE(p.published_at, 0) DESC, p.id'
     case 'author':
-      return 'p.author_handle COLLATE NOCASE ASC, COALESCE(p.published_at, 0) DESC'
+      return 'p.author_handle COLLATE NOCASE ASC, COALESCE(p.published_at, 0) DESC, p.id'
     case 'platform':
-      return 'p.platform ASC, COALESCE(p.saved_at, p.discovered_at) DESC'
+      return 'p.platform ASC, COALESCE(p.saved_at, p.discovered_at) DESC, p.id'
     case 'random':
-      return 'p.id' // ordre réel appliqué en JS, voir listPosts
+      // Ordre pseudo-aléatoire déterministe et paginable : la première tranche apparaît
+      // immédiatement sans charger toute la bibliothèque avant de la mélanger.
+      return `((p.rowid * 1103515245 + ${Math.max(1, Math.floor(randomSeed))}) & 2147483647), p.id`
     case 'saved':
     default:
       return 'COALESCE(p.saved_at, p.discovered_at) DESC, p.saved_rank ASC, p.id'
@@ -969,7 +1017,9 @@ export function pendingThumbnails(): PendingMedia[] {
          FROM media m JOIN posts p ON p.id = m.post_id
         WHERE m.thumb_path IS NULL
           AND (m.source_path IS NOT NULL OR m.remote_url LIKE 'http%')
-        ORDER BY m.post_id, m.idx`
+        ORDER BY CASE WHEN m.idx = 0 THEN 0 ELSE 1 END,
+                 CASE WHEN p.saved_rank IS NULL THEN 1 ELSE 0 END,
+                 p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx`
     )
     .all() as PendingMedia[]
 }
@@ -1000,7 +1050,9 @@ export function pendingVideos(): PendingMedia[] {
          FROM media m JOIN posts p ON p.id = m.post_id
         WHERE m.video_path IS NULL AND m.video_source IS NOT NULL
           AND m.video_cache_state = 'pending' AND m.video_attempts < 3
-        ORDER BY m.post_id, m.idx`
+        ORDER BY CASE WHEN m.idx = 0 THEN 0 ELSE 1 END,
+                 CASE WHEN p.saved_rank IS NULL THEN 1 ELSE 0 END,
+                 p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx`
     )
     .all() as PendingMedia[]
 }
@@ -1020,22 +1072,4 @@ function toFtsQuery(raw: string): string | null {
 
   if (terms.length === 0) return null
   return terms.map((t, i) => (i === terms.length - 1 ? `"${t}"*` : `"${t}"`)).join(' AND ')
-}
-
-/** Mélange déterministe (Fisher-Yates + PRNG mulberry32) pour un tri aléatoire stable. */
-function shuffle<T>(items: T[], seed: number): T[] {
-  const out = [...items]
-  let state = seed >>> 0
-  const random = (): number => {
-    state = (state + 0x6d2b79f5) >>> 0
-    let t = state
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1))
-    ;[out[i], out[j]] = [out[j], out[i]]
-  }
-  return out
 }

@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { SCHEMA_SQL, SCHEMA_VERSION } from './schema'
@@ -24,7 +24,10 @@ export function configuredDataDir(): string | null {
 }
 
 export function writeDataDirLocation(path: string): void {
-  writeFileSync(locationFile(), JSON.stringify({ path }, null, 2))
+  const destination = locationFile()
+  const temporary = `${destination}.tmp`
+  writeFileSync(temporary, JSON.stringify({ path }, null, 2))
+  renameSync(temporary, destination)
 }
 
 export function dataDir(): string {

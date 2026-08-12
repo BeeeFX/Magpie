@@ -1,12 +1,14 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { readdirSync, rmSync, statfsSync, statSync } from 'node:fs'
+import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { join, relative, resolve, sep } from 'node:path'
 import type {
   AccountInfo,
   AiCollectionApplyResult,
   AiCollectionChoice,
   LabelColor,
   LibraryInfo,
+  LibraryMoveProgress,
   Platform,
   PostQuery,
   Settings
@@ -22,8 +24,10 @@ import {
   createCollection,
   deleteDemoPosts,
   forgetAccount,
+  getPostsByIds,
   getStats,
   listCollections,
+  listPostPage,
   listPosts,
   readAccount,
   removeFromCollection,
@@ -101,11 +105,36 @@ export interface IpcHooks {
   onThemeChange: () => void
   /** Relance le traitement des médias en attente, sérialisé côté processus principal. */
   drainMedia: () => void
+  /** Garantit qu'aucun fichier média n'est écrit pendant une migration de bibliothèque. */
+  pauseMedia: () => Promise<void>
+  resumeMedia: () => void
   onSettingsChange: () => void
 }
 
-export function registerIpc({ onThemeChange, drainMedia, onSettingsChange }: IpcHooks): void {
+export function registerIpc({
+  onThemeChange,
+  drainMedia,
+  pauseMedia,
+  resumeMedia,
+  onSettingsChange
+}: IpcHooks): void {
   ipcMain.handle('posts:list', (_event, query: PostQuery) => listPosts(postQueryValue(query)))
+  ipcMain.handle('posts:page', (_event, query: PostQuery, offset: number, limit: number) => {
+    if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error('Pagination invalide')
+    }
+    return listPostPage(postQueryValue(query), offset, limit)
+  })
+  ipcMain.handle('posts:byIds', (_event, ids: string[]) => {
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 100 ||
+      ids.some((id) => typeof id !== 'string' || id.length > 300)
+    ) {
+      throw new Error('Liste de posts invalide')
+    }
+    return getPostsByIds(ids)
+  })
 
   ipcMain.handle('stats:get', () => getStats())
 
@@ -276,27 +305,91 @@ export function registerIpc({ onThemeChange, drainMedia, onSettingsChange }: Ipc
       throw new Error('Le nouveau dossier ne peut pas se trouver dans la bibliothèque actuelle.')
     }
 
-    mkdirSync(target, { recursive: true })
-    const contents = readdirSync(target)
+    await mkdir(target, { recursive: true })
+    const contents = await readdir(target)
     if (contents.length > 0) {
       throw new Error('Le dossier choisi doit être vide afin de protéger les fichiers existants.')
     }
 
-    // SQLite produit un instantané cohérent même si la base est ouverte en WAL. Les autres
-    // fichiers sont ensuite copiés ; l'ancienne bibliothèque reste intacte en secours.
-    await getDb().backup(join(target, 'magpie.db'))
-    for (const entry of readdirSync(source)) {
-      if (entry === 'magpie.db' || entry === 'magpie.db-wal' || entry === 'magpie.db-shm') continue
-      const from = join(source, entry)
-      const to = join(target, entry)
-      if (statSync(from).isDirectory()) cpSync(from, to, { recursive: true })
-      else if (existsSync(from)) copyFileSync(from, to)
+    if (syncEngine.current().running) {
+      throw new Error('Attendez la fin de la synchronisation avant de déplacer la bibliothèque.')
     }
 
-    writeDataDirLocation(target)
-    app.relaunch()
-    app.exit(0)
-    return { moved: true, path: target }
+    const targetDb = join(target, 'magpie.db')
+    const targetMedia = join(target, 'media')
+    const sourceMedia = join(source, 'media')
+    let startedWriting = false
+    const sendProgress = (progress: LibraryMoveProgress): void => {
+      if (!event.sender.isDestroyed()) event.sender.send('library:moveProgress', progress)
+    }
+
+    try {
+      sendProgress({ phase: 'preparing', done: 0, total: 0, path: target, message: null })
+      await pauseMedia()
+
+      const mediaFiles = await listLibraryFiles(sourceMedia)
+      const databaseBytes = await stat(join(source, 'magpie.db')).then((value) => value.size)
+      const mediaBytes = mediaFiles.reduce((sum, file) => sum + file.size, 0)
+      const total = Math.max(1, databaseBytes + mediaBytes)
+      const disk = statfsSync(target)
+      const available = disk.bavail * disk.bsize
+      if (available < total * 1.05) {
+        throw new Error('Espace libre insuffisant dans le dossier choisi.')
+      }
+
+      startedWriting = true
+      sendProgress({ phase: 'database', done: 0, total, path: target, message: null })
+      await getDb().backup(targetDb, {
+        progress: ({ totalPages, remainingPages }) => {
+          const ratio = totalPages > 0 ? (totalPages - remainingPages) / totalPages : 0
+          sendProgress({
+            phase: 'database',
+            done: Math.round(databaseBytes * ratio),
+            total,
+            path: target,
+            message: null
+          })
+          return 200
+        }
+      })
+
+      await mkdir(targetMedia, { recursive: true })
+      let copiedMediaBytes = 0
+      for (const file of mediaFiles) {
+        const destination = join(targetMedia, file.relativePath)
+        await mkdir(resolve(destination, '..'), { recursive: true })
+        await copyFile(file.path, destination)
+        copiedMediaBytes += file.size
+        sendProgress({
+          phase: 'media',
+          done: databaseBytes + copiedMediaBytes,
+          total,
+          path: target,
+          message: null
+        })
+      }
+
+      sendProgress({ phase: 'finalizing', done: total, total, path: target, message: null })
+      writeDataDirLocation(target)
+      sendProgress({ phase: 'done', done: total, total, path: target, message: null })
+
+      // L'ancienne bibliothèque reste intacte : le redémarrage est le seul moment où la
+      // connexion SQLite bascule vers la copie validée.
+      setTimeout(() => {
+        app.relaunch()
+        app.quit()
+      }, 450)
+      return { moved: true, path: target }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      sendProgress({ phase: 'error', done: 0, total: 0, path: target, message })
+      if (startedWriting) {
+        await rm(targetDb, { force: true }).catch(() => {})
+        await rm(targetMedia, { recursive: true, force: true }).catch(() => {})
+      }
+      resumeMedia()
+      throw error
+    }
   })
 
   ipcMain.handle(
@@ -313,21 +406,16 @@ export function registerIpc({ onThemeChange, drainMedia, onSettingsChange }: Ipc
     }
   )
 
-  // Les mutations de tags renvoient la liste rafraîchie : le renderer n'a pas à deviner
-  // le nouvel état ni à relancer une requête derrière.
-  ipcMain.handle('tags:add', (_event, postId: string, name: string, query: PostQuery) => {
+  ipcMain.handle('tags:add', (_event, postId: string, name: string) => {
     addTag(postId, name)
-    return listPosts(postQueryValue(query))
   })
 
-  ipcMain.handle('tags:remove', (_event, postId: string, name: string, query: PostQuery) => {
+  ipcMain.handle('tags:remove', (_event, postId: string, name: string) => {
     removeTag(postId, name)
-    return listPosts(postQueryValue(query))
   })
 
-  ipcMain.handle('posts:setLabel', (_event, postId: string, label: LabelColor | null, query: PostQuery) => {
+  ipcMain.handle('posts:setLabel', (_event, postId: string, label: LabelColor | null) => {
     setLabel(postId, label)
-    return listPosts(postQueryValue(query))
   })
 
   ipcMain.handle('collections:setColor', (_event, id: number, color: LabelColor | null) =>
@@ -391,6 +479,35 @@ export function registerIpc({ onThemeChange, drainMedia, onSettingsChange }: Ipc
   })
 
   ipcMain.handle('library:removeDemo', () => deleteDemoPosts())
+}
+
+interface LibraryFile {
+  path: string
+  relativePath: string
+  size: number
+}
+
+async function listLibraryFiles(root: string): Promise<LibraryFile[]> {
+  const files: LibraryFile[] = []
+  const visit = async (directory: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(directory, { withFileTypes: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    for (const entry of entries) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await visit(path)
+      else if (entry.isFile()) {
+        const info = await stat(path)
+        files.push({ path, relativePath: relative(root, path), size: info.size })
+      }
+    }
+  }
+  await visit(root)
+  return files
 }
 
 function cacheSize(): number {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { PLATFORMS } from '@shared/types'
 import { magpie, magpieEvents } from './bridge'
 import { Detail } from './components/Detail'
 import { Grid } from './components/Grid'
@@ -12,6 +13,7 @@ import { useStore } from './store'
 export function App(): React.JSX.Element {
   const refresh = useStore((s) => s.refresh)
   const setCacheProgress = useStore((s) => s.setCacheProgress)
+  const refreshPosts = useStore((s) => s.refreshPosts)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const loadSettings = useStore((s) => s.loadSettings)
@@ -26,6 +28,8 @@ export function App(): React.JSX.Element {
   const onboardingDone = useStore((s) => s.onboardingDone)
   const settingsLoading = useStore((s) => s.settingsLoading)
   const lastRefresh = useRef(0)
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSyncRevision = useRef('')
   const [aiOrganizerOpen, setAiOrganizerOpen] = useState(false)
   const openAiOrganizer = useCallback(() => {
     setSettingsOpen(false)
@@ -34,39 +38,71 @@ export function App(): React.JSX.Element {
   const closeAiOrganizer = useCallback(() => setAiOrganizerOpen(false), [])
 
   useEffect(() => {
-    void refresh()
+    void refresh(true)
     void loadSettings()
     void loadAccounts()
+    void magpie.getSyncState().then(setSyncState)
+
+    const refreshSoon = (): void => {
+      const elapsed = Date.now() - lastRefresh.current
+      if (elapsed >= 1000) {
+        lastRefresh.current = Date.now()
+        void refresh()
+        return
+      }
+      if (refreshTimer.current !== null) return
+      refreshTimer.current = setTimeout(() => {
+        refreshTimer.current = null
+        lastRefresh.current = Date.now()
+        void refresh()
+      }, 1000 - elapsed)
+    }
+
+    const refreshNow = (): void => {
+      if (refreshTimer.current !== null) clearTimeout(refreshTimer.current)
+      refreshTimer.current = null
+      lastRefresh.current = Date.now()
+      void refresh()
+    }
 
     /* Le cache tourne en fond : la grille se remplit au fur et à mesure plutôt que
        d'attendre la fin. On limite quand même la cadence — recharger à chaque vignette
        ferait clignoter l'écran pour rien. */
     const offProgress = magpieEvents.onCacheProgress((progress) => {
       setCacheProgress(progress)
-      const now = Date.now()
-      if (now - lastRefresh.current > 700) {
-        lastRefresh.current = now
-        void refresh()
-      }
+      if (progress.postIds?.length) void refreshPosts(progress.postIds)
     })
 
     const offUpdated = magpieEvents.onLibraryUpdated(() => {
       setCacheProgress(null)
-      void refresh()
+      refreshNow()
     })
 
     const offTheme = magpieEvents.onThemeChanged(setIsDark)
-    const offSync = magpieEvents.onSyncState(setSyncState)
+    const offSync = magpieEvents.onSyncState((state) => {
+      setSyncState(state)
+      // Chaque page est déjà écrite en base. Rafraîchir ici rend immédiatement visibles
+      // les nouveaux posts, même avant que leurs vignettes soient mises en cache.
+      const revision = PLATFORMS.map((platform) => {
+        const progress = state.byPlatform[platform]
+        return `${platform}:${progress.phase}:${progress.page}:${progress.added}`
+      }).join('|')
+      if (revision !== lastSyncRevision.current) {
+        lastSyncRevision.current = revision
+        refreshSoon()
+      }
+    })
     const offAi = magpieEvents.onAiTagProgress(setAiProgress)
 
     return () => {
+      if (refreshTimer.current !== null) clearTimeout(refreshTimer.current)
       offProgress()
       offUpdated()
       offTheme()
       offSync()
       offAi()
     }
-  }, [refresh, loadSettings, loadAccounts, setCacheProgress, setIsDark, setSyncState, setAiProgress])
+  }, [refresh, refreshPosts, loadSettings, loadAccounts, setCacheProgress, setIsDark, setSyncState, setAiProgress])
 
   /* Le thème effectif et l'accent sont posés sur <html> : tout le CSS s'y accroche, et
      un seul attribut suffit à basculer l'application entière. */

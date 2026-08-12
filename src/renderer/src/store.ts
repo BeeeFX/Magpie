@@ -27,6 +27,8 @@ import { resolveLanguage, translate, type TranslationKey } from './i18n'
 
 export const DENSITY_MIN = 140
 export const DENSITY_MAX = 400
+export const POST_PAGE_SIZE = 300
+let pageGeneration = 0
 
 /**
  * Accès aux traductions depuis un composant. Il vit ici plutôt que dans `i18n.ts` pour
@@ -42,6 +44,10 @@ interface State {
   posts: Post[]
   stats: LibraryStats | null
   loading: boolean
+  loadingMore: boolean
+  hasMore: boolean
+  resultTotal: number
+  nextOffset: number
   cacheProgress: CacheProgress | null
 
   query: PostQuery
@@ -90,7 +96,9 @@ interface State {
   /** Thème effectif, « système » déjà résolu. */
   isDark: boolean
 
-  refresh: () => Promise<void>
+  refresh: (reset?: boolean) => Promise<void>
+  refreshPosts: (ids: string[]) => Promise<void>
+  loadMore: () => Promise<void>
   setQuery: (patch: Partial<PostQuery>) => void
   resetQuery: () => void
   setSort: (sort: SortKey) => void
@@ -149,6 +157,10 @@ export const useStore = create<State>()(
       posts: [],
       stats: null,
       loading: true,
+      loadingMore: false,
+      hasMore: false,
+      resultTotal: 0,
+      nextOffset: 0,
       cacheProgress: null,
 
       query: DEFAULT_QUERY,
@@ -193,26 +205,97 @@ export const useStore = create<State>()(
       settingsLoading: true,
       isDark: true,
 
-      refresh: async () => {
+      refresh: async (reset = false) => {
+        const generation = ++pageGeneration
         const query = get().query
-        set({ loading: true })
-        const [posts, stats] = await Promise.all([
-          magpie.listPosts(query),
+        const current = get().posts
+        set({
+          loadingMore: false,
+          ...(reset || current.length === 0 ? { loading: true } : {})
+        })
+        const [page, stats] = await Promise.all([
+          magpie.listPostPage(query, 0, POST_PAGE_SIZE),
           magpie.getStats()
         ])
         // Une réponse plus lente qu'une requête plus récente ne doit pas écraser l'état.
-        if (get().query !== query) return
-        set({ posts, stats, loading: false })
+        if (get().query !== query || generation !== pageGeneration) return
+
+        let posts = page.posts
+        let nextOffset = page.posts.length
+        if (!reset && current.length > 0) {
+          // Pendant un long import, les cartes déjà à l'écran gardent leur ordre et leur
+          // ratio. Une vignette peut ainsi remplacer son placeholder sans déplacer tout
+          // le mur ; les nouveaux posts sont ajoutés à la suite jusqu'au prochain tri.
+          const updated = new Map(page.posts.map((post) => [post.id, post]))
+          const currentIds = new Set(current.map((post) => post.id))
+          const fresh = page.posts.filter((post) => !currentIds.has(post.id))
+          posts = [
+            ...current.map((post) => {
+              const next = updated.get(post.id)
+              return next ? { ...next, width: post.width, height: post.height } : post
+            }),
+            ...fresh
+          ]
+          // Les nouvelles lignes ont été insérées avant l'ancien offset dans SQLite.
+          // Les compter évite de les revoir à la page suivante ou d'en sauter d'autres.
+          nextOffset = get().nextOffset + fresh.length
+        }
+
+        set({
+          posts,
+          stats,
+          loading: false,
+          hasMore: nextOffset < page.total,
+          resultTotal: page.total,
+          nextOffset
+        })
+      },
+
+      refreshPosts: async (ids) => {
+        if (ids.length === 0) return
+        const changed = await magpie.getPostsByIds(ids)
+        if (changed.length === 0) return
+        const byId = new Map(changed.map((post) => [post.id, post]))
+        set({
+          posts: get().posts.map((post) => {
+            const next = byId.get(post.id)
+            return next ? { ...next, width: post.width, height: post.height } : post
+          })
+        })
+      },
+
+      loadMore: async () => {
+        const state = get()
+        if (state.loading || state.loadingMore || !state.hasMore) return
+        const generation = pageGeneration
+        const query = state.query
+        const offset = state.nextOffset
+        set({ loadingMore: true })
+        try {
+          const page = await magpie.listPostPage(query, offset, POST_PAGE_SIZE)
+          if (get().query !== query || generation !== pageGeneration) return
+          const known = new Set(get().posts.map((post) => post.id))
+          const fresh = page.posts.filter((post) => !known.has(post.id))
+          const posts = [...get().posts, ...fresh]
+          set({
+            posts,
+            resultTotal: page.total,
+            nextOffset: offset + page.posts.length,
+            hasMore: page.hasMore
+          })
+        } finally {
+          if (generation === pageGeneration) set({ loadingMore: false })
+        }
       },
 
       setQuery: (patch) => {
         set({ query: { ...get().query, ...patch }, scrollTop: 0, detailIndex: null })
-        void get().refresh()
+        void get().refresh(true)
       },
 
       resetQuery: () => {
         set({ query: DEFAULT_QUERY, scrollTop: 0 })
-        void get().refresh()
+        void get().refresh(true)
       },
 
       setSort: (sort) => {
@@ -220,7 +303,7 @@ export const useStore = create<State>()(
         // toujours le même ordre.
         const randomSeed = sort === 'random' ? Math.floor(Math.random() * 2 ** 31) : get().query.randomSeed
         set({ query: { ...get().query, sort, randomSeed }, scrollTop: 0 })
-        void get().refresh()
+        void get().refresh(true)
       },
 
       setGridMode: (gridMode) => set({ gridMode, scrollTop: 0 }),
@@ -244,12 +327,31 @@ export const useStore = create<State>()(
       favoriteSelection: async () => {
         const ids = get().selectedIds
         await magpie.setFavoriteMany(ids, true)
-        await get().refresh()
+        const selected = new Set(ids)
+        set({
+          posts: get().posts.map((post) =>
+            selected.has(post.id) ? { ...post, isFavorite: true } : post
+          ),
+          stats: await magpie.getStats()
+        })
       },
       tagSelection: async (name) => {
         const ids = get().selectedIds
         await magpie.addTagMany(ids, name)
-        await get().refresh()
+        const selected = new Set(ids)
+        const before = get().posts
+        const posts = before
+          .map((post) =>
+            selected.has(post.id) && !post.tags.some((tag) => tag.name === name)
+              ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
+              : post
+          )
+          .filter((post) => !(get().query.untaggedOnly && selected.has(post.id)))
+        set({
+          posts,
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
+          stats: await magpie.getStats()
+        })
       },
       setCacheProgress: (cacheProgress) => set({ cacheProgress }),
 
@@ -359,24 +461,72 @@ export const useStore = create<State>()(
       closeDetail: () => set({ detailIndex: null, detailOrigin: null }),
 
       addTag: async (postId, name) => {
-        set({ posts: await magpie.addTag(postId, name) })
-        set({ stats: await magpie.getStats() })
+        await magpie.addTag(postId, name)
+        const before = get().posts
+        const posts = before
+          .map((post) =>
+            post.id === postId && !post.tags.some((tag) => tag.name === name)
+              ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
+              : post
+          )
+          .filter((post) => !(get().query.untaggedOnly && post.id === postId))
+        set({
+          posts,
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
+          stats: await magpie.getStats()
+        })
       },
 
       removeTag: async (postId, name) => {
-        set({ posts: await magpie.removeTag(postId, name) })
-        set({ stats: await magpie.getStats() })
+        await magpie.removeTag(postId, name)
+        const before = get().posts
+        const removeFromResults = get().query.tag?.toLocaleLowerCase() === name.toLocaleLowerCase()
+        const posts = before
+          .map((post) =>
+            post.id === postId
+              ? {
+                  ...post,
+                  tags: post.tags.filter(
+                    (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
+                  )
+                }
+              : post
+          )
+          .filter((post) => !(removeFromResults && post.id === postId))
+        set({
+          posts,
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
+          stats: await magpie.getStats()
+        })
       },
 
       setLabel: async (postId, label) => {
-        set({ posts: await magpie.setLabel(postId, label) })
-        set({ stats: await magpie.getStats() })
+        await magpie.setLabel(postId, label)
+        const before = get().posts
+        const posts = before
+          .map((post) => (post.id === postId ? { ...post, label } : post))
+          .filter(
+            (post) => !(post.id === postId && get().query.label && get().query.label !== label)
+          )
+        set({
+          posts,
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
+          stats: await magpie.getStats()
+        })
       },
 
       /** Navigation dans la vue détaillée, bornée aux extrémités plutôt que circulaire. */
       stepDetail: (delta) => {
-        const { detailIndex, posts } = get()
+        const { detailIndex, posts, hasMore } = get()
         if (detailIndex === null || posts.length === 0) return
+        if (delta > 0 && detailIndex === posts.length - 1 && hasMore) {
+          const currentId = posts[detailIndex].id
+          void get().loadMore().then(() => {
+            const current = get().posts.findIndex((post) => post.id === currentId)
+            if (current >= 0 && current + 1 < get().posts.length) set({ detailIndex: current + 1 })
+          })
+          return
+        }
         const next = Math.min(posts.length - 1, Math.max(0, detailIndex + delta))
         if (next !== detailIndex) set({ detailIndex: next })
       },
@@ -420,8 +570,13 @@ export const useStore = create<State>()(
 
       toggleFavorite: async (id) => {
         const isFavorite = await magpie.toggleFavorite(id)
+        const before = get().posts
+        const posts = before
+          .map((p) => (p.id === id ? { ...p, isFavorite } : p))
+          .filter((post) => !(get().query.favoritesOnly && post.id === id && !isFavorite))
         set({
-          posts: get().posts.map((p) => (p.id === id ? { ...p, isFavorite } : p)),
+          posts,
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
           stats: get().stats
             ? {
                 ...get().stats!,

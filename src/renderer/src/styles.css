@@ -699,6 +699,7 @@ h1, h2, h3 {
   border: 0;
   border-radius: var(--pill);
   color: var(--faint);
+  white-space: nowrap;
   transition:
     background-color var(--fast) var(--ease),
     color var(--fast) var(--ease),
@@ -986,6 +987,22 @@ h1, h2, h3 {
   flex: none;
 }
 
+.setting--stack > .segmented--wide {
+  width: 100%;
+}
+
+.setting--compact .setting__label strong,
+.setting--compact .setting__label span {
+  display: block;
+}
+
+.setting--compact .setting__label span {
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .setting__label h3 {
   font-size: 13px;
 }
@@ -1006,6 +1023,85 @@ h1, h2, h3 {
   color: var(--faint);
   font-size: 11.5px;
   line-height: 1.45;
+}
+
+.library-location {
+  display: grid;
+  gap: 5px;
+  padding: 11px 13px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--field);
+}
+
+.library-location > span {
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.library-location code,
+.library-move code {
+  overflow: hidden;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.library-move {
+  display: grid;
+  gap: 9px;
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--hairline));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--field) 84%, var(--accent) 16%);
+}
+
+.library-move__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.library-move__status strong {
+  margin-right: auto;
+}
+
+.library-move__status .spinner {
+  width: 13px;
+  height: 13px;
+}
+
+.library-move__progress {
+  overflow: hidden;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--field-hover));
+}
+
+.library-move__progress > span {
+  display: block;
+  height: 100%;
+  min-width: 8%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 220ms var(--ease);
+}
+
+.setting__error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, #ef5b67 45%, var(--hairline));
+  border-radius: var(--radius-md);
+  color: #ef5b67;
+  background: color-mix(in srgb, #ef5b67 9%, var(--field));
+  font-size: 11.5px;
+  line-height: 1.4;
 }
 
 .update-card {
@@ -1411,6 +1507,20 @@ h1, h2, h3 {
   width: 100%;
 }
 
+.grid__load-more {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 56px;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Changement de filtre, de tri ou de recherche : le jeu de résultats se repose au lieu
    de se substituer sèchement. Une seule animation sur le conteneur plutôt qu'une par
    carte — à trente cartes visibles, trente animations décalées coûteraient cher pour un
@@ -1459,6 +1569,14 @@ h1, h2, h3 {
 .card:hover {
   transform: translate3d(var(--x), var(--y), 0) scale(1.014);
   z-index: 4;
+}
+
+/* Pendant un redimensionnement continu, interpoler chaque ancienne position pendant
+   340 ms fait poursuivre la souris à la grille. Les cartes suivent la fenêtre à la frame,
+   puis retrouvent leurs transitions fluides dès que le geste se termine. */
+.grid.is-resizing .card,
+.grid.is-resizing .card--cards {
+  transition: none;
 }
 
 /* ------------------------------------------------- carte de contenu (mode cartes)
@@ -1615,6 +1733,47 @@ h1, h2, h3 {
 
 .card:hover .card__media {
   box-shadow: var(--card-ring), var(--shadow-md);
+}
+
+/* Une affiche distante passe d'abord par le cache local. Le reflet indique clairement
+   que la carte se remplit encore, au lieu de ressembler à un média cassé. */
+.card__media.is-pending::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 28%,
+    color-mix(in srgb, var(--text) 8%, transparent) 45%,
+    transparent 62%
+  );
+  transform: translateX(-100%);
+  animation: media-pending-shine 1.8s var(--ease) infinite;
+}
+
+.card__media-pending {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--faint);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+
+.card__media-pending .spinner {
+  width: 16px;
+  height: 16px;
+}
+
+@keyframes media-pending-shine {
+  to { transform: translateX(100%); }
 }
 
 .card__media img {
@@ -1840,33 +1999,65 @@ h1, h2, h3 {
 .card-volume__popover {
   position: absolute;
   top: 36px;
-  left: 50%;
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 104px;
+  right: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 142px;
+  height: 38px;
+  padding: 0 10px 0 12px;
   border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 17px;
-  background: rgb(18 18 22 / 0.82);
+  border-radius: 13px;
+  background: rgb(18 18 22 / 0.92);
   box-shadow: var(--shadow-md);
   opacity: 0;
-  transform: translateX(-50%) translateY(-5px) scale(0.94);
+  transform: translateY(-5px) scale(0.96);
+  transform-origin: top right;
   pointer-events: none;
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px) saturate(1.15);
   transition: opacity 150ms ease, transform 180ms var(--spring);
 }
 
 .card-volume:hover .card-volume__popover,
 .card-volume:focus-within .card-volume__popover {
   opacity: 1;
-  transform: translateX(-50%) translateY(0) scale(1);
+  transform: translateY(0) scale(1);
   pointer-events: auto;
 }
 
 .card-volume__popover input {
-  width: 82px;
-  accent-color: var(--accent);
-  transform: rotate(-90deg);
+  width: 92px;
+  height: 18px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.card-volume__popover input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 30%, #777));
+}
+
+.card-volume__popover input::-webkit-slider-thumb {
+  width: 13px;
+  height: 13px;
+  margin-top: -4.5px;
+  appearance: none;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 2px 7px rgb(0 0 0 / 0.34);
+}
+
+.card-volume__popover > span {
+  width: 28px;
+  color: rgb(255 255 255 / 0.68);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .card__foot {
@@ -2341,6 +2532,43 @@ h1, h2, h3 {
   position: relative;
 }
 
+.sync-control {
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--on-accent) 8%, transparent);
+}
+
+.sync-control__main {
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  padding-right: 10px;
+}
+
+.sync-control__toggle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--on-accent) 22%, transparent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+
+.sync-control__main:hover,
+.sync-control__toggle:hover {
+  filter: brightness(1.1);
+}
+
+.sync-control__chevron {
+  transition: transform var(--base) var(--spring);
+}
+
+.sync-control__chevron.is-open {
+  transform: rotate(90deg);
+}
+
 .sync-progress {
   position: absolute;
   z-index: 80;
@@ -2351,10 +2579,18 @@ h1, h2, h3 {
   padding: 8px;
   border: 1px solid var(--hairline);
   border-radius: 18px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  background: color-mix(in srgb, var(--raised) 92%, transparent);
   box-shadow: var(--shadow-lg);
   backdrop-filter: blur(22px) saturate(1.25);
-  animation: pop-in 180ms var(--ease-out) both;
+  transform-origin: top right;
+  animation: sync-panel-in 180ms var(--ease) both;
+}
+
+@keyframes sync-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.97);
+  }
 }
 
 .sync-progress__row {
@@ -2409,11 +2645,22 @@ h1, h2, h3 {
 .sync-progress__bar {
   position: absolute;
   inset-block: 0;
-  left: -38%;
-  width: 38%;
+  left: 0;
+  width: var(--sync-progress, 5%);
   border-radius: inherit;
   background: var(--accent-gradient);
-  animation: sync-progress-slide 1.25s var(--ease-in-out) infinite;
+  overflow: hidden;
+  transition: width 420ms var(--ease);
+}
+
+.sync-progress__bar::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: -45%;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.38), transparent);
+  animation: sync-progress-shine 1.35s linear infinite;
 }
 
 .sync-progress__cancel {
@@ -2435,9 +2682,9 @@ h1, h2, h3 {
   transform: scale(1.06);
 }
 
-@keyframes sync-progress-slide {
+@keyframes sync-progress-shine {
   to {
-    left: 100%;
+    left: 110%;
   }
 }
 

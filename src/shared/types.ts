@@ -3,6 +3,14 @@
 export const PLATFORMS = ['instagram', 'x', 'reddit'] as const
 export type Platform = (typeof PLATFORMS)[number]
 
+/** Plafond de pages parcourues en une passe. Il sert aussi de repère visuel à la barre
+ * de progression : les plateformes ne publient pas le nombre total de pages à l'avance. */
+export const SYNC_PAGE_LIMITS: Record<Platform, number> = {
+  instagram: 120,
+  x: 120,
+  reddit: 60
+}
+
 export const POST_KINDS = ['image', 'carousel', 'video', 'text', 'link'] as const
 export type PostKind = (typeof POST_KINDS)[number]
 
@@ -68,6 +76,15 @@ export interface PostMedia {
   height: number | null
   /** Qualités que la plateforme expose pour ce clip. */
   videoQualities: VideoQuality[]
+}
+
+/** Tranche d'un mur potentiellement très grand. Les lots sont préchargés avant que
+ * l'utilisateur atteigne le bas, donnant un scroll continu sans charger 10 000 posts. */
+export interface PostPage {
+  posts: Post[]
+  total: number
+  offset: number
+  hasMore: boolean
 }
 
 export type SortKey = 'saved' | 'published' | 'author' | 'platform' | 'random'
@@ -197,6 +214,17 @@ export interface LibraryInfo {
   version: string
 }
 
+export type LibraryMovePhase = 'preparing' | 'database' | 'media' | 'finalizing' | 'done' | 'error'
+
+export interface LibraryMoveProgress {
+  phase: LibraryMovePhase
+  /** Octets copiés. La sauvegarde SQLite est convertie en octets estimés par page. */
+  done: number
+  total: number
+  path: string
+  message: string | null
+}
+
 export type UpdatePhase =
   | 'idle'
   | 'checking'
@@ -258,6 +286,8 @@ export interface LibraryStats {
 /** Surface IPC exposée au renderer via contextBridge. */
 export interface MagpieApi {
   listPosts(query: PostQuery): Promise<Post[]>
+  listPostPage(query: PostQuery, offset: number, limit: number): Promise<PostPage>
+  getPostsByIds(ids: string[]): Promise<Post[]>
   getStats(): Promise<LibraryStats>
   toggleFavorite(id: string): Promise<boolean>
   setFavoriteMany(ids: string[], value: boolean): Promise<void>
@@ -281,10 +311,10 @@ export interface MagpieApi {
   chooseLibraryFolder(): Promise<{ moved: boolean; path: string }>
   cacheVideoQuality(postId: string, mediaIndex: number, quality: VideoQuality): Promise<string>
 
-  setLabel(postId: string, label: LabelColor | null): Promise<Post[]>
+  setLabel(postId: string, label: LabelColor | null): Promise<void>
   setCollectionColor(collectionId: number, color: LabelColor | null): Promise<void>
-  addTag(postId: string, name: string): Promise<Post[]>
-  removeTag(postId: string, name: string): Promise<Post[]>
+  addTag(postId: string, name: string): Promise<void>
+  removeTag(postId: string, name: string): Promise<void>
   listCollections(): Promise<CollectionInfo[]>
   createCollection(name: string): Promise<CollectionInfo>
   addToCollection(collectionId: number, postIds: string[], readd?: boolean): Promise<AddToCollectionResult>
@@ -308,6 +338,8 @@ export interface MagpieApi {
 export interface CacheProgress {
   done: number
   total: number
+  /** Médias tout juste traités, pour actualiser leurs cartes sans recharger le mur. */
+  postIds?: string[]
 }
 
 export interface AiTagProgress {
@@ -352,6 +384,7 @@ export interface MagpieEvents {
   onSyncState(cb: (state: SyncState) => void): () => void
   onAiTagProgress(cb: (progress: AiTagProgress) => void): () => void
   onUpdateState(cb: (state: UpdateState) => void): () => void
+  onLibraryMoveProgress(cb: (progress: LibraryMoveProgress) => void): () => void
 }
 
 declare global {

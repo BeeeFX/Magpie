@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Platform } from '@shared/types'
-import { PLATFORMS } from '@shared/types'
+import { PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
 import { formatDateTime, formatTime, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
@@ -60,6 +60,10 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
         const progress = sync.byPlatform[platform]
         const isSyncing = progress.phase === 'running'
         const isBusy = busy.has(platform)
+        const syncPercent = Math.min(
+          96,
+          Math.max(5, (progress.page / SYNC_PAGE_LIMITS[platform]) * 100)
+        )
 
         return (
           <div key={platform} className="account">
@@ -76,8 +80,17 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
               {connected && noteKey ? <span className="account__warn">{t(noteKey)}</span> : null}
               {isSyncing ? (
                 <div className="account__sync" aria-live="polite">
-                  <span className="sync-progress__track" aria-hidden="true">
-                    <span className="sync-progress__bar" />
+                  <span
+                    className="sync-progress__track"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={SYNC_PAGE_LIMITS[platform]}
+                    aria-valuenow={progress.page}
+                  >
+                    <span
+                      className="sync-progress__bar"
+                      style={{ '--sync-progress': `${syncPercent}%` } as React.CSSProperties}
+                    />
                   </span>
                   <span className="account__sync-meta">
                     {t('sync.progress', {

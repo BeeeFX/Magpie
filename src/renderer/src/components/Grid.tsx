@@ -13,6 +13,10 @@ export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
   const loading = useStore((s) => s.loading)
+  const loadingMore = useStore((s) => s.loadingMore)
+  const hasMore = useStore((s) => s.hasMore)
+  const resultTotal = useStore((s) => s.resultTotal)
+  const loadMore = useStore((s) => s.loadMore)
   const mode = useStore((s) => s.gridMode)
   const density = useStore((s) => s.density)
   const savedScrollTop = useStore((s) => s.scrollTop)
@@ -32,7 +36,10 @@ export function Grid(): React.JSX.Element {
   const [scroll, setScroll] = useState(0)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [resultsKey, setResultsKey] = useState(0)
+  const [resizing, setResizing] = useState(false)
   const restored = useRef(false)
+  const resizeFrame = useRef(0)
+  const resizeEnd = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /* Largeur et hauteur réelles du conteneur — la mise en page en dépend entièrement.
      On mesure une première fois de façon synchrone plutôt que d'attendre le premier
@@ -47,7 +54,25 @@ export function Grid(): React.JSX.Element {
       // contenu, sinon les colonnes déborderaient de la largeur disponible.
       const style = getComputedStyle(el)
       const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
-      setViewport({ width: Math.max(0, el.clientWidth - padX), height: el.clientHeight })
+      const next = { width: Math.max(0, el.clientWidth - padX), height: el.clientHeight }
+      setViewport((current) =>
+        current.width === next.width && current.height === next.height ? current : next
+      )
+    }
+
+    const scheduleMeasure = (): void => {
+      if (!resizeFrame.current) {
+        resizeFrame.current = requestAnimationFrame(() => {
+          resizeFrame.current = 0
+          measure()
+        })
+      }
+      setResizing(true)
+      if (resizeEnd.current !== null) clearTimeout(resizeEnd.current)
+      resizeEnd.current = setTimeout(() => {
+        resizeEnd.current = null
+        setResizing(false)
+      }, 120)
     }
 
     measure()
@@ -57,14 +82,16 @@ export function Grid(): React.JSX.Element {
     // tant que la fenêtre n'est pas composited. Sans cela, la grille peut rester vide
     // jusqu'au premier redimensionnement.
     const deferred = [setTimeout(measure, 0), setTimeout(measure, 150)]
-    const observer = new ResizeObserver(measure)
+    const observer = new ResizeObserver(scheduleMeasure)
     observer.observe(el)
-    window.addEventListener('resize', measure)
+    window.addEventListener('resize', scheduleMeasure)
 
     return () => {
       for (const id of deferred) clearTimeout(id)
+      cancelAnimationFrame(resizeFrame.current)
+      if (resizeEnd.current !== null) clearTimeout(resizeEnd.current)
       observer.disconnect()
-      window.removeEventListener('resize', measure)
+      window.removeEventListener('resize', scheduleMeasure)
     }
   }, [])
 
@@ -74,10 +101,17 @@ export function Grid(): React.JSX.Element {
     if (frame.current) return
     frame.current = requestAnimationFrame(() => {
       frame.current = 0
-      const top = scrollerRef.current?.scrollTop ?? 0
+      const element = scrollerRef.current
+      const top = element?.scrollTop ?? 0
       setScroll(top)
+      if (
+        element &&
+        element.scrollHeight - top - element.clientHeight < element.clientHeight * 2.5
+      ) {
+        void loadMore()
+      }
     })
-  }, [])
+  }, [loadMore])
 
   useEffect(() => () => cancelAnimationFrame(frame.current), [])
 
@@ -109,12 +143,24 @@ export function Grid(): React.JSX.Element {
   /* Restauration de la position, une seule fois, quand la mise en page est prête. */
   useLayoutEffect(() => {
     if (restored.current || layout.totalHeight === 0 || !scrollerRef.current) return
+    if (savedScrollTop > layout.totalHeight - viewport.height && hasMore) {
+      void loadMore()
+      return
+    }
     restored.current = true
     if (savedScrollTop > 0) {
       scrollerRef.current.scrollTop = Math.min(savedScrollTop, layout.totalHeight)
       setScroll(scrollerRef.current.scrollTop)
     }
-  }, [layout.totalHeight, savedScrollTop])
+  }, [layout.totalHeight, savedScrollTop, viewport.height, hasMore, loadMore])
+
+  /* Sur un grand écran ou une grille très dense, le premier lot peut ne pas dépasser
+     assez loin sous la fenêtre. On précharge avant que le bas devienne visible. */
+  useEffect(() => {
+    if (hasMore && !loadingMore && layout.totalHeight < scroll + viewport.height * 3) {
+      void loadMore()
+    }
+  }, [hasMore, loadingMore, layout.totalHeight, scroll, viewport.height, loadMore])
 
   const visible = useMemo(
     () => visibleItems(layout, scroll, viewport.height),
@@ -142,7 +188,7 @@ export function Grid(): React.JSX.Element {
   }, [])
 
   return (
-    <div className="grid" ref={scrollerRef} onScroll={onScroll}>
+    <div className={`grid ${resizing ? 'is-resizing' : ''}`} ref={scrollerRef} onScroll={onScroll}>
       {posts.length === 0 && !loading ? (
         <div className="grid__empty">
           {accounts.some((a) => a.connected) ? (
@@ -168,7 +214,7 @@ export function Grid(): React.JSX.Element {
       <div
         key={resultsKey}
         className="grid__canvas grid__canvas--fresh"
-        style={{ height: layout.totalHeight }}
+        style={{ height: layout.totalHeight + (hasMore ? 64 : 0) }}
       >
         {visible.map((item) => (
           <Card
@@ -186,6 +232,12 @@ export function Grid(): React.JSX.Element {
             onToggleSelected={toggleSelected}
           />
         ))}
+        {hasMore ? (
+          <div className="grid__load-more" style={{ top: layout.totalHeight }} aria-live="polite">
+            <span className="spinner" />
+            <span>{posts.length} / {resultTotal}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   )

@@ -120,7 +120,8 @@ export async function fetchMedia(
   url: string,
   // Un clip de plusieurs dizaines de mégaoctets sur une connexion ordinaire dépasse
   // largement une minute : le délai est calé sur le pire cas raisonnable.
-  timeoutMs = 180000
+  timeoutMs = 180000,
+  signal?: AbortSignal
 ): Promise<Buffer> {
   const origin =
     platform === 'instagram'
@@ -135,14 +136,28 @@ export async function fetchMedia(
   req.setHeader('Referer', origin)
 
   return new Promise((resolve, reject) => {
+    const cleanup = (): void => signal?.removeEventListener('abort', abort)
+    const abort = (): void => {
+      clearTimeout(timeout)
+      cleanup()
+      req.abort()
+      reject(new Error('Téléchargement interrompu'))
+    }
     const timeout = setTimeout(() => {
+      cleanup()
       req.abort()
       reject(new Error(`Délai dépassé sur ${url}`))
     }, timeoutMs)
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
 
     req.on('response', (response) => {
       if (response.statusCode >= 400) {
         clearTimeout(timeout)
+        cleanup()
         reject(new HttpError(response.statusCode, url))
         return
       }
@@ -150,16 +165,19 @@ export async function fetchMedia(
       response.on('data', (chunk) => chunks.push(chunk))
       response.on('end', () => {
         clearTimeout(timeout)
+        cleanup()
         resolve(Buffer.concat(chunks))
       })
       response.on('error', (err: Error) => {
         clearTimeout(timeout)
+        cleanup()
         reject(err)
       })
     })
 
     req.on('error', (err) => {
       clearTimeout(timeout)
+      cleanup()
       reject(err)
     })
 

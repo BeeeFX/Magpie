@@ -1,5 +1,5 @@
 import type { Platform, PlatformSync, SyncState } from '@shared/types'
-import { idleSyncState, PLATFORMS } from '@shared/types'
+import { idleSyncState, PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
 import { AuthExpired, ChallengeRequired, RateLimited } from '../adapters/http'
 import type { PlatformAdapter } from '../adapters/types'
 import { instagramAdapter } from '../adapters/instagram'
@@ -29,10 +29,10 @@ export const ADAPTERS: Record<Platform, PlatformAdapter> = {
 }
 
 /** Instagram est la plus prompte à réagir : elle reçoit les pauses les plus longues. */
-const PACING: Record<Platform, { minMs: number; maxMs: number; maxPages: number }> = {
-  instagram: { minMs: 2500, maxMs: 5000, maxPages: 120 },
-  x: { minMs: 2000, maxMs: 4000, maxPages: 120 },
-  reddit: { minMs: 1200, maxMs: 2400, maxPages: 60 }
+const PACING: Record<Platform, { minMs: number; maxMs: number }> = {
+  instagram: { minMs: 2500, maxMs: 5000 },
+  x: { minMs: 2000, maxMs: 4000 },
+  reddit: { minMs: 1200, maxMs: 2400 }
 }
 
 /** Pages consécutives sans nouveauté avant de considérer le rattrapage terminé. */
@@ -144,7 +144,7 @@ class SyncEngine {
 
   private async syncOne(platform: Platform): Promise<void> {
     const adapter = ADAPTERS[platform]
-    const { maxPages } = PACING[platform]
+    const maxPages = SYNC_PAGE_LIMITS[platform]
 
     this.patch(platform, {
       phase: 'running',

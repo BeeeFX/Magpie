@@ -10,11 +10,13 @@ import type {
   CollectionInfo,
   LabelColor,
   LibraryInfo,
+  LibraryMoveProgress,
   LibraryStats,
   MagpieApi,
   MagpieEvents,
   Platform,
   Post,
+  PostPage,
   PostQuery,
   Settings,
   SyncState,
@@ -26,18 +28,11 @@ import type {
  * Pont typé. Le renderer n'a jamais accès à `ipcRenderer` directement : il ne peut appeler
  * que les canaux listés ici, avec les formes déclarées dans `@shared/types`.
  */
-/**
- * Dernière requête émise. Les mutations de tags renvoient la liste rafraîchie, et elle
- * doit respecter les filtres courants : mémoriser la requête ici évite de la faire
- * transiter dans chaque appel côté interface.
- */
-let currentQuery: PostQuery | null = null
-
 const api: MagpieApi = {
-  listPosts: (query: PostQuery): Promise<Post[]> => {
-    currentQuery = query
-    return ipcRenderer.invoke('posts:list', query)
-  },
+  listPosts: (query: PostQuery): Promise<Post[]> => ipcRenderer.invoke('posts:list', query),
+  listPostPage: (query: PostQuery, offset: number, limit: number): Promise<PostPage> =>
+    ipcRenderer.invoke('posts:page', query, offset, limit),
+  getPostsByIds: (ids: string[]): Promise<Post[]> => ipcRenderer.invoke('posts:byIds', ids),
   getStats: (): Promise<LibraryStats> => ipcRenderer.invoke('stats:get'),
   toggleFavorite: (id: string): Promise<boolean> => ipcRenderer.invoke('posts:toggleFavorite', id),
   setFavoriteMany: (ids: string[], value: boolean): Promise<void> =>
@@ -70,14 +65,14 @@ const api: MagpieApi = {
   cacheVideoQuality: (postId: string, mediaIndex: number, quality: VideoQuality): Promise<string> =>
     ipcRenderer.invoke('media:quality', postId, mediaIndex, quality),
 
-  setLabel: (postId: string, label: LabelColor | null): Promise<Post[]> =>
-    ipcRenderer.invoke('posts:setLabel', postId, label, currentQuery),
+  setLabel: (postId: string, label: LabelColor | null): Promise<void> =>
+    ipcRenderer.invoke('posts:setLabel', postId, label),
   setCollectionColor: (collectionId: number, color: LabelColor | null): Promise<void> =>
     ipcRenderer.invoke('collections:setColor', collectionId, color),
-  addTag: (postId: string, name: string): Promise<Post[]> =>
-    ipcRenderer.invoke('tags:add', postId, name, currentQuery),
-  removeTag: (postId: string, name: string): Promise<Post[]> =>
-    ipcRenderer.invoke('tags:remove', postId, name, currentQuery),
+  addTag: (postId: string, name: string): Promise<void> =>
+    ipcRenderer.invoke('tags:add', postId, name),
+  removeTag: (postId: string, name: string): Promise<void> =>
+    ipcRenderer.invoke('tags:remove', postId, name),
   listCollections: (): Promise<CollectionInfo[]> => ipcRenderer.invoke('collections:list'),
   createCollection: (name: string): Promise<CollectionInfo> =>
     ipcRenderer.invoke('collections:create', name),
@@ -139,6 +134,11 @@ const events: MagpieEvents = {
     const listener = (_e: unknown, state: UpdateState): void => cb(state)
     ipcRenderer.on('updates:state', listener)
     return () => ipcRenderer.removeListener('updates:state', listener)
+  },
+  onLibraryMoveProgress: (cb) => {
+    const listener = (_e: unknown, progress: LibraryMoveProgress): void => cb(progress)
+    ipcRenderer.on('library:moveProgress', listener)
+    return () => ipcRenderer.removeListener('library:moveProgress', listener)
   }
 }
 

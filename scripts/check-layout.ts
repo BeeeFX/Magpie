@@ -149,6 +149,23 @@ run('masonry', 420, 400)
 run('cards', 1200, 240)
 run('cards', 640, 300)
 
+// Charge réaliste d'une très grande bibliothèque : les 10 000 objets participent au
+// calcul, mais seule une poignée de cartes doit atteindre React autour du viewport.
+const largePosts = makePosts(10_000)
+const largeStarted = performance.now()
+const largeLayout = computeLayout(largePosts, {
+  containerWidth: 1920,
+  targetColumnWidth: 220,
+  gap: 12,
+  mode: 'cards'
+})
+const largeElapsed = performance.now() - largeStarted
+const largeVisible = visibleItems(largeLayout, largeLayout.totalHeight / 2, 1080, 500)
+console.log('\nbibliothèque de 10 000 posts')
+check('les 10 000 cartes sont indexées', largeLayout.items.length === 10_000)
+check('moins de 100 cartes sont rendues à la fois', largeVisible.length < 100, `${largeVisible.length}`)
+check('le calcul reste sous une seconde', largeElapsed < 1000, `${largeElapsed.toFixed(1)} ms`)
+
 const empty = computeLayout([], { containerWidth: 1200, targetColumnWidth: 240, gap: 12, mode: 'masonry' })
 console.log('\ncas limites')
 check('liste vide', empty.items.length === 0 && empty.totalHeight === 0)
