@@ -45,7 +45,17 @@ jobs:
           npm run check:layout
 
       - name: Build installer and update manifest
-        run: npm run dist:win
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            npm run dist:win -- --publish never
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -lt 3) {
+              Write-Host "Packaging download failed; retrying ($attempt/3)..."
+              Start-Sleep -Seconds (15 * $attempt)
+            }
+          }
+          exit 1
 
       - name: Publish stable GitHub release
         shell: pwsh
