@@ -66,14 +66,10 @@ jobs:
           $installer = Get-Item "release/Magpie-Setup-$version.exe"
           $blockmap = Get-Item "release/Magpie-Setup-$version.exe.blockmap"
           $manifest = Get-Item "release/latest.yml"
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash
-          $checksum = "release/SHA256SUMS-$version.txt"
-          Set-Content -Encoding ascii -Path $checksum -Value "$hash  $($installer.Name)"
           gh release create $env:GITHUB_REF_NAME `
             $installer.FullName `
             $blockmap.FullName `
             $manifest.FullName `
-            $checksum `
             --verify-tag `
             --title "Magpie $version" `
             --generate-notes

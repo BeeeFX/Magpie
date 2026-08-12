@@ -52,7 +52,7 @@ Magpie can analyse your video descriptions, thumbnails and existing tags, then p
 2. Download `Magpie-Setup-x.y.z.exe` and follow the installer.
 3. Open Magpie and connect your first account in the welcome tour.
 
-> Magpie is not code-signed yet, so Windows SmartScreen may show a warning. Check that the publisher page is this repository before continuing. A SHA-256 checksum is included with every release.
+> Magpie is not code-signed yet, so Windows SmartScreen may show a warning. Check that the publisher page is this repository before continuing.
 
 Users upgrading from 0.1.1 need to install 0.2.0 manually once. After that, Magpie checks stable GitHub releases automatically, downloads updates in the background and asks before restarting to install them.
 
@@ -97,7 +97,7 @@ npm run dist:win
 - Sharp for thumbnails and FFmpeg for adaptive video streams;
 - electron-builder + electron-updater for NSIS releases and differential updates.
 
-A tag matching the `package.json` version triggers the Windows release workflow. It publishes the installer, blockmap, `latest.yml` update manifest and SHA-256 checksum to GitHub Releases.
+A tag matching the `package.json` version triggers the Windows release workflow. It publishes the installer, blockmap and `latest.yml` update manifest to GitHub Releases.
 
 </details>
 
