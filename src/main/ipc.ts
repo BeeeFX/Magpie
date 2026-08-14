@@ -272,6 +272,12 @@ export function registerIpc({
   ipcMain.handle('updates:state', () => getUpdateState())
   ipcMain.handle('updates:check', () => checkForUpdates())
   ipcMain.handle('updates:install', () => installUpdate())
+  ipcMain.handle('window:setFullscreen', (event, enabled: boolean): boolean => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return false
+    win.setFullScreen(enabled === true)
+    return enabled === true
+  })
 
   ipcMain.handle('library:clearCache', async () => {
     // Les métadonnées, tags et collections survivent toujours à une purge de médias :

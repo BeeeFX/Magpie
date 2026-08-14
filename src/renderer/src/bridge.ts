@@ -179,6 +179,7 @@ const previewApi: MagpieApi = {
     message: 'browser-preview'
   }),
   installUpdate: async () => {},
+  setWindowFullscreen: async () => false,
   clearMediaCache: async () => {},
   openDataFolder: async () => {},
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),

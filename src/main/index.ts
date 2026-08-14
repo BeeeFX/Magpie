@@ -12,6 +12,9 @@ import {
 } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
+import { Readable } from 'node:stream'
 import { closeDb, getDb, mediaDir } from './db'
 import { registerIpc } from './ipc'
 import { countPosts, recentAiCandidateIds, repairMissingSyncDates } from './db/queries'
@@ -25,6 +28,7 @@ import { localOrganizer } from './tagging/organize'
 import type { SyncPhase } from '@shared/types'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
+import { parseByteRange } from './media/range'
 
 const isDev = !app.isPackaged
 const APP_ID = 'tv.electrictheatre.magpie'
@@ -245,9 +249,56 @@ function registerMediaProtocol(): void {
       (url.host === 'video' && VIDEO_NAME_PATTERN.test(name))
     if (!valid) return new Response('Bad request', { status: 400 })
 
-    // `net.fetch` honore les requêtes par plage, ce dont l'élément vidéo a besoin pour
-    // démarrer sans charger tout le fichier.
-    return net.fetch(pathToFileURL(join(mediaDir(), name)).toString())
+    const filePath = join(mediaDir(), name)
+    if (url.host === 'thumb') return net.fetch(pathToFileURL(filePath).toString())
+
+    try {
+      const file = await stat(filePath)
+      const range = parseByteRange(request.headers.get('range'), file.size)
+      const commonHeaders = {
+        'Accept-Ranges': 'bytes',
+        'Content-Type': 'video/mp4',
+        'Cache-Control': 'private, max-age=31536000, immutable'
+      }
+
+      if (range === null) {
+        return new Response(null, {
+          status: 416,
+          headers: { ...commonHeaders, 'Content-Range': `bytes */${file.size}` }
+        })
+      }
+
+      if (range) {
+        const length = range.end - range.start + 1
+        const body =
+          request.method === 'HEAD'
+            ? null
+            : (Readable.toWeb(
+              createReadStream(filePath, { start: range.start, end: range.end })
+              ) as unknown as ConstructorParameters<typeof Response>[0])
+        return new Response(body, {
+          status: 206,
+          headers: {
+            ...commonHeaders,
+            'Content-Length': String(length),
+            'Content-Range': `bytes ${range.start}-${range.end}/${file.size}`
+          }
+        })
+      }
+
+      const body =
+        request.method === 'HEAD'
+          ? null
+          : (Readable.toWeb(createReadStream(filePath)) as unknown as ConstructorParameters<
+              typeof Response
+            >[0])
+      return new Response(body, {
+        status: 200,
+        headers: { ...commonHeaders, 'Content-Length': String(file.size) }
+      })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
   })
 }
 

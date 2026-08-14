@@ -2228,6 +2228,22 @@ html.window-is-moving .app *::after {
     opacity 0.28s var(--ease);
 }
 
+/* Une grande fenêtre ne doit pas conserver le format presque carré pensé pour le mode
+   fenêtré. Au-delà de ce seuil, la scène profite réellement du bureau tout en gardant
+   les flèches de navigation accessibles. */
+@media (min-width: 1450px) and (min-height: 800px) {
+  .detail {
+    gap: 8px;
+    padding: 14px;
+  }
+
+  .detail__panel {
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 19vw, 400px);
+    width: min(1900px, calc(100vw - 112px));
+    height: min(1100px, calc(100vh - 44px));
+  }
+}
+
 @media (max-width: 1080px) {
   .detail__panel {
     grid-template-columns: minmax(0, 1fr) 320px;
@@ -2241,6 +2257,48 @@ html.window-is-moving .app *::after {
   min-width: 0;
   background: var(--backdrop);
   overflow: hidden;
+}
+
+.detail__stage:fullscreen,
+.player:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  background: #000;
+}
+
+.detail__stage:fullscreen::backdrop,
+.player:fullscreen::backdrop {
+  background: #000;
+}
+
+/* Repli Electron lorsque Chromium refuse l'API Fullscreen HTML. La fenêtre entière passe
+   en plein écran, puis l'interface se réduit à la scène afin d'obtenir le même résultat. */
+.detail.is-window-fullscreen {
+  gap: 0;
+  padding: 0;
+  background: #000;
+  backdrop-filter: none;
+}
+
+.detail.is-window-fullscreen .detail__panel {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.detail.is-window-fullscreen .detail__side,
+.detail.is-window-fullscreen > .detail__nav {
+  display: none;
+}
+
+.detail.is-window-fullscreen .detail__stage {
+  width: 100vw;
+  height: 100vh;
 }
 
 .detail__media {
@@ -3172,6 +3230,11 @@ html.window-is-moving .app *::after {
 
 .player__btn:hover {
   background: rgb(255 255 255 / 0.16);
+}
+
+.player__btn.is-active {
+  background: rgb(255 255 255 / 0.18);
+  color: var(--accent-soft);
 }
 
 .player__pause {

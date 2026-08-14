@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useT } from '../store'
-import { IconPlay, IconVolume } from './Icons'
+import { IconExpand, IconPlay, IconVolume } from './Icons'
 import type { VideoQuality } from '@shared/types'
 import { magpie } from '../bridge'
 
@@ -11,6 +11,8 @@ interface Props {
   postId: string
   mediaIndex: number
   qualities: VideoQuality[]
+  fullscreen: boolean
+  onToggleFullscreen(): Promise<void>
 }
 
 function formatClock(seconds: number): string {
@@ -28,7 +30,15 @@ function formatClock(seconds: number): string {
  * partagés** : ils vivent dans le store, persistés, et s'appliquent à chaque clip ouvert —
  * on règle une fois, pas à chaque post.
  */
-export function VideoPlayer({ src, poster, postId, mediaIndex, qualities }: Props): React.JSX.Element {
+export function VideoPlayer({
+  src,
+  poster,
+  postId,
+  mediaIndex,
+  qualities,
+  fullscreen,
+  onToggleFullscreen
+}: Props): React.JSX.Element {
   const t = useT()
   const volume = useStore((s) => s.volume)
   const muted = useStore((s) => s.muted)
@@ -37,9 +47,12 @@ export function VideoPlayer({ src, poster, postId, mediaIndex, qualities }: Prop
   const playbackQuality = useStore((s) => s.playbackQuality)
 
   const ref = useRef<HTMLVideoElement>(null)
+  const scrubbingRef = useRef(false)
+  const resumeAfterScrubRef = useRef(false)
   const [playing, setPlaying] = useState(true)
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [scrubValue, setScrubValue] = useState<number | null>(null)
   const [activeSrc, setActiveSrc] = useState(src)
   const [quality, setQuality] = useState<VideoQuality | 'auto'>('auto')
   const [qualityBusy, setQualityBusy] = useState(false)
@@ -47,6 +60,9 @@ export function VideoPlayer({ src, poster, postId, mediaIndex, qualities }: Prop
   useEffect(() => {
     setActiveSrc(src)
     setQuality('auto')
+    setTime(0)
+    setDuration(0)
+    setScrubValue(null)
   }, [src])
 
   useEffect(() => {
@@ -96,14 +112,45 @@ export function VideoPlayer({ src, poster, postId, mediaIndex, qualities }: Prop
   const toggle = useCallback(() => {
     const el = ref.current
     if (!el) return
-    if (el.paused) void el.play().catch(() => {})
+    if (el.paused) {
+      if (el.ended || (Number.isFinite(el.duration) && el.currentTime >= el.duration - 0.08)) {
+        el.currentTime = 0
+        setTime(0)
+      }
+      void el.play().catch(() => setPlaying(false))
+    }
     else el.pause()
   }, [])
 
+  const beginScrub = (): void => {
+    const el = ref.current
+    if (!el) return
+    scrubbingRef.current = true
+    resumeAfterScrubRef.current = !el.paused
+    if (!el.paused) el.pause()
+  }
+
   const seek = (event: React.ChangeEvent<HTMLInputElement>): void => {
     const el = ref.current
-    if (!el || !Number.isFinite(duration)) return
-    el.currentTime = (Number(event.target.value) / 1000) * duration
+    if (!el || !Number.isFinite(duration) || duration <= 0) return
+    const value = Number(event.target.value)
+    const nextTime = (value / 1000) * duration
+    setScrubValue(value)
+    setTime(nextTime)
+    try {
+      el.currentTime = nextTime
+    } catch {
+      // La prochaine requête par plage reprendra dès que les métadonnées seront prêtes.
+    }
+  }
+
+  const endScrub = (): void => {
+    const el = ref.current
+    if (!el || !scrubbingRef.current) return
+    scrubbingRef.current = false
+    setScrubValue(null)
+    if (resumeAfterScrubRef.current) void el.play().catch(() => setPlaying(false))
+    resumeAfterScrubRef.current = false
   }
 
   return (
@@ -114,13 +161,20 @@ export function VideoPlayer({ src, poster, postId, mediaIndex, qualities }: Prop
         poster={poster}
         className="player__video"
         autoPlay
-        loop
         playsInline
         onClick={toggle}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          if (!scrubbingRef.current) setTime(e.currentTarget.currentTime)
+        }}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        onDurationChange={(e) => setDuration(e.currentTarget.duration)}
+        onEnded={(e) => {
+          e.currentTarget.currentTime = 0
+          setTime(0)
+          void e.currentTarget.play().catch(() => setPlaying(false))
+        }}
       />
 
       <div className="player__bar">
@@ -135,7 +189,17 @@ export function VideoPlayer({ src, poster, postId, mediaIndex, qualities }: Prop
           type="range"
           min={0}
           max={1000}
-          value={duration > 0 ? Math.round((time / duration) * 1000) : 0}
+          value={scrubValue ?? (duration > 0 ? Math.round((time / duration) * 1000) : 0)}
+          onPointerDown={beginScrub}
+          onPointerUp={endScrub}
+          onPointerCancel={endScrub}
+          onKeyDown={(event) => {
+            if (['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
+              beginScrub()
+            }
+          }}
+          onKeyUp={endScrub}
+          onBlur={endScrub}
           onChange={seek}
           aria-label="Position"
         />
@@ -184,6 +248,16 @@ export function VideoPlayer({ src, poster, postId, mediaIndex, qualities }: Prop
             aria-label="Volume"
           />
         </div>
+
+        <button
+          type="button"
+          className={`player__btn ${fullscreen ? 'is-active' : ''}`}
+          onClick={() => void onToggleFullscreen().catch(() => {})}
+          aria-label={t('detail.fullscreen')}
+          aria-pressed={fullscreen}
+        >
+          <IconExpand size={15} />
+        </button>
       </div>
     </div>
   )

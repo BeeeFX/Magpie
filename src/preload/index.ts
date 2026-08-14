@@ -59,6 +59,8 @@ const api: MagpieApi = {
   getUpdateState: (): Promise<UpdateState> => ipcRenderer.invoke('updates:state'),
   checkForUpdates: (): Promise<UpdateState> => ipcRenderer.invoke('updates:check'),
   installUpdate: (): Promise<void> => ipcRenderer.invoke('updates:install'),
+  setWindowFullscreen: (enabled: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('window:setFullscreen', enabled),
   clearMediaCache: (): Promise<void> => ipcRenderer.invoke('library:clearCache'),
   openDataFolder: (): Promise<void> => ipcRenderer.invoke('app:openDataFolder'),
   chooseLibraryFolder: (): Promise<{ moved: boolean; path: string }> =>

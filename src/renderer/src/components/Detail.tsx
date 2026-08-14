@@ -50,6 +50,7 @@ export function Detail(): React.JSX.Element | null {
   const nitrateEnabled = useStore((s) => s.nitrateEnabled)
 
   const panelRef = useRef<HTMLDivElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   const lastWheel = useRef(0)
   const [entered, setEntered] = useState(false)
   const [leaving, setLeaving] = useState(false)
@@ -59,6 +60,9 @@ export function Detail(): React.JSX.Element | null {
   const [collections, setCollections] = useState<CollectionInfo[]>([])
   const [inCollections, setInCollections] = useState<number[]>([])
   const [notice, setNotice] = useState<string | null>(null)
+  const [htmlFullscreen, setHtmlFullscreen] = useState(false)
+  const [nativeFullscreen, setNativeFullscreen] = useState(false)
+  const fullscreen = htmlFullscreen || nativeFullscreen
 
   const post: Post | undefined = index === null ? undefined : posts[index]
 
@@ -80,6 +84,10 @@ export function Detail(): React.JSX.Element | null {
    * réel n'a lieu qu'une fois la transition finie.
    */
   const requestClose = useCallback(() => {
+    if (nativeFullscreen) {
+      void magpie.setWindowFullscreen(false)
+      setNativeFullscreen(false)
+    }
     const panel = panelRef.current
     const transform = originTransform()
     if (!panel || !transform) {
@@ -90,7 +98,7 @@ export function Detail(): React.JSX.Element | null {
     panel.style.transform = transform
     panel.style.opacity = '0'
     setTimeout(close, 280)
-  }, [close, originTransform])
+  }, [close, nativeFullscreen, originTransform])
 
   /* Animation d'ouverture depuis la vignette. */
   useLayoutEffect(() => {
@@ -136,6 +144,34 @@ export function Detail(): React.JSX.Element | null {
     void magpie.listCollections().then(setCollections)
   }, [index])
 
+  useEffect(() => {
+    const update = (): void => setHtmlFullscreen(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', update)
+    return () => document.removeEventListener('fullscreenchange', update)
+  }, [])
+
+  const toggleFullscreen = useCallback(async (): Promise<void> => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen?.()
+      return
+    }
+    if (nativeFullscreen) {
+      await magpie.setWindowFullscreen(false)
+      setNativeFullscreen(false)
+      return
+    }
+
+    try {
+      if (!stageRef.current?.requestFullscreen) throw new Error('Fullscreen API unavailable')
+      await stageRef.current.requestFullscreen()
+    } catch {
+      // Certains environnements Chromium refusent l'API HTML malgré un clic utilisateur.
+      // Electron peut alors mettre la fenêtre en plein écran et le CSS masque le panneau.
+      const enabled = await magpie.setWindowFullscreen(true)
+      setNativeFullscreen(enabled)
+    }
+  }, [nativeFullscreen])
+
   const stepMedia = useCallback(
     (delta: number) => {
       if (!post || post.media.length < 2) return
@@ -154,6 +190,11 @@ export function Detail(): React.JSX.Element | null {
       }
       switch (e.key) {
         case 'Escape':
+          if (fullscreen) {
+            e.preventDefault()
+            void toggleFullscreen().catch(() => {})
+            break
+          }
           requestClose()
           break
         case 'ArrowRight':
@@ -170,7 +211,7 @@ export function Detail(): React.JSX.Element | null {
           break
         case 'f':
         case 'F':
-          void document.documentElement.requestFullscreen?.().catch(() => {})
+          void toggleFullscreen().catch(() => {})
           break
         default:
           break
@@ -178,7 +219,7 @@ export function Detail(): React.JSX.Element | null {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [index, requestClose, step, stepMedia])
+  }, [fullscreen, index, requestClose, step, stepMedia, toggleFullscreen])
 
   /**
    * Molette : un cran vers le bas passe au signet suivant, vers le haut au précédent.
@@ -245,7 +286,7 @@ export function Detail(): React.JSX.Element | null {
 
   return (
     <div
-      className={`detail ${entered ? 'is-entered' : ''} ${leaving ? 'is-leaving' : ''}`}
+      className={`detail ${entered ? 'is-entered' : ''} ${leaving ? 'is-leaving' : ''} ${nativeFullscreen ? 'is-window-fullscreen' : ''}`}
       onMouseDown={requestClose}
       onWheel={onWheel}
     >
@@ -269,7 +310,7 @@ export function Detail(): React.JSX.Element | null {
         onMouseDown={(e) => e.stopPropagation()}
       >
         {hasMedia ? (
-        <div className="detail__stage">
+        <div className="detail__stage" ref={stageRef}>
           {isVideo ? (
             <VideoPlayer
               key={media.videoUrl}
@@ -278,6 +319,8 @@ export function Detail(): React.JSX.Element | null {
               postId={post.id}
               mediaIndex={media.idx}
               qualities={media.videoQualities}
+              fullscreen={fullscreen}
+              onToggleFullscreen={toggleFullscreen}
             />
           ) : media?.thumbUrl ? (
             <img src={media.thumbUrl} alt={post.text ?? ''} className="detail__media" />
@@ -435,9 +478,10 @@ export function Detail(): React.JSX.Element | null {
             </button>
             <button
               type="button"
-              className="btn btn--icon"
-              onClick={() => void document.documentElement.requestFullscreen?.().catch(() => {})}
+              className={`btn btn--icon ${fullscreen ? 'is-active' : ''}`}
+              onClick={() => void toggleFullscreen().catch(() => {})}
               title={`${t('detail.fullscreen')}  ·  F`}
+              aria-pressed={fullscreen}
             >
               <IconExpand size={15} />
             </button>

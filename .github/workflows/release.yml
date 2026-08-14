@@ -44,6 +44,7 @@ jobs:
           npm run typecheck
           npm run check:layout
           npm run check:organizer
+          npm run check:media
 
       - name: Build installer and update manifest
         shell: pwsh

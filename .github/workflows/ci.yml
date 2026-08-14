@@ -43,5 +43,8 @@ jobs:
       - name: Local organiser checks
         run: npm run check:organizer
 
+      - name: Media streaming checks
+        run: npm run check:media
+
       - name: Production build
         run: npm run build

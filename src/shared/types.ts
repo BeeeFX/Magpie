@@ -308,6 +308,7 @@ export interface MagpieApi {
   getUpdateState(): Promise<UpdateState>
   checkForUpdates(): Promise<UpdateState>
   installUpdate(): Promise<void>
+  setWindowFullscreen(enabled: boolean): Promise<boolean>
   clearMediaCache(): Promise<void>
   openDataFolder(): Promise<void>
   chooseLibraryFolder(): Promise<{ moved: boolean; path: string }>
