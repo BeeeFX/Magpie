@@ -107,6 +107,18 @@ const MIGRATIONS: Record<number, (conn: Database.Database) => void> = {
   6: (conn) => {
     conn.exec("ALTER TABLE media ADD COLUMN video_cache_state TEXT NOT NULL DEFAULT 'pending'")
     conn.exec('ALTER TABLE media ADD COLUMN video_attempts INTEGER NOT NULL DEFAULT 0')
+  },
+  7: (conn) => {
+    conn.exec('ALTER TABLE media ADD COLUMN thumb_attempts INTEGER NOT NULL DEFAULT 0')
+    conn.exec(`CREATE INDEX IF NOT EXISTS idx_posts_feed ON posts(
+      is_archived, COALESCE(saved_at, discovered_at) DESC, saved_rank ASC, id
+    )`)
+    conn.exec(
+      'CREATE INDEX IF NOT EXISTS idx_media_thumb_queue ON media(thumb_path, thumb_attempts, post_id, idx)'
+    )
+    conn.exec(`CREATE INDEX IF NOT EXISTS idx_media_video_queue ON media(
+      video_cache_state, video_attempts, video_path, post_id, idx
+    )`)
   }
 }
 

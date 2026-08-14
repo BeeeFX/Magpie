@@ -285,17 +285,22 @@ async function drainMediaQueue(): Promise<void> {
 
   mediaDraining = true
   try {
+    let hasMore = false
     do {
       mediaQueuedAgain = false
       mediaAbortController = new AbortController()
       const result = await processPendingMedia(
         (progress) => mainWindow?.webContents.send('cache:progress', progress),
-        4,
+        mainWindow?.isVisible() ? 2 : 3,
         () => mediaPaused,
         mediaAbortController.signal
       )
+      hasMore = result.hasMore
       if (result.total > 0) mainWindow?.webContents.send('library:updated')
-    } while (mediaQueuedAgain && !mediaPaused)
+      // Rend régulièrement la main à Electron entre deux lots afin que déplacer ou
+      // redimensionner la fenêtre reste instantané pendant un gros rattrapage.
+      if (hasMore && !mediaPaused) await new Promise((resolve) => setTimeout(resolve, 25))
+    } while ((mediaQueuedAgain || hasMore) && !mediaPaused)
   } catch (err) {
     console.error('[magpie] Cache média :', err)
   } finally {

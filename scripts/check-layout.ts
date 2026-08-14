@@ -164,7 +164,7 @@ const largeVisible = visibleItems(largeLayout, largeLayout.totalHeight / 2, 1080
 console.log('\nbibliothèque de 10 000 posts')
 check('les 10 000 cartes sont indexées', largeLayout.items.length === 10_000)
 check('moins de 100 cartes sont rendues à la fois', largeVisible.length < 100, `${largeVisible.length}`)
-check('le calcul reste sous une seconde', largeElapsed < 1000, `${largeElapsed.toFixed(1)} ms`)
+check('le calcul reste sous 100 ms', largeElapsed < 100, `${largeElapsed.toFixed(1)} ms`)
 
 const empty = computeLayout([], { containerWidth: 1200, targetColumnWidth: 240, gap: 12, mode: 'masonry' })
 console.log('\ncas limites')

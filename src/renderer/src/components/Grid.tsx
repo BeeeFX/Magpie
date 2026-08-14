@@ -12,6 +12,7 @@ const GAP = 16
 export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
+  const layoutRevision = useStore((s) => s.layoutRevision)
   const loading = useStore((s) => s.loading)
   const loadingMore = useStore((s) => s.loadingMore)
   const hasMore = useStore((s) => s.hasMore)
@@ -129,6 +130,11 @@ export function Grid(): React.JSX.Element {
     setResultsKey((k) => k + 1)
   }, [query])
 
+  /*
+   * Une vignette terminée remplace le contenu d'une carte, mais ses dimensions restent
+   * celles déjà réservées. La géométrie ne doit donc pas être recalculée pour les milliers
+   * d'autres cartes à chaque progression du cache.
+   */
   const layout = useMemo(
     () =>
       computeLayout(posts, {
@@ -137,7 +143,7 @@ export function Grid(): React.JSX.Element {
         gap: GAP,
         mode
       }),
-    [posts, viewport.width, density, mode]
+    [layoutRevision, viewport.width, density, mode]
   )
 
   /* Restauration de la position, une seule fois, quand la mise en page est prête. */
@@ -162,10 +168,16 @@ export function Grid(): React.JSX.Element {
     }
   }, [hasMore, loadingMore, layout.totalHeight, scroll, viewport.height, loadMore])
 
+  const postsById = useMemo(() => new Map(posts.map((post) => [post.id, post])), [posts])
   const visible = useMemo(
-    () => visibleItems(layout, scroll, viewport.height),
-    [layout, scroll, viewport.height]
+    () =>
+      visibleItems(layout, scroll, viewport.height).map((item) => ({
+        ...item,
+        post: postsById.get(item.post.id) ?? item.post
+      })),
+    [layout, postsById, scroll, viewport.height]
   )
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
   const onCopy = useCallback((post: Post) => {
     void magpie.copyToClipboard(post.url)
@@ -228,7 +240,7 @@ export function Grid(): React.JSX.Element {
             onOpen={onOpen}
             onSendToNitrate={onSendToNitrate}
             selectionMode={selectionMode}
-            selected={selectedIds.includes(item.post.id)}
+            selected={selectedIdSet.has(item.post.id)}
             onToggleSelected={toggleSelected}
           />
         ))}

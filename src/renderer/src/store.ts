@@ -1,11 +1,10 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
 import type {
   AccentName,
   AccountInfo,
   AiProvider,
   AiTagProgress,
-  CacheProgress,
   GridMode,
   LabelColor,
   LibraryStats,
@@ -29,6 +28,56 @@ export const DENSITY_MIN = 140
 export const DENSITY_MAX = 400
 export const POST_PAGE_SIZE = 300
 let pageGeneration = 0
+let lastStatsRefresh = 0
+
+async function fetchStats(): Promise<LibraryStats> {
+  const stats = await magpie.getStats()
+  lastStatsRefresh = Date.now()
+  return stats
+}
+
+/**
+ * Zustand appelle le stockage après chaque mutation, même lorsque la partie persistée n'a
+ * pas changé. Sur une grosse synchronisation cela faisait des milliers d'écritures
+ * synchrones dans Chromium. On déduplique et on regroupe ces écritures hors du chemin de
+ * rendu.
+ */
+function deferredStorage(): StateStorage {
+  const pending = new Map<string, string>()
+  const last = new Map<string, string | null>()
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  const flush = (): void => {
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+    for (const [name, value] of pending) {
+      localStorage.setItem(name, value)
+      last.set(name, value)
+    }
+    pending.clear()
+  }
+
+  window.addEventListener('pagehide', flush)
+
+  return {
+    getItem: (name) => {
+      const value = localStorage.getItem(name)
+      last.set(name, value)
+      return value
+    },
+    setItem: (name, value) => {
+      if ((pending.get(name) ?? last.get(name)) === value) return
+      pending.set(name, value)
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(flush, 500)
+    },
+    removeItem: (name) => {
+      pending.delete(name)
+      last.delete(name)
+      localStorage.removeItem(name)
+    }
+  }
+}
 
 /**
  * Accès aux traductions depuis un composant. Il vit ici plutôt que dans `i18n.ts` pour
@@ -48,7 +97,8 @@ interface State {
   hasMore: boolean
   resultTotal: number
   nextOffset: number
-  cacheProgress: CacheProgress | null
+  /** Ne change que lorsque la position ou la taille des cartes peut changer. */
+  layoutRevision: number
 
   query: PostQuery
   gridMode: GridMode
@@ -96,7 +146,7 @@ interface State {
   /** Thème effectif, « système » déjà résolu. */
   isDark: boolean
 
-  refresh: (reset?: boolean) => Promise<void>
+  refresh: (reset?: boolean, forceStats?: boolean) => Promise<void>
   refreshPosts: (ids: string[]) => Promise<void>
   loadMore: () => Promise<void>
   setQuery: (patch: Partial<PostQuery>) => void
@@ -115,7 +165,6 @@ interface State {
   clearSelection: () => void
   favoriteSelection: () => Promise<void>
   tagSelection: (name: string) => Promise<void>
-  setCacheProgress: (progress: CacheProgress | null) => void
   toggleFavorite: (id: string) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   loadSettings: () => Promise<void>
@@ -161,7 +210,7 @@ export const useStore = create<State>()(
       hasMore: false,
       resultTotal: 0,
       nextOffset: 0,
-      cacheProgress: null,
+      layoutRevision: 0,
 
       query: DEFAULT_QUERY,
       // Les cartes de contenu sont le mode par défaut : le mur mélange des posts texte
@@ -205,7 +254,7 @@ export const useStore = create<State>()(
       settingsLoading: true,
       isDark: true,
 
-      refresh: async (reset = false) => {
+      refresh: async (reset = false, forceStats = false) => {
         const generation = ++pageGeneration
         const query = get().query
         const current = get().posts
@@ -213,9 +262,11 @@ export const useStore = create<State>()(
           loadingMore: false,
           ...(reset || current.length === 0 ? { loading: true } : {})
         })
+        const shouldRefreshStats =
+          forceStats || get().stats === null || Date.now() - lastStatsRefresh >= 5000
         const [page, stats] = await Promise.all([
           magpie.listPostPage(query, 0, POST_PAGE_SIZE),
-          magpie.getStats()
+          shouldRefreshStats ? fetchStats() : Promise.resolve(get().stats!)
         ])
         // Une réponse plus lente qu'une requête plus récente ne doit pas écraser l'état.
         if (get().query !== query || generation !== pageGeneration) return
@@ -244,6 +295,10 @@ export const useStore = create<State>()(
         set({
           posts,
           stats,
+          layoutRevision:
+            reset || current.length === 0 || posts.length !== current.length
+              ? get().layoutRevision + 1
+              : get().layoutRevision,
           loading: false,
           hasMore: nextOffset < page.total,
           resultTotal: page.total,
@@ -253,7 +308,12 @@ export const useStore = create<State>()(
 
       refreshPosts: async (ids) => {
         if (ids.length === 0) return
-        const changed = await magpie.getPostsByIds(ids)
+        const unique = [...new Set(ids)]
+        const chunks: string[][] = []
+        for (let offset = 0; offset < unique.length; offset += 100) {
+          chunks.push(unique.slice(offset, offset + 100))
+        }
+        const changed = (await Promise.all(chunks.map((chunk) => magpie.getPostsByIds(chunk)))).flat()
         if (changed.length === 0) return
         const byId = new Map(changed.map((post) => [post.id, post]))
         set({
@@ -279,6 +339,8 @@ export const useStore = create<State>()(
           const posts = [...get().posts, ...fresh]
           set({
             posts,
+            layoutRevision:
+              fresh.length > 0 ? get().layoutRevision + 1 : get().layoutRevision,
             resultTotal: page.total,
             nextOffset: offset + page.posts.length,
             hasMore: page.hasMore
@@ -332,7 +394,7 @@ export const useStore = create<State>()(
           posts: get().posts.map((post) =>
             selected.has(post.id) ? { ...post, isFavorite: true } : post
           ),
-          stats: await magpie.getStats()
+          stats: await fetchStats()
         })
       },
       tagSelection: async (name) => {
@@ -349,11 +411,12 @@ export const useStore = create<State>()(
           .filter((post) => !(get().query.untaggedOnly && selected.has(post.id)))
         set({
           posts,
+          layoutRevision:
+            posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
           resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: await magpie.getStats()
+          stats: await fetchStats()
         })
       },
-      setCacheProgress: (cacheProgress) => set({ cacheProgress }),
 
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
 
@@ -472,8 +535,10 @@ export const useStore = create<State>()(
           .filter((post) => !(get().query.untaggedOnly && post.id === postId))
         set({
           posts,
+          layoutRevision:
+            posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
           resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: await magpie.getStats()
+          stats: await fetchStats()
         })
       },
 
@@ -495,8 +560,10 @@ export const useStore = create<State>()(
           .filter((post) => !(removeFromResults && post.id === postId))
         set({
           posts,
+          layoutRevision:
+            posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
           resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: await magpie.getStats()
+          stats: await fetchStats()
         })
       },
 
@@ -510,8 +577,10 @@ export const useStore = create<State>()(
           )
         set({
           posts,
+          layoutRevision:
+            posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
           resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: await magpie.getStats()
+          stats: await fetchStats()
         })
       },
 
@@ -564,7 +633,7 @@ export const useStore = create<State>()(
         // Une plateforme vient de finir : ses comptes et sa bibliothèque ont bougé.
         if (wasRunning && !sync.running) {
           void get().loadAccounts()
-          void get().refresh()
+          void get().refresh(false, true)
         }
       },
 
@@ -588,6 +657,7 @@ export const useStore = create<State>()(
     }),
     {
       name: 'magpie-ui',
+      storage: createJSONStorage(deferredStorage),
       // On ne persiste ici que ce qui appartient à l'interface. Le thème et l'accent
       // vivent côté processus principal : c'est lui qui doit les connaître pour colorer
       // les boutons système, et deux sources de vérité finiraient par diverger.

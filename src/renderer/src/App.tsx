@@ -12,7 +12,6 @@ import { useStore } from './store'
 
 export function App(): React.JSX.Element {
   const refresh = useStore((s) => s.refresh)
-  const setCacheProgress = useStore((s) => s.setCacheProgress)
   const refreshPosts = useStore((s) => s.refreshPosts)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
@@ -30,6 +29,8 @@ export function App(): React.JSX.Element {
   const lastRefresh = useRef(0)
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSyncRevision = useRef('')
+  const pendingPostIds = useRef(new Set<string>())
+  const mediaRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [aiOrganizerOpen, setAiOrganizerOpen] = useState(false)
   const openAiOrganizer = useCallback(() => {
     setSettingsOpen(false)
@@ -62,19 +63,30 @@ export function App(): React.JSX.Element {
       if (refreshTimer.current !== null) clearTimeout(refreshTimer.current)
       refreshTimer.current = null
       lastRefresh.current = Date.now()
-      void refresh()
+      void refresh(false, true)
+    }
+
+    const flushMediaRefresh = (): void => {
+      mediaRefreshTimer.current = null
+      if (pendingPostIds.current.size === 0) return
+      const ids = [...pendingPostIds.current]
+      pendingPostIds.current.clear()
+      void refreshPosts(ids)
     }
 
     /* Le cache tourne en fond : la grille se remplit au fur et à mesure plutôt que
        d'attendre la fin. On limite quand même la cadence — recharger à chaque vignette
        ferait clignoter l'écran pour rien. */
     const offProgress = magpieEvents.onCacheProgress((progress) => {
-      setCacheProgress(progress)
-      if (progress.postIds?.length) void refreshPosts(progress.postIds)
+      for (const id of progress.postIds ?? []) pendingPostIds.current.add(id)
+      if (mediaRefreshTimer.current === null) {
+        mediaRefreshTimer.current = setTimeout(flushMediaRefresh, 300)
+      }
     })
 
     const offUpdated = magpieEvents.onLibraryUpdated(() => {
-      setCacheProgress(null)
+      if (mediaRefreshTimer.current !== null) clearTimeout(mediaRefreshTimer.current)
+      flushMediaRefresh()
       refreshNow()
     })
 
@@ -99,6 +111,7 @@ export function App(): React.JSX.Element {
 
     return () => {
       if (refreshTimer.current !== null) clearTimeout(refreshTimer.current)
+      if (mediaRefreshTimer.current !== null) clearTimeout(mediaRefreshTimer.current)
       offProgress()
       offUpdated()
       offTheme()
@@ -107,7 +120,7 @@ export function App(): React.JSX.Element {
       offWindowInteraction()
       document.documentElement.classList.remove('window-is-moving')
     }
-  }, [refresh, refreshPosts, loadSettings, loadAccounts, setCacheProgress, setIsDark, setSyncState, setAiProgress])
+  }, [refresh, refreshPosts, loadSettings, loadAccounts, setIsDark, setSyncState, setAiProgress])
 
   /* Le thème effectif et l'accent sont posés sur <html> : tout le CSS s'y accroche, et
      un seul attribut suffit à basculer l'application entière. */

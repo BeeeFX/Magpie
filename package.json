@@ -1,6 +1,6 @@
 {
   "name": "magpie",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Vos posts sauvegardés d'Instagram, X et Reddit dans un seul mur",
   "author": "BeeeFX",
   "license": "MIT",
@@ -35,7 +35,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sharp": "^0.35.3",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",

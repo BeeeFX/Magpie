@@ -1,15 +1,17 @@
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
+import { copyFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import sharp from 'sharp'
 import ffmpegPath from 'ffmpeg-static'
 import type { Platform, VideoQuality } from '@shared/types'
-import { fetchMedia } from '../adapters/http'
+import { downloadMediaToFile, fetchMedia, MediaLimitExceeded } from '../adapters/http'
 import { mediaDir } from '../db'
 import {
   pendingThumbnails,
   pendingVideos,
+  markThumbnailFailure,
   markVideoCacheResult,
   setThumbnail,
   setVideo,
@@ -32,6 +34,19 @@ import { readSettings } from '../settings'
 
 const MAX_WIDTH = 640
 const QUALITY = 80
+let mediaWarningCount = 0
+
+function warnMedia(postId: string, idx: number, error: unknown): void {
+  mediaWarningCount++
+  // Une URL expirée ne doit pas produire des milliers de lignes et ralentir le processus
+  // principal. On garde les premiers diagnostics, puis un échantillon régulier.
+  if (mediaWarningCount <= 20 || mediaWarningCount % 100 === 0) {
+    console.warn(
+      `[magpie] Média impossible pour ${postId}#${idx} (${mediaWarningCount} échec(s)) :`,
+      error
+    )
+  }
+}
 
 /** Nom déterministe : rejouer le cache n'accumule pas de fichiers orphelins. */
 function thumbName(postId: string, idx: number): string {
@@ -52,22 +67,73 @@ export const VIDEO_NAME_PATTERN = /^[0-9a-f]{40}\.mp4$/
 
 class CacheQuotaReached extends Error {}
 
-function cacheBytes(): number {
-  return readdirSync(mediaDir()).reduce((total, entry) => {
-    try {
-      return total + statSync(join(mediaDir(), entry)).size
-    } catch {
-      return total
+let knownCacheBytes: number | null = null
+let cacheScan: Promise<number> | null = null
+
+/** Un seul inventaire du cache par lancement, au lieu d'un scan de milliers de fichiers
+ * avant chaque clip. Les écritures suivantes maintiennent le compteur en mémoire. */
+async function cacheBytes(): Promise<number> {
+  if (knownCacheBytes !== null) return knownCacheBytes
+  if (cacheScan) return cacheScan
+
+  cacheScan = (async () => {
+    const dir = mediaDir()
+    const entries = await readdir(dir)
+    let cursor = 0
+    let total = 0
+    const worker = async (): Promise<void> => {
+      while (cursor < entries.length) {
+        const entry = entries[cursor++]
+        try {
+          total += (await stat(join(dir, entry))).size
+        } catch {
+          // Un autre travailleur peut avoir remplacé un fichier entre les deux appels.
+        }
+      }
     }
-  }, 0)
+    await Promise.all(Array.from({ length: Math.min(16, entries.length) }, worker))
+    knownCacheBytes = total
+    cacheScan = null
+    return total
+  })()
+  return cacheScan
 }
 
-function ensureQuota(bytes: number): void {
+export function getCacheUsage(): Promise<number> {
+  return cacheBytes()
+}
+
+function recordCacheDelta(delta: number): void {
+  if (knownCacheBytes !== null) knownCacheBytes = Math.max(0, knownCacheBytes + delta)
+}
+
+async function fileSize(path: string): Promise<number> {
+  try {
+    return (await stat(path)).size
+  } catch {
+    return 0
+  }
+}
+
+async function ensureQuota(bytes: number): Promise<void> {
   const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
-  if (cacheBytes() + bytes > limit) throw new CacheQuotaReached()
+  if ((await cacheBytes()) + bytes > limit) throw new CacheQuotaReached()
+}
+
+async function remainingQuota(): Promise<number> {
+  const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
+  return Math.max(0, limit - (await cacheBytes()))
+}
+
+/** Appelé après une purge ou un déplacement de bibliothèque. */
+export function resetCacheUsage(bytes: number | null = null): void {
+  knownCacheBytes = bytes
+  cacheScan = null
 }
 
 async function cacheAdaptiveVideo(source: string, target: string, signal?: AbortSignal): Promise<void> {
+  if ((await remainingQuota()) <= 0) throw new CacheQuotaReached()
+  const previousSize = await fileSize(target)
   const executable = ffmpegPath
   if (!executable) throw new Error('ffmpeg indisponible')
   await new Promise<void>((resolve, reject) => {
@@ -101,9 +167,12 @@ async function cacheAdaptiveVideo(source: string, target: string, signal?: Abort
     })
     if (signal?.aborted) abort()
   })
+  const nextSize = await fileSize(target)
+  recordCacheDelta(nextSize - previousSize)
   const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
-  if (cacheBytes() > limit) {
+  if ((await cacheBytes()) > limit) {
     rmSync(target, { force: true })
+    recordCacheDelta(-nextSize)
     throw new CacheQuotaReached()
   }
 }
@@ -113,9 +182,9 @@ async function loadSource(
   sourcePath: string | null,
   remoteUrl: string | null,
   signal?: AbortSignal
-): Promise<Buffer> {
+): Promise<Buffer | string> {
   if (sourcePath && existsSync(sourcePath)) {
-    return sharp(sourcePath).toBuffer()
+    return sourcePath
   }
   if (remoteUrl && /^https?:/.test(remoteUrl)) {
     return fetchMedia(platform, remoteUrl, 180000, signal)
@@ -133,6 +202,7 @@ export async function buildThumbnail(
 ): Promise<void> {
   const name = thumbName(postId, idx)
   const target = join(mediaDir(), name)
+  const previousSize = await fileSize(target)
 
   const input = await loadSource(platform, sourcePath, remoteUrl, signal)
 
@@ -141,8 +211,11 @@ export async function buildThumbnail(
     .resize({ width: MAX_WIDTH, withoutEnlargement: true })
     .webp({ quality: QUALITY })
     .toFile(target)
+  recordCacheDelta(info.size - previousSize)
 
-  const stats = await sharp(input).stats()
+  // La couleur dominante n'a pas besoin de redécoder l'original, parfois immense. La
+  // vignette déjà réduite contient la même information visuelle pour une fraction du CPU.
+  const stats = await sharp(target).resize(32, 32, { fit: 'inside' }).stats()
   const { r, g, b } = stats.dominant
 
   setThumbnail(postId, idx, {
@@ -174,12 +247,21 @@ export async function cacheVideo(
       if (/\.(?:m3u8|mpd)(?:\?|$)/i.test(source)) {
         await cacheAdaptiveVideo(source, target, signal)
       } else {
-        const data = await fetchMedia(platform, source, 180000, signal)
-        ensureQuota(data.length)
-        writeFileSync(target, data)
+        const available = await remainingQuota()
+        if (available <= 0) throw new CacheQuotaReached()
+        try {
+          const bytes = await downloadMediaToFile(platform, source, target, available, 180000, signal)
+          recordCacheDelta(bytes)
+        } catch (error) {
+          if (error instanceof MediaLimitExceeded) throw new CacheQuotaReached()
+          throw error
+        }
       }
     } else if (existsSync(source)) {
-      copyFileSync(source, target)
+      const bytes = await fileSize(source)
+      await ensureQuota(bytes)
+      await copyFile(source, target)
+      recordCacheDelta(bytes)
     } else {
       throw new Error('Aucune source exploitable pour ce clip')
     }
@@ -204,11 +286,20 @@ export async function cacheRequestedVideoQuality(
   const target = join(mediaDir(), name)
   if (!existsSync(target)) {
     if (/^https?:/.test(variant.source)) {
-      const data = await fetchMedia(variant.platform, variant.source)
-      ensureQuota(data.length)
-      writeFileSync(target, data)
+      const available = await remainingQuota()
+      if (available <= 0) throw new CacheQuotaReached()
+      try {
+        const bytes = await downloadMediaToFile(variant.platform, variant.source, target, available)
+        recordCacheDelta(bytes)
+      } catch (error) {
+        if (error instanceof MediaLimitExceeded) throw new CacheQuotaReached()
+        throw error
+      }
     } else if (existsSync(variant.source)) {
-      copyFileSync(variant.source, target)
+      const bytes = await fileSize(variant.source)
+      await ensureQuota(bytes)
+      await copyFile(variant.source, target)
+      recordCacheDelta(bytes)
     } else {
       throw new Error('La source de cette qualité a expiré.')
     }
@@ -229,12 +320,15 @@ export interface CacheProgress {
  */
 export async function processPendingMedia(
   onProgress?: (progress: CacheProgress) => void,
-  concurrency = 4,
+  concurrency = 2,
   shouldPause?: () => boolean,
   signal?: AbortSignal
-): Promise<CacheProgress> {
-  const thumbs = pendingThumbnails().map((t) => ({ type: 'thumb' as const, ...t }))
-  const videos = pendingVideos().map((v) => ({ type: 'video' as const, ...v }))
+): Promise<CacheProgress & { hasMore: boolean }> {
+  const thumbnailBatch = 360
+  const videoBatch = 120
+  const thumbs = pendingThumbnails(thumbnailBatch).map((t) => ({ type: 'thumb' as const, ...t }))
+  const videos = pendingVideos(videoBatch).map((v) => ({ type: 'video' as const, ...v }))
+  const hasMore = thumbs.length === thumbnailBatch || videos.length === videoBatch
   // Trois affiches puis un clip : auparavant, les milliers de vignettes bloquaient toute
   // la file vidéo jusqu'à leur achèvement. L'entrelacement fait progresser les deux sans
   // laisser les gros fichiers ralentir l'apparition du mur.
@@ -251,7 +345,7 @@ export async function processPendingMedia(
   let done = 0
   const changedPostIds = new Set<string>()
 
-  if (total === 0) return { done: 0, total: 0 }
+  if (total === 0) return { done: 0, total: 0, hasMore: false }
 
   let cursor = 0
   const worker = async (): Promise<void> => {
@@ -271,14 +365,17 @@ export async function processPendingMedia(
           await cacheVideo(item.platform, item.post_id, item.idx, item.video_source, signal)
         }
       } catch (err) {
-        if (item.type === 'video') {
+        if (item.type === 'thumb' && !signal?.aborted) {
+          markThumbnailFailure(item.post_id, item.idx)
+        }
+        if (item.type === 'video' && !signal?.aborted) {
           markVideoCacheResult(
             item.post_id,
             item.idx,
             err instanceof CacheQuotaReached ? 'skipped' : 'pending'
           )
         }
-        console.warn(`[magpie] Média impossible pour ${item.post_id}#${item.idx}:`, err)
+        if (!signal?.aborted) warnMedia(item.post_id, item.idx, err)
       }
       done++
       changedPostIds.add(item.post_id)
@@ -291,5 +388,5 @@ export async function processPendingMedia(
 
   await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker))
   if (changedPostIds.size > 0) onProgress?.({ done, total, postIds: [...changedPostIds] })
-  return { done, total }
+  return { done, total, hasMore }
 }

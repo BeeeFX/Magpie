@@ -606,6 +606,11 @@ export function upsertPosts(posts: PostInput[], media: MediaInput[]): void {
                        WHEN media.remote_url IS excluded.remote_url THEN media.thumb_path
                        ELSE NULL
                      END,
+      thumb_attempts = CASE
+                         WHEN media.remote_url IS excluded.remote_url
+                           THEN media.thumb_attempts
+                         ELSE 0
+                       END,
       video_path   = CASE
                        WHEN media.video_source IS excluded.video_source THEN media.video_path
                        ELSE NULL
@@ -980,7 +985,8 @@ export function setThumbnail(
   const db = getDb()
   db.transaction(() => {
     db.prepare(
-      `UPDATE media SET thumb_path = ?, width = ?, height = ? WHERE post_id = ? AND idx = ?`
+      `UPDATE media SET thumb_path = ?, thumb_attempts = 0, width = ?, height = ?
+       WHERE post_id = ? AND idx = ?`
     ).run(info.thumbPath, info.width, info.height, postId, idx)
 
     // Les dimensions du média principal remontent sur le post : c'est ce que lit le
@@ -1001,6 +1007,7 @@ export interface PendingMedia {
   remote_url: string | null
   video_source: string | null
   video_attempts: number
+  thumb_attempts: number
 }
 
 /**
@@ -1010,18 +1017,30 @@ export interface PendingMedia {
  * faisait la première version, à l'époque où tout venait de la fixture — laissait tous les
  * vrais signets sans vignette, puisqu'ils n'ont qu'une URL.
  */
-export function pendingThumbnails(): PendingMedia[] {
+export function pendingThumbnails(rawLimit = 400): PendingMedia[] {
+  const limit = Math.min(1000, Math.max(1, Math.floor(rawLimit)))
   return getDb()
     .prepare(
-      `SELECT m.post_id, m.idx, p.platform, m.source_path, m.remote_url, m.video_source
+      `SELECT m.post_id, m.idx, p.platform, m.source_path, m.remote_url, m.video_source,
+              m.thumb_attempts, m.video_attempts
          FROM media m JOIN posts p ON p.id = m.post_id
         WHERE m.thumb_path IS NULL
+          AND m.thumb_attempts < 3
           AND (m.source_path IS NOT NULL OR m.remote_url LIKE 'http%')
         ORDER BY CASE WHEN m.idx = 0 THEN 0 ELSE 1 END,
                  CASE WHEN p.saved_rank IS NULL THEN 1 ELSE 0 END,
-                 p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx`
+                 p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx
+        LIMIT ?`
     )
-    .all() as PendingMedia[]
+    .all(limit) as PendingMedia[]
+}
+
+export function markThumbnailFailure(postId: string, idx: number): void {
+  getDb()
+    .prepare(
+      `UPDATE media SET thumb_attempts = thumb_attempts + 1 WHERE post_id = ? AND idx = ?`
+    )
+    .run(postId, idx)
 }
 
 export function setVideo(postId: string, idx: number, videoPath: string): void {
@@ -1042,7 +1061,8 @@ export function markVideoCacheResult(postId: string, idx: number, state: 'skippe
     .run(state, postId, idx)
 }
 
-export function pendingVideos(): PendingMedia[] {
+export function pendingVideos(rawLimit = 150): PendingMedia[] {
+  const limit = Math.min(500, Math.max(1, Math.floor(rawLimit)))
   return getDb()
     .prepare(
       `SELECT m.post_id, m.idx, p.platform, m.source_path, m.remote_url, m.video_source,
@@ -1052,9 +1072,10 @@ export function pendingVideos(): PendingMedia[] {
           AND m.video_cache_state = 'pending' AND m.video_attempts < 3
         ORDER BY CASE WHEN m.idx = 0 THEN 0 ELSE 1 END,
                  CASE WHEN p.saved_rank IS NULL THEN 1 ELSE 0 END,
-                 p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx`
+                 p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx
+        LIMIT ?`
     )
-    .all() as PendingMedia[]
+    .all(limit) as PendingMedia[]
 }
 
 /* ------------------------------------------------------------------ utilitaires */

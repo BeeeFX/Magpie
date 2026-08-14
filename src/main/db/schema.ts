@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
@@ -44,6 +44,9 @@ CREATE INDEX IF NOT EXISTS idx_posts_saved     ON posts(saved_at DESC, saved_ran
 CREATE INDEX IF NOT EXISTS idx_posts_published ON posts(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_favorite  ON posts(is_favorite) WHERE is_favorite = 1;
 CREATE INDEX IF NOT EXISTS idx_posts_label     ON posts(label) WHERE label IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_posts_feed      ON posts(
+  is_archived, COALESCE(saved_at, discovered_at) DESC, saved_rank ASC, id
+);
 
 CREATE TABLE IF NOT EXISTS media (
   id          INTEGER PRIMARY KEY,
@@ -53,6 +56,7 @@ CREATE TABLE IF NOT EXISTS media (
   remote_url  TEXT,
   source_path TEXT,
   thumb_path  TEXT,
+  thumb_attempts INTEGER NOT NULL DEFAULT 0,
   -- Source du clip : chemin local ou URL distante, résolue comme celle de l'image.
   video_source TEXT,
   -- Clip en cache, servi au survol. Distinct de full_path, qui est l'archivage en
@@ -67,6 +71,10 @@ CREATE TABLE IF NOT EXISTS media (
 );
 
 CREATE INDEX IF NOT EXISTS idx_media_post ON media(post_id);
+CREATE INDEX IF NOT EXISTS idx_media_thumb_queue ON media(thumb_path, thumb_attempts, post_id, idx);
+CREATE INDEX IF NOT EXISTS idx_media_video_queue ON media(
+  video_cache_state, video_attempts, video_path, post_id, idx
+);
 
 CREATE TABLE IF NOT EXISTS media_variants (
   post_id    TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,

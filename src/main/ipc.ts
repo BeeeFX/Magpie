@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
-import { readdirSync, rmSync, statfsSync, statSync } from 'node:fs'
+import { statfsSync } from 'node:fs'
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type {
@@ -42,7 +42,7 @@ import {
 import { seedIfEmpty } from './fixtures/seed'
 import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
-import { cacheRequestedVideoQuality } from './media/cache'
+import { cacheRequestedVideoQuality, getCacheUsage, resetCacheUsage } from './media/cache'
 import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
@@ -255,7 +255,7 @@ export function registerIpc({
     return next
   })
 
-  ipcMain.handle('library:info', (): LibraryInfo => {
+  ipcMain.handle('library:info', async (): Promise<LibraryInfo> => {
     const db = getDb()
     const posts = (db.prepare('SELECT COUNT(*) n FROM posts').get() as { n: number }).n
     const media = (db.prepare('SELECT COUNT(*) n FROM media').get() as { n: number }).n
@@ -263,7 +263,7 @@ export function registerIpc({
       posts,
       media,
       demoPosts: countDemoPosts(),
-      cacheBytes: cacheSize(),
+      cacheBytes: await getCacheUsage(),
       dataPath: dataDir(),
       version: app.getVersion()
     }
@@ -273,16 +273,29 @@ export function registerIpc({
   ipcMain.handle('updates:check', () => checkForUpdates())
   ipcMain.handle('updates:install', () => installUpdate())
 
-  ipcMain.handle('library:clearCache', () => {
+  ipcMain.handle('library:clearCache', async () => {
     // Les métadonnées, tags et collections survivent toujours à une purge de médias :
     // on efface les fichiers et on remet les références à zéro, le cache se reconstruira
     // au prochain démarrage.
-    for (const entry of readdirSync(mediaDir())) {
-      rmSync(join(mediaDir(), entry), { force: true })
+    await pauseMedia()
+    try {
+      const dir = mediaDir()
+      const entries = await readdir(dir)
+      let cursor = 0
+      const worker = async (): Promise<void> => {
+        while (cursor < entries.length) {
+          const entry = entries[cursor++]
+          await rm(join(dir, entry), { force: true })
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(16, entries.length) }, worker))
+      getDb().exec(
+        "UPDATE media SET thumb_path = NULL, thumb_attempts = 0, video_path = NULL, video_cache_state = 'pending', video_attempts = 0"
+      )
+      resetCacheUsage(0)
+    } finally {
+      resumeMedia()
     }
-    getDb().exec(
-      "UPDATE media SET thumb_path = NULL, video_path = NULL, video_cache_state = 'pending', video_attempts = 0"
-    )
   })
 
   ipcMain.handle('app:openDataFolder', () => shell.openPath(dataDir()))
@@ -508,18 +521,4 @@ async function listLibraryFiles(root: string): Promise<LibraryFile[]> {
   }
   await visit(root)
   return files
-}
-
-function cacheSize(): number {
-  try {
-    return readdirSync(mediaDir()).reduce((total, entry) => {
-      try {
-        return total + statSync(join(mediaDir(), entry)).size
-      } catch {
-        return total
-      }
-    }, 0)
-  } catch {
-    return 0
-  }
 }

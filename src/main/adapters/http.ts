@@ -1,4 +1,8 @@
 import { net } from 'electron'
+import { createWriteStream } from 'node:fs'
+import { rename, rm } from 'node:fs/promises'
+import { Transform, type Readable, type TransformCallback } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import type { Platform } from '@shared/types'
 import { cookieHeader, sessionFor, userAgent } from './session'
 
@@ -40,6 +44,13 @@ export class HttpError extends Error {
   constructor(readonly status: number, readonly body: string) {
     super(`HTTP ${status}`)
     this.name = 'HttpError'
+  }
+}
+
+export class MediaLimitExceeded extends Error {
+  constructor() {
+    super('Le média dépasse l’espace de cache disponible')
+    this.name = 'MediaLimitExceeded'
   }
 }
 
@@ -181,6 +192,97 @@ export async function fetchMedia(
       reject(err)
     })
 
+    req.end()
+  })
+}
+
+/**
+ * Écrit un média directement sur disque. Les clips ne transitent jamais par un énorme
+ * Buffer JavaScript : avec plusieurs téléchargements parallèles, cette différence évite
+ * des centaines de Mo de mémoire temporaire et de longues pauses du ramasse-miettes.
+ */
+export async function downloadMediaToFile(
+  platform: Platform,
+  url: string,
+  target: string,
+  maxBytes: number,
+  timeoutMs = 180000,
+  signal?: AbortSignal
+): Promise<number> {
+  const origin =
+    platform === 'instagram'
+      ? 'https://www.instagram.com/'
+      : platform === 'x'
+        ? 'https://x.com/'
+        : 'https://www.reddit.com/'
+  const temporary = `${target}.part`
+  await rm(temporary, { force: true })
+
+  const req = net.request({ method: 'GET', url, session: sessionFor(platform) })
+  req.setHeader('User-Agent', userAgent())
+  req.setHeader('Accept', 'video/*,application/octet-stream,*/*;q=0.8')
+  req.setHeader('Referer', origin)
+
+  return new Promise<number>((resolve, reject) => {
+    let settled = false
+    let bytes = 0
+
+    const cleanup = (): void => {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', abort)
+    }
+    const fail = (error: Error): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      req.abort()
+      void rm(temporary, { force: true }).finally(() => reject(error))
+    }
+    const succeed = (): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(bytes)
+    }
+    const abort = (): void => fail(new Error('Téléchargement interrompu'))
+    const timeout = setTimeout(
+      () => fail(new Error(`Délai dépassé sur ${url}`)),
+      timeoutMs
+    )
+
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+
+    req.on('response', (response) => {
+      if (response.statusCode >= 400) {
+        fail(new HttpError(response.statusCode, url))
+        return
+      }
+
+      const header = response.headers['content-length']
+      const announced = Number(Array.isArray(header) ? header[0] : header)
+      if (Number.isFinite(announced) && announced > maxBytes) {
+        fail(new MediaLimitExceeded())
+        return
+      }
+
+      const limiter = new Transform({
+        transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
+          bytes += chunk.length
+          callback(bytes > maxBytes ? new MediaLimitExceeded() : null, chunk)
+        }
+      })
+
+      void pipeline(response as unknown as Readable, limiter, createWriteStream(temporary))
+        .then(() => rename(temporary, target))
+        .then(succeed)
+        .catch((error: Error) => fail(error))
+    })
+
+    req.on('error', (error) => fail(error))
     req.end()
   })
 }
