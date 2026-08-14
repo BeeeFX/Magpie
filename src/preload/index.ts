@@ -15,14 +15,14 @@ import type {
   MagpieApi,
   MagpieEvents,
   OrganizerProgress,
+  PlaybackQuality,
   Platform,
   Post,
   PostPage,
   PostQuery,
   Settings,
   SyncState,
-  UpdateState,
-  VideoQuality
+  UpdateState
 } from '@shared/types'
 
 /**
@@ -65,8 +65,12 @@ const api: MagpieApi = {
   openDataFolder: (): Promise<void> => ipcRenderer.invoke('app:openDataFolder'),
   chooseLibraryFolder: (): Promise<{ moved: boolean; path: string }> =>
     ipcRenderer.invoke('library:chooseFolder'),
-  cacheVideoQuality: (postId: string, mediaIndex: number, quality: VideoQuality): Promise<string> =>
-    ipcRenderer.invoke('media:quality', postId, mediaIndex, quality),
+  getMediaPlaybackUrl: (
+    postId: string,
+    mediaIndex: number,
+    kind: 'image' | 'video',
+    quality: PlaybackQuality
+  ): Promise<string> => ipcRenderer.invoke('media:playbackUrl', postId, mediaIndex, kind, quality),
 
   setLabel: (postId: string, label: LabelColor | null): Promise<void> =>
     ipcRenderer.invoke('posts:setLabel', postId, label),

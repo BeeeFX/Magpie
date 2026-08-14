@@ -9,6 +9,7 @@ import {
   SOURCE_LABEL
 } from '../format'
 import type { LayoutItem } from '../layout'
+import { magpie } from '../bridge'
 import { useStore, useT } from '../store'
 import {
   IconCheck,
@@ -65,6 +66,7 @@ function CardImpl({
   const [hovered, setHovered] = useState(false)
   const [index, setIndex] = useState(0)
   const [videoReady, setVideoReady] = useState(false)
+  const [streamedVideoUrl, setStreamedVideoUrl] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const rootRef = useRef<HTMLElement>(null)
 
@@ -89,7 +91,30 @@ function CardImpl({
     if (!hovered) setVideoReady(false)
   }, [hovered])
 
-  const videoUrl = hovered ? (current?.videoUrl ?? null) : null
+  useEffect(() => {
+    setStreamedVideoUrl(null)
+  }, [post.id, current?.idx])
+
+  useEffect(() => {
+    if (
+      !hovered ||
+      current?.kind !== 'video' ||
+      current.videoUrl ||
+      streamedVideoUrl
+    ) return
+    let cancelled = false
+    void magpie
+      .getMediaPlaybackUrl(post.id, current.idx, 'video', 'auto')
+      .then((url) => {
+        if (!cancelled && url) setStreamedVideoUrl(url)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [current?.idx, current?.kind, current?.videoUrl, hovered, post.id, streamedVideoUrl])
+
+  const videoUrl = hovered ? (current?.videoUrl ?? streamedVideoUrl) : null
 
   /* Le son des aperçus suit le réglage global. Il reste coupé par défaut, et la lecture
      est relancée à chaque clip : un refus d'autoplay est avalé sans bruit. */

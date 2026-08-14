@@ -66,7 +66,8 @@ const PREVIEW_DEFAULTS: Settings = {
   language: 'system',
   accent: 'violet',
   nitrateEnabled: false,
-  videoCacheQuality: '720p',
+  videoCacheQuality: '480p',
+  mediaStorageMode: 'stream',
   playbackQuality: 'auto',
   cacheLimitGb: 20,
   trayEnabled: true,
@@ -161,19 +162,19 @@ const previewApi: MagpieApi = {
       demoPosts: posts.length,
       cacheBytes: 0,
       dataPath: 'aperçu navigateur',
-      version: '0.2.2'
+      version: '0.4.0'
     }
   },
   getUpdateState: async (): Promise<UpdateState> => ({
     phase: 'unsupported',
-    currentVersion: '0.2.2',
+    currentVersion: '0.4.0',
     availableVersion: null,
     percent: null,
     message: 'browser-preview'
   }),
   checkForUpdates: async (): Promise<UpdateState> => ({
     phase: 'unsupported',
-    currentVersion: '0.2.2',
+    currentVersion: '0.4.0',
     availableVersion: null,
     percent: null,
     message: 'browser-preview'
@@ -183,9 +184,7 @@ const previewApi: MagpieApi = {
   clearMediaCache: async () => {},
   openDataFolder: async () => {},
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),
-  cacheVideoQuality: async () => {
-    throw new Error('Qualités vidéo indisponibles dans l’aperçu navigateur.')
-  },
+  getMediaPlaybackUrl: async () => '',
 
   // Les mutations n'ont pas de base derrière elles en aperçu : elles renvoient l'état
   // courant sans rien modifier, plutôt que de simuler une persistance qui mentirait.

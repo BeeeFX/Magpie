@@ -93,6 +93,7 @@ export type GridMode = 'masonry' | 'cards'
 export type ThemeChoice = 'system' | 'light' | 'dark'
 export type VideoQuality = '480p' | '720p' | '1080p' | 'source'
 export type PlaybackQuality = 'auto' | VideoQuality
+export type MediaStorageMode = 'stream' | 'offline'
 export type SyncSchedule = 'manual' | 'hourly' | '6h' | 'daily'
 export type AiProvider = 'openai' | 'anthropic' | 'gemini' | 'deepseek' | 'custom'
 
@@ -118,6 +119,8 @@ export interface Settings {
   onboardingDone: boolean
   /** Qualité maximale mise en cache automatiquement. */
   videoCacheQuality: VideoQuality
+  /** `stream` conserve seulement les vignettes ; `offline` garde aussi les clips. */
+  mediaStorageMode: MediaStorageMode
   /** Qualité préférée dans le lecteur détaillé. */
   playbackQuality: PlaybackQuality
   /** Plafond du cache média, en Gio. */
@@ -312,7 +315,12 @@ export interface MagpieApi {
   clearMediaCache(): Promise<void>
   openDataFolder(): Promise<void>
   chooseLibraryFolder(): Promise<{ moved: boolean; path: string }>
-  cacheVideoQuality(postId: string, mediaIndex: number, quality: VideoQuality): Promise<string>
+  getMediaPlaybackUrl(
+    postId: string,
+    mediaIndex: number,
+    kind: 'image' | 'video',
+    quality: PlaybackQuality
+  ): Promise<string>
 
   setLabel(postId: string, label: LabelColor | null): Promise<void>
   setCollectionColor(collectionId: number, color: LabelColor | null): Promise<void>

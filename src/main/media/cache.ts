@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import sharp from 'sharp'
 import ffmpegPath from 'ffmpeg-static'
-import type { Platform, VideoQuality } from '@shared/types'
+import type { Platform } from '@shared/types'
 import { downloadMediaToFile, fetchMedia, MediaLimitExceeded } from '../adapters/http'
 import { mediaDir } from '../db'
 import {
@@ -15,8 +15,6 @@ import {
   markVideoCacheResult,
   setThumbnail,
   setVideo,
-  setVideoVariantCache,
-  videoVariant
 } from '../db/queries'
 import { readSettings } from '../settings'
 
@@ -55,10 +53,6 @@ function thumbName(postId: string, idx: number): string {
 
 function videoName(postId: string, idx: number): string {
   return `${createHash('sha1').update(`${postId}:${idx}:video`).digest('hex')}.mp4`
-}
-
-function variantVideoName(postId: string, idx: number, quality: VideoQuality): string {
-  return `${createHash('sha1').update(`${postId}:${idx}:video:${quality}`).digest('hex')}.mp4`
 }
 
 /** Le protocole `magpie://` ne sert que des noms de ces formes — voir main/index.ts. */
@@ -270,44 +264,6 @@ export async function cacheVideo(
   setVideo(postId, idx, name)
 }
 
-/** Télécharge à la demande une qualité supérieure choisie dans le lecteur. */
-export async function cacheRequestedVideoQuality(
-  postId: string,
-  idx: number,
-  quality: VideoQuality
-): Promise<string> {
-  const variant = videoVariant(postId, idx, quality)
-  if (!variant) throw new Error('Cette qualité n’est plus disponible pour ce média.')
-  if (variant.cachePath && existsSync(join(mediaDir(), variant.cachePath))) {
-    return variant.cachePath
-  }
-
-  const name = variantVideoName(postId, idx, quality)
-  const target = join(mediaDir(), name)
-  if (!existsSync(target)) {
-    if (/^https?:/.test(variant.source)) {
-      const available = await remainingQuota()
-      if (available <= 0) throw new CacheQuotaReached()
-      try {
-        const bytes = await downloadMediaToFile(variant.platform, variant.source, target, available)
-        recordCacheDelta(bytes)
-      } catch (error) {
-        if (error instanceof MediaLimitExceeded) throw new CacheQuotaReached()
-        throw error
-      }
-    } else if (existsSync(variant.source)) {
-      const bytes = await fileSize(variant.source)
-      await ensureQuota(bytes)
-      await copyFile(variant.source, target)
-      recordCacheDelta(bytes)
-    } else {
-      throw new Error('La source de cette qualité a expiré.')
-    }
-  }
-  setVideoVariantCache(postId, idx, quality, name)
-  return name
-}
-
 export interface CacheProgress {
   done: number
   total: number
@@ -327,7 +283,10 @@ export async function processPendingMedia(
   const thumbnailBatch = 360
   const videoBatch = 120
   const thumbs = pendingThumbnails(thumbnailBatch).map((t) => ({ type: 'thumb' as const, ...t }))
-  const videos = pendingVideos(videoBatch).map((v) => ({ type: 'video' as const, ...v }))
+  const videos =
+    readSettings().mediaStorageMode === 'offline'
+      ? pendingVideos(videoBatch).map((v) => ({ type: 'video' as const, ...v }))
+      : []
   const hasMore = thumbs.length === thumbnailBatch || videos.length === videoBatch
   // Trois affiches puis un clip : auparavant, les milliers de vignettes bloquaient toute
   // la file vidéo jusqu'à leur achèvement. L'entrelacement fait progresser les deux sans
@@ -361,7 +320,7 @@ export async function processPendingMedia(
             item.remote_url,
             signal
           )
-        } else if (item.video_source) {
+        } else if (item.video_source && readSettings().mediaStorageMode === 'offline') {
           await cacheVideo(item.platform, item.post_id, item.idx, item.video_source, signal)
         }
       } catch (err) {

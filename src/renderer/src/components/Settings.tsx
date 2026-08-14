@@ -59,6 +59,8 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
   const setNitrateEnabled = useStore((s) => s.setNitrateEnabled)
   const videoCacheQuality = useStore((s) => s.videoCacheQuality)
   const setVideoCacheQuality = useStore((s) => s.setVideoCacheQuality)
+  const mediaStorageMode = useStore((s) => s.mediaStorageMode)
+  const setMediaStorageMode = useStore((s) => s.setMediaStorageMode)
   const playbackQuality = useStore((s) => s.playbackQuality)
   const setPlaybackQuality = useStore((s) => s.setPlaybackQuality)
   const cacheLimitGb = useStore((s) => s.cacheLimitGb)
@@ -284,21 +286,41 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
             </div>
             <div className="setting setting--compact">
               <div className="setting__label">
-                <strong>{t('settings.cacheQuality')}</strong>
+                <strong>{t('settings.storageMode')}</strong>
+                <span>{t(`settings.storageMode.${mediaStorageMode}Hint`)}</span>
               </div>
               <div className="segmented segmented--wide">
-                {cacheQualities.map((quality) => (
+                {(['stream', 'offline'] as const).map((mode) => (
                   <button
-                    key={quality}
+                    key={mode}
                     type="button"
-                    className={videoCacheQuality === quality ? 'is-active' : ''}
-                    onClick={() => void setVideoCacheQuality(quality)}
+                    className={mediaStorageMode === mode ? 'is-active' : ''}
+                    onClick={() => void setMediaStorageMode(mode)}
                   >
-                    {t(`quality.${quality}` as TranslationKey)}
+                    {t(`settings.storageMode.${mode}`)}
                   </button>
                 ))}
               </div>
             </div>
+            {mediaStorageMode === 'offline' ? (
+              <div className="setting setting--compact">
+                <div className="setting__label">
+                  <strong>{t('settings.cacheQuality')}</strong>
+                </div>
+                <div className="segmented segmented--wide">
+                  {cacheQualities.map((quality) => (
+                    <button
+                      key={quality}
+                      type="button"
+                      className={videoCacheQuality === quality ? 'is-active' : ''}
+                      onClick={() => void setVideoCacheQuality(quality)}
+                    >
+                      {t(`quality.${quality}` as TranslationKey)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="setting setting--compact">
               <div className="setting__label">
                 <strong>{t('settings.playbackQuality')}</strong>

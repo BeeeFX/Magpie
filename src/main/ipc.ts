@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
-import { statfsSync } from 'node:fs'
+import { existsSync, statfsSync } from 'node:fs'
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type {
@@ -11,10 +11,10 @@ import type {
   LibraryMoveProgress,
   Platform,
   PostQuery,
+  PlaybackQuality,
   Settings
 } from '@shared/types'
 import { DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS } from '@shared/types'
-import type { VideoQuality } from '@shared/types'
 import { dataDir, getDb, mediaDir, writeDataDirLocation } from './db'
 import {
   addTag,
@@ -30,6 +30,7 @@ import {
   listPostPage,
   listPosts,
   readAccount,
+  playbackMediaSource,
   removeFromCollection,
   removeTag,
   setCollectionColor,
@@ -42,7 +43,8 @@ import {
 import { seedIfEmpty } from './fixtures/seed'
 import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
-import { cacheRequestedVideoQuality, getCacheUsage, resetCacheUsage } from './media/cache'
+import { getCacheUsage, resetCacheUsage, VIDEO_NAME_PATTERN } from './media/cache'
+import { createRemoteMediaUrl } from './media/remote'
 import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
@@ -412,16 +414,37 @@ export function registerIpc({
   })
 
   ipcMain.handle(
-    'media:quality',
-    async (_event, postId: string, idx: number, quality: VideoQuality) => {
+    'media:playbackUrl',
+    async (
+      _event,
+      postId: string,
+      idx: number,
+      kind: 'image' | 'video',
+      quality: PlaybackQuality
+    ) => {
       if (typeof postId !== 'string' || postId.length > 300 || !Number.isInteger(idx) || idx < 0) {
         throw new Error('Média invalide')
       }
-      if (!['480p', '720p', '1080p', 'source'].includes(quality)) {
+      if (!['image', 'video'].includes(kind)) throw new Error('Type de média invalide')
+      if (!['auto', '480p', '720p', '1080p', 'source'].includes(quality)) {
         throw new Error('Qualité invalide')
       }
-      const name = await cacheRequestedVideoQuality(postId, idx, quality)
-      return `magpie://video/${name}`
+
+      const media = playbackMediaSource(postId, idx, kind, quality)
+      if (!media) throw new Error('Média indisponible')
+      if (
+        kind === 'video' &&
+        media.cachePath &&
+        VIDEO_NAME_PATTERN.test(media.cachePath) &&
+        existsSync(join(mediaDir(), media.cachePath))
+      ) {
+        return `magpie://video/${media.cachePath}`
+      }
+      if (!media.source || !/^https?:\/\//i.test(media.source)) {
+        throw new Error('La source en ligne de ce média a expiré. Synchronisez à nouveau le compte.')
+      }
+
+      return createRemoteMediaUrl({ postId, mediaIndex: idx, kind, quality })
     }
   )
 

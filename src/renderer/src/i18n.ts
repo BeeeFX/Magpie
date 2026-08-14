@@ -153,7 +153,12 @@ const fr = {
     'Ajoute un bouton sur les posts vidéo, qui les envoie à Nitrate pour téléchargement et compression.',
   'settings.nitrateWindowsOnly': ' Nitrate n’existe que sous Windows.',
   'settings.video': 'Vidéo et stockage',
-  'settings.videoHint': 'Contrôle la qualité téléchargée, la lecture et la taille maximale du cache.',
+  'settings.videoHint': 'Choisissez ce qui reste sur le disque et ce qui est diffusé à la demande.',
+  'settings.storageMode': 'Stockage des vidéos',
+  'settings.storageMode.stream': 'Mode léger',
+  'settings.storageMode.streamHint': 'Miniatures locales ; médias détaillés diffusés depuis la plateforme.',
+  'settings.storageMode.offline': 'Mode hors-ligne',
+  'settings.storageMode.offlineHint': 'Conserve aussi une copie locale de chaque vidéo.',
   'settings.cacheQuality': 'Qualité mise en cache',
   'settings.playbackQuality': 'Qualité de lecture préférée',
   'settings.cacheLimit': 'Taille maximale du cache',
@@ -229,6 +234,7 @@ const fr = {
   'quality.1080p': '1080p',
   'quality.source': 'Source',
   'player.quality': 'Qualité vidéo',
+  'player.streamError': 'Impossible de diffuser ce média. Une nouvelle synchronisation peut renouveler son lien.',
   'settings.library': 'Bibliothèque',
   'settings.libraryStats': '{posts} posts · {media} médias · cache {size}',
   'settings.libraryLocation': 'Emplacement actuel',
@@ -243,7 +249,7 @@ const fr = {
   'settings.clearing': 'Purge…',
   'settings.replayTour': 'Revoir la présentation',
   'settings.cacheNote':
-    'Vider le cache ne supprime que les images et les clips : les posts, les tags et les favoris sont conservés, et les vignettes se régénèrent au prochain démarrage.',
+    'Vider le cache conserve les posts, tags et favoris. Les vignettes se régénèrent ; en mode hors-ligne, les clips se remplissent à nouveau progressivement.',
   'settings.demo': 'Données de démonstration',
   'settings.demoHint':
     'Une bibliothèque fictive de 139 posts, pour essayer l’interface sans connecter de compte. Jamais chargée automatiquement.',
@@ -307,6 +313,20 @@ const fr = {
   'welcome.findTitle': 'Retrouver',
   'welcome.findText':
     'Recherche instantanée sur les légendes et les auteurs, insensible aux accents.',
+  'welcome.storageTitle': 'Avant de télécharger vos médias',
+  'welcome.storageText':
+    'Une grande bibliothèque peut occuper beaucoup d’espace. Choisissez ce que Magpie garde sur ce PC et où placer la bibliothèque.',
+  'welcome.storageStream': 'Économiser l’espace',
+  'welcome.storageStreamText':
+    'Garde les miniatures légères. Les images et vidéos en grand sont diffusées à la demande et ne sont pas ajoutées au cache média.',
+  'welcome.storageOffline': 'Garder les vidéos hors-ligne',
+  'welcome.storageOfflineText':
+    'Télécharge une copie de chaque vidéo dans la qualité choisie. Plus fiable, mais beaucoup plus volumineux.',
+  'welcome.recommended': 'Recommandé',
+  'welcome.storageLocation': 'Emplacement de la bibliothèque et du cache',
+  'welcome.storageLoading': 'Recherche de l’emplacement…',
+  'welcome.storageChoose': 'Choisir un dossier…',
+  'welcome.storageLimit': 'Limite du cache · {size} Go',
   'welcome.howTitle': 'Comment ça marche',
   'welcome.loginTitle': 'Vous vous connectez sur la vraie page',
   'welcome.loginText':
@@ -475,7 +495,12 @@ const en: Record<TranslationKey, string> = {
     'Adds a button on video posts that sends them to Nitrate for download and compression.',
   'settings.nitrateWindowsOnly': ' Nitrate is Windows-only.',
   'settings.video': 'Video and storage',
-  'settings.videoHint': 'Control downloaded quality, playback and the maximum cache size.',
+  'settings.videoHint': 'Choose what stays on disk and what is streamed on demand.',
+  'settings.storageMode': 'Video storage',
+  'settings.storageMode.stream': 'Space saver',
+  'settings.storageMode.streamHint': 'Local thumbnails; detailed media streamed from the platform.',
+  'settings.storageMode.offline': 'Offline mode',
+  'settings.storageMode.offlineHint': 'Also keeps a local copy of every video.',
   'settings.cacheQuality': 'Cached quality',
   'settings.playbackQuality': 'Preferred playback quality',
   'settings.cacheLimit': 'Maximum cache size',
@@ -551,6 +576,7 @@ const en: Record<TranslationKey, string> = {
   'quality.1080p': '1080p',
   'quality.source': 'Source',
   'player.quality': 'Video quality',
+  'player.streamError': 'This media could not be streamed. Syncing the account again may renew its link.',
   'settings.library': 'Library',
   'settings.libraryStats': '{posts} posts · {media} media · {size} cached',
   'settings.libraryLocation': 'Current location',
@@ -565,7 +591,7 @@ const en: Record<TranslationKey, string> = {
   'settings.clearing': 'Clearing…',
   'settings.replayTour': 'Replay the tour',
   'settings.cacheNote':
-    'Clearing the cache only removes images and clips: posts, tags and favourites are kept, and thumbnails regenerate on the next launch.',
+    'Clearing the cache keeps posts, tags and favourites. Thumbnails regenerate; in offline mode, clips gradually fill again.',
   'settings.guide': 'Help and getting started',
   'settings.guideHint': 'Review Magpie\'s main features and account connection.',
   'settings.updates': 'Updates',
@@ -628,6 +654,20 @@ const en: Record<TranslationKey, string> = {
     'Tags, collections and favourites — across platforms, independent of how each one files things.',
   'welcome.findTitle': 'Find things again',
   'welcome.findText': 'Instant search across captions and authors, accent-insensitive.',
+  'welcome.storageTitle': 'Before downloading your media',
+  'welcome.storageText':
+    'A large library can use a lot of space. Choose what Magpie keeps on this PC and where the library should live.',
+  'welcome.storageStream': 'Save disk space',
+  'welcome.storageStreamText':
+    'Keeps lightweight thumbnails. Full images and videos are streamed on demand and are not added to the media cache.',
+  'welcome.storageOffline': 'Keep videos offline',
+  'welcome.storageOfflineText':
+    'Downloads a copy of every video at your chosen quality. More reliable, but much larger.',
+  'welcome.recommended': 'Recommended',
+  'welcome.storageLocation': 'Library and cache location',
+  'welcome.storageLoading': 'Finding the location…',
+  'welcome.storageChoose': 'Choose a folder…',
+  'welcome.storageLimit': 'Cache limit · {size} GB',
   'welcome.howTitle': 'How it works',
   'welcome.loginTitle': 'You sign in on the real page',
   'welcome.loginText':

@@ -17,7 +17,12 @@ import { stat } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { closeDb, getDb, mediaDir } from './db'
 import { registerIpc } from './ipc'
-import { countPosts, recentAiCandidateIds, repairMissingSyncDates } from './db/queries'
+import {
+  countPosts,
+  playbackMediaSource,
+  recentAiCandidateIds,
+  repairMissingSyncDates
+} from './db/queries'
 import { backfillRuleTags } from './tagging/rules'
 import { processPendingMedia, THUMB_NAME_PATTERN, VIDEO_NAME_PATTERN } from './media/cache'
 import { applyTheme, readSettings } from './settings'
@@ -29,6 +34,8 @@ import type { SyncPhase } from '@shared/types'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
+import { parseRemoteMediaUrl } from './media/remote'
+import { sessionFor, userAgent } from './adapters/session'
 
 const isDev = !app.isPackaged
 const APP_ID = 'tv.electrictheatre.magpie'
@@ -240,6 +247,56 @@ export function syncTheme(): void {
 function registerMediaProtocol(): void {
   protocol.handle('magpie', async (request) => {
     const url = new URL(request.url)
+
+    if (url.host === 'remote') {
+      const remoteRequest = parseRemoteMediaUrl(request.url)
+      if (!remoteRequest) return new Response('Bad request', { status: 400 })
+      const { postId, mediaIndex: idx, kind, quality } = remoteRequest
+
+      const media = playbackMediaSource(postId, idx, kind, quality)
+      if (!media?.source || !/^https?:\/\//i.test(media.source)) {
+        return new Response('Media unavailable', { status: 404 })
+      }
+
+      const origin =
+        media.platform === 'instagram'
+          ? 'https://www.instagram.com/'
+          : media.platform === 'x'
+            ? 'https://x.com/'
+            : 'https://www.reddit.com/'
+      const headers = new Headers({
+        Accept:
+          kind === 'video'
+            ? 'video/*,application/octet-stream,*/*;q=0.8'
+            : 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        Referer: origin,
+        'User-Agent': userAgent(),
+        'Cache-Control': 'no-store'
+      })
+      const range = request.headers.get('range')
+      if (range) headers.set('Range', range)
+
+      try {
+        const remote = await sessionFor(media.platform).fetch(media.source, {
+          method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+          headers,
+          credentials: 'include',
+          redirect: 'follow'
+        })
+        const responseHeaders = new Headers(remote.headers)
+        responseHeaders.set('Cache-Control', 'no-store')
+        responseHeaders.delete('set-cookie')
+        responseHeaders.delete('set-cookie2')
+        return new Response(request.method === 'HEAD' ? null : remote.body, {
+          status: remote.status,
+          statusText: remote.statusText,
+          headers: responseHeaders
+        })
+      } catch {
+        return new Response('Remote media unavailable', { status: 502 })
+      }
+    }
+
     const name = decodeURIComponent(url.pathname.replace(/^\//, ''))
 
     // Le nom vient de la base, mais on le revalide : c'est la seule chose qui empêche un
@@ -403,7 +460,12 @@ void app.whenReady().then(async () => {
     drainMedia: () => void drainMediaQueue(),
     pauseMedia: pauseMediaQueue,
     resumeMedia: resumeMediaQueue,
-    onSettingsChange: refreshBackgroundFeatures
+    onSettingsChange: () => {
+      refreshBackgroundFeatures()
+      // Passer en mode hors-ligne doit commencer à remplir le cache sans attendre un
+      // redémarrage. En mode léger, les workers consultent le réglage avant chaque clip.
+      void drainMediaQueue()
+    }
   })
   createWindow()
   refreshBackgroundFeatures()

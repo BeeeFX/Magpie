@@ -10,7 +10,8 @@ const DEFAULTS: Settings = {
   accent: 'violet',
   nitrateEnabled: false,
   onboardingDone: false,
-  videoCacheQuality: '720p',
+  videoCacheQuality: '480p',
+  mediaStorageMode: 'stream',
   playbackQuality: 'auto',
   cacheLimitGb: 20,
   trayEnabled: true,
@@ -54,6 +55,10 @@ function sanitize(raw: unknown): Settings {
       value.videoCacheQuality === 'source'
         ? value.videoCacheQuality
         : DEFAULTS.videoCacheQuality,
+    mediaStorageMode:
+      value.mediaStorageMode === 'stream' || value.mediaStorageMode === 'offline'
+        ? value.mediaStorageMode
+        : DEFAULTS.mediaStorageMode,
     playbackQuality:
       value.playbackQuality === 'auto' ||
       value.playbackQuality === '480p' ||

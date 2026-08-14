@@ -8,15 +8,16 @@ import type {
   GridMode,
   LabelColor,
   LibraryStats,
+  MediaStorageMode,
+  PlaybackQuality,
   Platform,
   Post,
   PostQuery,
   SortKey,
   SyncState,
   ThemeChoice,
-  VideoQuality,
-  PlaybackQuality
-  ,SyncSchedule
+  SyncSchedule,
+  VideoQuality
 } from '@shared/types'
 import type { Language, LanguageChoice } from '@shared/types'
 import { DEFAULT_QUERY, idleSyncState } from '@shared/types'
@@ -130,6 +131,7 @@ interface State {
   accent: AccentName
   nitrateEnabled: boolean
   videoCacheQuality: VideoQuality
+  mediaStorageMode: MediaStorageMode
   playbackQuality: PlaybackQuality
   cacheLimitGb: number
   trayEnabled: boolean
@@ -174,6 +176,7 @@ interface State {
   setLanguage: (language: LanguageChoice) => Promise<void>
   setNitrateEnabled: (enabled: boolean) => Promise<void>
   setVideoCacheQuality: (quality: VideoQuality) => Promise<void>
+  setMediaStorageMode: (mode: MediaStorageMode) => Promise<void>
   setPlaybackQuality: (quality: PlaybackQuality) => Promise<void>
   setCacheLimitGb: (limit: number) => Promise<void>
   setTrayEnabled: (enabled: boolean) => Promise<void>
@@ -239,7 +242,8 @@ export const useStore = create<State>()(
       // Aligné sur les valeurs par défaut du processus principal (main/settings.ts).
       accent: 'violet',
       nitrateEnabled: false,
-      videoCacheQuality: '720p',
+      videoCacheQuality: '480p',
+      mediaStorageMode: 'stream',
       playbackQuality: 'auto',
       cacheLimitGb: 20,
       trayEnabled: true,
@@ -435,6 +439,7 @@ export const useStore = create<State>()(
           accent: settings.accent,
           nitrateEnabled: settings.nitrateEnabled,
           videoCacheQuality: settings.videoCacheQuality,
+          mediaStorageMode: settings.mediaStorageMode,
           playbackQuality: settings.playbackQuality,
           cacheLimitGb: settings.cacheLimitGb,
           trayEnabled: settings.trayEnabled,
@@ -486,6 +491,11 @@ export const useStore = create<State>()(
       setVideoCacheQuality: async (videoCacheQuality) => {
         set({ videoCacheQuality })
         await magpie.setSettings({ videoCacheQuality })
+      },
+
+      setMediaStorageMode: async (mediaStorageMode) => {
+        set({ mediaStorageMode })
+        await magpie.setSettings({ mediaStorageMode })
       },
 
       setPlaybackQuality: async (playbackQuality) => {

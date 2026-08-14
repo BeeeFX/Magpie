@@ -1,6 +1,7 @@
 import type {
   LabelColor,
   LibraryStats,
+  PlaybackQuality,
   Platform,
   Post,
   PostKind,
@@ -752,34 +753,76 @@ export function knownPostIds(platform: Platform): Set<string> {
   return new Set(rows.map((row) => row.id))
 }
 
-export function videoVariant(
-  postId: string,
-  idx: number,
-  quality: VideoQuality
-): { platform: Platform; source: string; cachePath: string | null } | null {
-  const row = getDb()
-    .prepare(
-      `SELECT p.platform, v.source, v.cache_path
-         FROM media_variants v JOIN posts p ON p.id = v.post_id
-        WHERE v.post_id = ? AND v.idx = ? AND v.quality = ?`
-    )
-    .get(postId, idx, quality) as
-    | { platform: Platform; source: string; cache_path: string | null }
-    | undefined
-  return row ? { platform: row.platform, source: row.source, cachePath: row.cache_path } : null
+export interface PlaybackMediaSource {
+  platform: Platform
+  source: string | null
+  cachePath: string | null
 }
 
-export function setVideoVariantCache(
+/**
+ * Résout un média au moment où le lecteur s'ouvre. L'URL distante ne traverse jamais le
+ * pont vers l'interface : le protocole `magpie://remote` la diffuse depuis la session
+ * isolée de la plateforme, avec ses cookies et son referer.
+ */
+export function playbackMediaSource(
   postId: string,
   idx: number,
-  quality: VideoQuality,
-  cachePath: string
-): void {
-  getDb()
+  kind: 'image' | 'video',
+  quality: PlaybackQuality
+): PlaybackMediaSource | null {
+  const row = getDb()
     .prepare(
-      'UPDATE media_variants SET cache_path = ? WHERE post_id = ? AND idx = ? AND quality = ?'
+      `SELECT p.platform, m.kind, m.remote_url, m.video_source, m.video_path
+         FROM media m JOIN posts p ON p.id = m.post_id
+        WHERE m.post_id = ? AND m.idx = ?`
     )
-    .run(cachePath, postId, idx, quality)
+    .get(postId, idx) as
+    | {
+        platform: Platform
+        kind: 'image' | 'video'
+        remote_url: string | null
+        video_source: string | null
+        video_path: string | null
+      }
+    | undefined
+  if (!row || row.kind !== kind) return null
+
+  if (kind === 'image') {
+    return { platform: row.platform, source: row.remote_url, cachePath: null }
+  }
+
+  if (quality === 'auto') {
+    // Chromium desktop ne lit pas directement tous les manifestes HLS/DASH. Reddit
+    // fournit aussi un MP4 de secours dans `media_variants` : en mode streaming il vaut
+    // mieux une lecture immédiate que laisser un manifeste inutilisable au lecteur.
+    if (row.video_source && /\.(?:m3u8|mpd)(?:\?|$)/i.test(row.video_source)) {
+      const fallback = getDb()
+        .prepare(
+          `SELECT source, cache_path
+             FROM media_variants
+            WHERE post_id = ? AND idx = ?
+            ORDER BY CASE quality
+              WHEN '480p' THEN 1 WHEN '720p' THEN 2 WHEN '1080p' THEN 3 ELSE 4 END
+            LIMIT 1`
+        )
+        .get(postId, idx) as { source: string; cache_path: string | null } | undefined
+      if (fallback) {
+        return { platform: row.platform, source: fallback.source, cachePath: row.video_path }
+      }
+    }
+    return { platform: row.platform, source: row.video_source, cachePath: row.video_path }
+  }
+
+  const variant = getDb()
+    .prepare(
+      `SELECT source, cache_path
+         FROM media_variants
+        WHERE post_id = ? AND idx = ? AND quality = ?`
+    )
+    .get(postId, idx, quality) as { source: string; cache_path: string | null } | undefined
+  return variant
+    ? { platform: row.platform, source: variant.source, cachePath: variant.cache_path }
+    : null
 }
 
 export interface AccountRow {

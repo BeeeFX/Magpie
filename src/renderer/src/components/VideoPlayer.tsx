@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useT } from '../store'
-import { IconExpand, IconPlay, IconVolume } from './Icons'
+import { IconCheck, IconExpand, IconPlay, IconSettings, IconVolume } from './Icons'
 import type { VideoQuality } from '@shared/types'
 import { magpie } from '../bridge'
 
@@ -47,8 +47,10 @@ export function VideoPlayer({
   const playbackQuality = useStore((s) => s.playbackQuality)
 
   const ref = useRef<HTMLVideoElement>(null)
+  const qualityMenuRef = useRef<HTMLDivElement>(null)
   const scrubbingRef = useRef(false)
   const resumeAfterScrubRef = useRef(false)
+  const resumeAfterQualityRef = useRef<{ time: number; playing: boolean } | null>(null)
   const [playing, setPlaying] = useState(true)
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -56,35 +58,48 @@ export function VideoPlayer({
   const [activeSrc, setActiveSrc] = useState(src)
   const [quality, setQuality] = useState<VideoQuality | 'auto'>('auto')
   const [qualityBusy, setQualityBusy] = useState(false)
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
+  const [sourceError, setSourceError] = useState(false)
+  const qualitySignature = qualities.join('|')
 
   useEffect(() => {
-    setActiveSrc(src)
-    setQuality('auto')
+    let cancelled = false
+    const preferred = playbackQuality !== 'auto' && qualities.includes(playbackQuality)
+      ? playbackQuality
+      : 'auto'
+    setQuality(preferred)
     setTime(0)
     setDuration(0)
     setScrubValue(null)
-  }, [src])
-
-  useEffect(() => {
-    if (playbackQuality === 'auto' || !qualities.includes(playbackQuality)) return
-    let cancelled = false
+    setSourceError(false)
     setQualityBusy(true)
     void magpie
-      .cacheVideoQuality(postId, mediaIndex, playbackQuality)
+      .getMediaPlaybackUrl(postId, mediaIndex, 'video', preferred)
       .then((url) => {
+        if (!cancelled) setActiveSrc(url || src)
+      })
+      .catch(() => {
         if (!cancelled) {
-          setActiveSrc(url)
-          setQuality(playbackQuality)
+          setActiveSrc(src)
+          setSourceError(!src)
         }
       })
-      .catch(() => {})
       .finally(() => {
         if (!cancelled) setQualityBusy(false)
       })
     return () => {
       cancelled = true
     }
-  }, [mediaIndex, playbackQuality, postId, qualities])
+  }, [mediaIndex, playbackQuality, postId, qualitySignature, src])
+
+  useEffect(() => {
+    if (!qualityMenuOpen) return
+    const close = (event: PointerEvent): void => {
+      if (!qualityMenuRef.current?.contains(event.target as Node)) setQualityMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [qualityMenuOpen])
 
   /* Le volume du store est la source de vérité : on le pousse dans l'élément à chaque
      changement, y compris quand un nouveau clip est monté. */
@@ -96,14 +111,19 @@ export function VideoPlayer({
   }, [volume, muted, activeSrc])
 
   const chooseQuality = async (next: VideoQuality | 'auto'): Promise<void> => {
+    const current = ref.current
+    resumeAfterQualityRef.current = current
+      ? { time: current.currentTime, playing: !current.paused }
+      : null
     setQuality(next)
-    if (next === 'auto') {
-      setActiveSrc(src)
-      return
-    }
+    setQualityMenuOpen(false)
     setQualityBusy(true)
+    setSourceError(false)
     try {
-      setActiveSrc(await magpie.cacheVideoQuality(postId, mediaIndex, next))
+      const url = await magpie.getMediaPlaybackUrl(postId, mediaIndex, 'video', next)
+      setActiveSrc(url || src)
+    } catch {
+      setSourceError(true)
     } finally {
       setQualityBusy(false)
     }
@@ -157,7 +177,7 @@ export function VideoPlayer({
     <div className="player">
       <video
         ref={ref}
-        src={activeSrc}
+        src={activeSrc || undefined}
         poster={poster}
         className="player__video"
         autoPlay
@@ -168,14 +188,35 @@ export function VideoPlayer({
         onTimeUpdate={(e) => {
           if (!scrubbingRef.current) setTime(e.currentTarget.currentTime)
         }}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        onLoadedMetadata={(e) => {
+          const video = e.currentTarget
+          setDuration(video.duration)
+          const resume = resumeAfterQualityRef.current
+          if (resume) {
+            video.currentTime = Math.min(resume.time, Math.max(0, video.duration - 0.08))
+            setTime(video.currentTime)
+            if (resume.playing) void video.play().catch(() => setPlaying(false))
+            resumeAfterQualityRef.current = null
+          }
+        }}
         onDurationChange={(e) => setDuration(e.currentTarget.duration)}
         onEnded={(e) => {
           e.currentTarget.currentTime = 0
           setTime(0)
           void e.currentTarget.play().catch(() => setPlaying(false))
         }}
+        onError={() => {
+          if (src && activeSrc !== src) {
+            setQuality('auto')
+            setActiveSrc(src)
+            setSourceError(false)
+          } else {
+            setSourceError(true)
+          }
+        }}
       />
+
+      {sourceError ? <div className="player__error">{t('player.streamError')}</div> : null}
 
       <div className="player__bar">
         <button type="button" className="player__btn" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
@@ -206,23 +247,37 @@ export function VideoPlayer({
 
         <span className="player__time">{formatClock(duration)}</span>
 
-        {qualities.length > 1 ? (
-          <select
-            className="player__quality"
-            value={quality}
-            disabled={qualityBusy}
-            onChange={(event) =>
-              void chooseQuality(event.target.value as VideoQuality | 'auto')
-            }
-            aria-label={t('player.quality')}
-          >
-            <option value="auto">{t('quality.auto')}</option>
-            {qualities.map((item) => (
-              <option key={item} value={item}>
-                {t(`quality.${item}` as Parameters<typeof t>[0])}
-              </option>
-            ))}
-          </select>
+        {qualities.length > 0 ? (
+          <div className="player__quality" ref={qualityMenuRef}>
+            {qualityMenuOpen ? (
+              <div className="player__quality-popover" role="menu" aria-label={t('player.quality')}>
+                <span className="player__quality-title">{t('player.quality')}</span>
+                {(['auto', ...qualities] as Array<VideoQuality | 'auto'>).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={quality === item}
+                    className={quality === item ? 'is-active' : ''}
+                    onClick={() => void chooseQuality(item)}
+                  >
+                    <span>{t(`quality.${item}` as Parameters<typeof t>[0])}</span>
+                    {quality === item ? <IconCheck size={13} /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className={`player__btn ${qualityMenuOpen ? 'is-active' : ''} ${qualityBusy ? 'is-busy' : ''}`}
+              disabled={qualityBusy}
+              onClick={() => setQualityMenuOpen((open) => !open)}
+              aria-label={t('player.quality')}
+              aria-expanded={qualityMenuOpen}
+            >
+              <IconSettings size={15} />
+            </button>
+          </div>
         ) : null}
 
         <div className="player__volume">

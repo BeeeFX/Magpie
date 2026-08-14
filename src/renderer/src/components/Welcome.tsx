@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ACCENTS, LANGUAGES } from '@shared/types'
+import type { LibraryInfo, VideoQuality } from '@shared/types'
+import { magpie } from '../bridge'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
 import { Accounts } from './Accounts'
@@ -9,6 +11,7 @@ import {
   IconCheck,
   IconCollections,
   IconGrid,
+  IconInbox,
   IconSearch,
   IconSend,
   IconStar,
@@ -56,7 +59,33 @@ export function Welcome(): React.JSX.Element {
   const setLanguage = useStore((s) => s.setLanguage)
   const accent = useStore((s) => s.accent)
   const setAccent = useStore((s) => s.setAccent)
+  const mediaStorageMode = useStore((s) => s.mediaStorageMode)
+  const setMediaStorageMode = useStore((s) => s.setMediaStorageMode)
+  const videoCacheQuality = useStore((s) => s.videoCacheQuality)
+  const setVideoCacheQuality = useStore((s) => s.setVideoCacheQuality)
+  const cacheLimitGb = useStore((s) => s.cacheLimitGb)
+  const setCacheLimitGb = useStore((s) => s.setCacheLimitGb)
   const [index, setIndex] = useState(0)
+  const [libraryInfo, setLibraryInfo] = useState<LibraryInfo | null>(null)
+  const [choosingFolder, setChoosingFolder] = useState(false)
+  const [folderError, setFolderError] = useState<string | null>(null)
+
+  useEffect(() => {
+    void magpie.getLibraryInfo().then(setLibraryInfo).catch(() => {})
+  }, [])
+
+  const chooseFolder = async (): Promise<void> => {
+    setChoosingFolder(true)
+    setFolderError(null)
+    try {
+      const result = await magpie.chooseLibraryFolder()
+      if (!result.moved) setLibraryInfo((info) => (info ? { ...info, dataPath: result.path } : info))
+    } catch (error) {
+      setFolderError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setChoosingFolder(false)
+    }
+  }
 
   const connectedCount = accounts.filter((a) => a.connected).length
 
@@ -75,7 +104,7 @@ export function Welcome(): React.JSX.Element {
     ]
   ]
 
-  const steps = ['hello', 'what', 'how', 'connect']
+  const steps = ['hello', 'what', 'storage', 'how', 'connect']
   const isLast = index === steps.length - 1
 
   return (
@@ -120,18 +149,92 @@ export function Welcome(): React.JSX.Element {
             </div>
           ) : null}
 
-          {index === 1 || index === 2 ? (
+          {index === 1 || index === 3 ? (
             <>
               <h2>{t(index === 1 ? 'welcome.whatTitle' : 'welcome.howTitle')}</h2>
               <div className="features">
-                {features[index - 1].map((f) => (
+                {features[index === 1 ? 0 : 1].map((f) => (
                   <Feature key={f.key} icon={f.icon} title={t(f.title)} text={t(f.text)} />
                 ))}
               </div>
             </>
           ) : null}
 
-          {index === 3 ? (
+          {index === 2 ? (
+            <>
+              <div className="welcome__storage-head">
+                <span className="feature__icon"><IconInbox size={20} /></span>
+                <div>
+                  <h2>{t('welcome.storageTitle')}</h2>
+                  <p className="welcome__lead welcome__lead--tight">{t('welcome.storageText')}</p>
+                </div>
+              </div>
+
+              <div className="welcome__storage-options">
+                <button
+                  type="button"
+                  className={`welcome__storage-option ${mediaStorageMode === 'stream' ? 'is-active' : ''}`}
+                  onClick={() => void setMediaStorageMode('stream')}
+                >
+                  <span className="welcome__storage-check"><IconCheck size={14} /></span>
+                  <strong>{t('welcome.storageStream')}</strong>
+                  <span>{t('welcome.storageStreamText')}</span>
+                  <em>{t('welcome.recommended')}</em>
+                </button>
+                <button
+                  type="button"
+                  className={`welcome__storage-option ${mediaStorageMode === 'offline' ? 'is-active' : ''}`}
+                  onClick={() => void setMediaStorageMode('offline')}
+                >
+                  <span className="welcome__storage-check"><IconCheck size={14} /></span>
+                  <strong>{t('welcome.storageOffline')}</strong>
+                  <span>{t('welcome.storageOfflineText')}</span>
+                </button>
+              </div>
+
+              {mediaStorageMode === 'offline' ? (
+                <div className="welcome__storage-row">
+                  <span>{t('settings.cacheQuality')}</span>
+                  <div className="segmented">
+                    {(['480p', '720p', '1080p', 'source'] as VideoQuality[]).map((quality) => (
+                      <button
+                        key={quality}
+                        type="button"
+                        className={videoCacheQuality === quality ? 'is-active' : ''}
+                        onClick={() => void setVideoCacheQuality(quality)}
+                      >
+                        {t(`quality.${quality}` as TranslationKey)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="welcome__storage-row welcome__storage-row--path">
+                <div>
+                  <strong>{t('welcome.storageLocation')}</strong>
+                  <span title={libraryInfo?.dataPath}>{libraryInfo?.dataPath ?? t('welcome.storageLoading')}</span>
+                </div>
+                <button type="button" className="btn" disabled={choosingFolder} onClick={() => void chooseFolder()}>
+                  {choosingFolder ? t('settings.choosingLibrary') : t('welcome.storageChoose')}
+                </button>
+              </div>
+              {folderError ? <p className="welcome__storage-error">{folderError}</p> : null}
+
+              <label className="welcome__storage-limit">
+                <span>{t('welcome.storageLimit', { size: cacheLimitGb })}</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  value={cacheLimitGb}
+                  onChange={(event) => void setCacheLimitGb(Number(event.target.value))}
+                />
+              </label>
+            </>
+          ) : null}
+
+          {index === 4 ? (
             <>
               <h2>{t('welcome.connectTitle')}</h2>
               <p className="welcome__lead welcome__lead--tight">{t('welcome.connectText')}</p>

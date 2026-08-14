@@ -60,11 +60,13 @@ export function Detail(): React.JSX.Element | null {
   const [collections, setCollections] = useState<CollectionInfo[]>([])
   const [inCollections, setInCollections] = useState<number[]>([])
   const [notice, setNotice] = useState<string | null>(null)
+  const [detailImageSrc, setDetailImageSrc] = useState<string | null>(null)
   const [htmlFullscreen, setHtmlFullscreen] = useState(false)
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
   const fullscreen = htmlFullscreen || nativeFullscreen
 
   const post: Post | undefined = index === null ? undefined : posts[index]
+  const selectedMedia = post?.media[mediaIndex] ?? post?.media[0]
 
   /** Transformation qui fait coïncider le panneau avec la vignette d'origine. */
   const originTransform = useCallback((): string | null => {
@@ -138,6 +140,24 @@ export function Detail(): React.JSX.Element | null {
     if (!post) return
     void magpie.collectionsForPost(post.id).then(setInCollections)
   }, [post?.id])
+
+  useEffect(() => {
+    if (!post || selectedMedia?.kind !== 'image') {
+      setDetailImageSrc(null)
+      return
+    }
+    let cancelled = false
+    setDetailImageSrc(selectedMedia.thumbUrl)
+    void magpie
+      .getMediaPlaybackUrl(post.id, selectedMedia.idx, 'image', 'auto')
+      .then((url) => {
+        if (!cancelled && url) setDetailImageSrc(url)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [post?.id, selectedMedia?.idx, selectedMedia?.kind, selectedMedia?.thumbUrl])
 
   useEffect(() => {
     if (index === null) return
@@ -239,9 +259,9 @@ export function Detail(): React.JSX.Element | null {
 
   if (index === null || !post) return null
 
-  const media = post.media[mediaIndex] ?? post.media[0]
-  const isVideo = media?.kind === 'video' && media.videoUrl
-  const hasMedia = Boolean(media?.thumbUrl || media?.videoUrl)
+  const media = selectedMedia
+  const isVideo = media?.kind === 'video' && (Boolean(media.videoUrl) || media.videoQualities.length > 0)
+  const hasMedia = Boolean(media?.thumbUrl || media?.videoUrl || media?.videoQualities.length)
 
   const copy = (): void => {
     void magpie.copyToClipboard(post.url)
@@ -313,7 +333,7 @@ export function Detail(): React.JSX.Element | null {
         <div className="detail__stage" ref={stageRef}>
           {isVideo ? (
             <VideoPlayer
-              key={media.videoUrl}
+              key={`${post.id}:${media.idx}`}
               src={media.videoUrl ?? ''}
               poster={media.thumbUrl ?? undefined}
               postId={post.id}
@@ -322,8 +342,13 @@ export function Detail(): React.JSX.Element | null {
               fullscreen={fullscreen}
               onToggleFullscreen={toggleFullscreen}
             />
-          ) : media?.thumbUrl ? (
-            <img src={media.thumbUrl} alt={post.text ?? ''} className="detail__media" />
+          ) : detailImageSrc ? (
+            <img
+              src={detailImageSrc}
+              alt={post.text ?? ''}
+              className="detail__media"
+              onError={() => setDetailImageSrc(media?.thumbUrl ?? null)}
+            />
           ) : null}
 
           {post.media.length > 1 ? (

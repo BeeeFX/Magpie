@@ -29,7 +29,8 @@ Magpie turns hundreds of scattered saved posts into a fast Pinterest-style wall.
 - Connect **Instagram, X and Reddit** and sync them at the same time.
 - Watch each account’s progress and resume long imports safely.
 - Choose the grid density, light/dark theme and colour accent.
-- Control video quality, shared volume and the maximum media-cache size.
+- Choose lightweight on-demand streaming or an offline video library, with a configurable cache limit.
+- Pick the streaming resolution from the player’s compact quality menu.
 - Select many posts at once to tag, favourite, copy or add to a collection.
 - Optionally organise new posts with OpenAI, Claude, Gemini, DeepSeek or another compatible model.
 - Move the whole library to another drive whenever it gets large.
@@ -58,7 +59,7 @@ Users upgrading from 0.1.1 need to install 0.2.0 manually once. After that, Magp
 
 ## Private by default
 
-Your posts, tags, collections and cached media stay on your computer. Platform sessions live in separate Chromium partitions, and Magpie never sees the password entered on the platform’s real login page.
+Your posts, tags, collections and cached media stay on your computer. In space-saver mode, full media is requested directly from its platform only when you view it and is not added to Magpie’s media cache. Platform sessions live in separate Chromium partitions, and Magpie never sees the password entered on the platform’s real login page.
 
 AI tagging is off by default. If enabled, post text and a thumbnail may be sent to the provider you choose. The API key is encrypted using the operating system’s secure storage.
 
