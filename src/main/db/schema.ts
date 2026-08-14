@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
@@ -130,6 +130,15 @@ CREATE TABLE IF NOT EXISTS accounts (
   last_sync_at     INTEGER,
   last_sync_status TEXT,
   cursor           TEXT
+);
+
+-- Petite signature visuelle calculée localement à partir de la vignette. Elle permet à
+-- l'organisateur de ne retraiter que les nouveaux médias lors des analyses suivantes.
+CREATE TABLE IF NOT EXISTS local_video_features (
+  post_id     TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  thumb_path  TEXT,
+  visual      BLOB,
+  updated_at  INTEGER NOT NULL
 );
 
 -- Table externe : le contenu vit dans la table posts, l'index FTS ne stocke que ce qu'il

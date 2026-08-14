@@ -43,6 +43,7 @@ jobs:
         run: |
           npm run typecheck
           npm run check:layout
+          npm run check:organizer
 
       - name: Build installer and update manifest
         shell: pwsh

@@ -14,6 +14,7 @@ import type {
   LibraryStats,
   MagpieApi,
   MagpieEvents,
+  OrganizerProgress,
   Platform,
   Post,
   PostPage,
@@ -129,6 +130,11 @@ const events: MagpieEvents = {
     const listener = (_e: unknown, progress: AiTagProgress): void => cb(progress)
     ipcRenderer.on('ai:progress', listener)
     return () => ipcRenderer.removeListener('ai:progress', listener)
+  },
+  onOrganizerProgress: (cb) => {
+    const listener = (_e: unknown, value: OrganizerProgress): void => cb(value)
+    ipcRenderer.on('organizer:progress', listener)
+    return () => ipcRenderer.removeListener('organizer:progress', listener)
   },
   onUpdateState: (cb) => {
     const listener = (_e: unknown, state: UpdateState): void => cb(state)

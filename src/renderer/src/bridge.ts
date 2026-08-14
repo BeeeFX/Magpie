@@ -238,6 +238,7 @@ const previewEvents: MagpieEvents = {
   onLibraryUpdated: () => () => {},
   onSyncState: () => () => {},
   onAiTagProgress: () => () => {},
+  onOrganizerProgress: () => () => {},
   onUpdateState: () => () => {},
   onLibraryMoveProgress: () => () => {},
   onWindowInteraction: () => () => {},

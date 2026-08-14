@@ -373,8 +373,10 @@ export interface AiCandidate {
 
 export interface VideoOrganizationItem {
   id: string
+  platform: Platform
   text: string | null
-  description: string | null
+  authorHandle: string | null
+  thumbPath: string | null
   tags: string[]
 }
 
@@ -394,28 +396,71 @@ export function videoAiCandidateIds(): string[] {
 export function videoOrganizationItems(): VideoOrganizationItem[] {
   const rows = getDb()
     .prepare(
-      `SELECT p.id, p.text, p.ai_description,
-              GROUP_CONCAT(DISTINCT t.name) AS tags
+      `SELECT p.id, p.platform, p.text, p.author_handle,
+              (SELECT m2.thumb_path FROM media m2
+                WHERE m2.post_id = p.id AND m2.kind = 'video'
+                ORDER BY m2.idx LIMIT 1) AS thumb_path,
+              GROUP_CONCAT(DISTINCT CASE WHEN pt.source <> 'ai' THEN t.name END) AS tags
          FROM posts p
-         JOIN media m ON m.post_id = p.id AND m.kind = 'video'
          LEFT JOIN post_tags pt ON pt.post_id = p.id
          LEFT JOIN tags t ON t.id = pt.tag_id
         WHERE p.is_archived = 0
+          AND EXISTS (SELECT 1 FROM media m WHERE m.post_id = p.id AND m.kind = 'video')
         GROUP BY p.id
         ORDER BY p.discovered_at DESC`
     )
     .all() as {
     id: string
+    platform: Platform
     text: string | null
-    ai_description: string | null
+    author_handle: string | null
+    thumb_path: string | null
     tags: string | null
   }[]
   return rows.map((row) => ({
     id: row.id,
+    platform: row.platform,
     text: row.text,
-    description: row.ai_description,
+    authorHandle: row.author_handle,
+    thumbPath: row.thumb_path,
     tags: row.tags?.split(',').filter(Boolean) ?? []
   }))
+}
+
+export interface LocalVideoFeature {
+  postId: string
+  thumbPath: string | null
+  visual: Buffer | null
+}
+
+export function localVideoFeatures(): Map<string, LocalVideoFeature> {
+  const rows = getDb()
+    .prepare('SELECT post_id, thumb_path, visual FROM local_video_features')
+    .all() as { post_id: string; thumb_path: string | null; visual: Buffer | null }[]
+  return new Map(
+    rows.map((row) => [
+      row.post_id,
+      { postId: row.post_id, thumbPath: row.thumb_path, visual: row.visual }
+    ])
+  )
+}
+
+export function saveLocalVideoFeatures(features: LocalVideoFeature[]): void {
+  if (features.length === 0) return
+  const statement = getDb().prepare(`
+    INSERT INTO local_video_features (post_id, thumb_path, visual, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(post_id) DO UPDATE SET
+      thumb_path = excluded.thumb_path,
+      visual = excluded.visual,
+      updated_at = excluded.updated_at
+  `)
+  const now = Date.now()
+  getDb().transaction(() => {
+    for (const feature of features) {
+      statement.run(feature.postId, feature.thumbPath, feature.visual, now)
+    }
+  })()
 }
 
 export function aiCandidates(postIds?: string[], limit = 500): AiCandidate[] {

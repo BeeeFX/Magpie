@@ -213,6 +213,21 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
 
           <section className="setting setting--stack">
             <div className="setting__label">
+              <h3>{t('settings.localOrganizer')}</h3>
+              <p>{t('settings.localOrganizerHint')}</p>
+            </div>
+            <div className="setting__actions">
+              <button type="button" className="btn btn--primary" onClick={onOpenAiOrganizer}>
+                {t('settings.aiOrganize')}
+              </button>
+            </div>
+            <p className="setting__note">{t('settings.localOrganizerNote')}</p>
+          </section>
+
+          <div className="modal__sep" />
+
+          <section className="setting setting--stack">
+            <div className="setting__label">
               <h3>{t('settings.background')}</h3>
               <p>{t('settings.backgroundHint')}</p>
             </div>
@@ -693,14 +708,6 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
                 {aiProgress?.running
                   ? t('settings.aiProgress', { done: aiProgress.done, total: aiProgress.total })
                   : t('settings.aiRun')}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={!aiKeyStored || aiProgress?.running}
-                onClick={onOpenAiOrganizer}
-              >
-                {t('settings.aiOrganize')}
               </button>
             </div>
             <p className="setting__note">{t('settings.aiPrivacy')}</p>

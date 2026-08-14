@@ -352,6 +352,13 @@ export interface AiTagProgress {
   running: boolean
 }
 
+export interface OrganizerProgress {
+  stage: 'idle' | 'preparing' | 'visuals' | 'grouping'
+  done: number
+  total: number
+  running: boolean
+}
+
 export interface AiCollectionSuggestion {
   id: string
   name: string
@@ -385,6 +392,7 @@ export interface MagpieEvents {
   onThemeChanged(cb: (isDark: boolean) => void): () => void
   onSyncState(cb: (state: SyncState) => void): () => void
   onAiTagProgress(cb: (progress: AiTagProgress) => void): () => void
+  onOrganizerProgress(cb: (progress: OrganizerProgress) => void): () => void
   onUpdateState(cb: (state: UpdateState) => void): () => void
   onLibraryMoveProgress(cb: (progress: LibraryMoveProgress) => void): () => void
   onWindowInteraction(cb: (active: boolean) => void): () => void

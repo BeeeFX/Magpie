@@ -119,6 +119,14 @@ const MIGRATIONS: Record<number, (conn: Database.Database) => void> = {
     conn.exec(`CREATE INDEX IF NOT EXISTS idx_media_video_queue ON media(
       video_cache_state, video_attempts, video_path, post_id, idx
     )`)
+  },
+  8: (conn) => {
+    conn.exec(`CREATE TABLE IF NOT EXISTS local_video_features (
+      post_id TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+      thumb_path TEXT,
+      visual BLOB,
+      updated_at INTEGER NOT NULL
+    )`)
   }
 }
 

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AiCollectionApplyResult,
   AiCollectionPlan,
-  AiCollectionSuggestion
+  AiCollectionSuggestion,
+  OrganizerProgress
 } from '@shared/types'
-import { magpie } from '../bridge'
+import { magpie, magpieEvents } from '../bridge'
 import { useStore, useT } from '../store'
 import { IconClose } from './Icons'
 
@@ -20,7 +21,7 @@ interface EditableSuggestion extends AiCollectionSuggestion {
 export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null {
   const t = useT()
   const refresh = useStore((state) => state.refresh)
-  const aiProgress = useStore((state) => state.aiProgress)
+  const [organizerProgress, setOrganizerProgress] = useState<OrganizerProgress | null>(null)
   const [phase, setPhase] = useState<'intro' | 'loading' | 'review' | 'applying' | 'done'>('intro')
   const [plan, setPlan] = useState<AiCollectionPlan | null>(null)
   const [suggestions, setSuggestions] = useState<EditableSuggestion[]>([])
@@ -42,6 +43,11 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose])
+
+  useEffect(() => {
+    if (!open) return
+    return magpieEvents.onOrganizerProgress(setOrganizerProgress)
+  }, [open])
 
   const selected = useMemo(
     () => suggestions.filter((suggestion) => suggestion.included && suggestion.name.trim()),
@@ -147,10 +153,24 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
               <div className="organizer-spinner" />
               <h3>{t('organizer.working')}</h3>
               <p>
-                {aiProgress?.running
-                  ? t('organizer.tagProgress', { done: aiProgress.done, total: aiProgress.total })
-                  : t('organizer.grouping')}
+                {organizerProgress?.stage === 'visuals'
+                  ? t('organizer.visualProgress', {
+                      done: organizerProgress.done,
+                      total: organizerProgress.total
+                    })
+                  : organizerProgress?.stage === 'grouping'
+                    ? t('organizer.grouping')
+                    : t('organizer.preparing')}
               </p>
+              {organizerProgress?.total ? (
+                <div className="organizer-progress" aria-hidden="true">
+                  <span
+                    style={{
+                      width: `${Math.min(100, (organizerProgress.done / organizerProgress.total) * 100)}%`
+                    }}
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
 

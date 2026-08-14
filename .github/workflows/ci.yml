@@ -40,5 +40,8 @@ jobs:
       - name: Layout checks
         run: npm run check:layout
 
+      - name: Local organiser checks
+        run: npm run check:organizer
+
       - name: Production build
         run: npm run build

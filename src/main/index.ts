@@ -21,6 +21,7 @@ import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
 import { repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
+import { localOrganizer } from './tagging/organize'
 import type { SyncPhase } from '@shared/types'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
@@ -392,6 +393,10 @@ void app.whenReady().then(async () => {
   aiTagger.subscribe((progress) => {
     mainWindow?.webContents.send('ai:progress', progress)
     if (!progress.running) mainWindow?.webContents.send('library:updated')
+  })
+
+  localOrganizer.subscribe((value) => {
+    mainWindow?.webContents.send('organizer:progress', value)
   })
 
   // Le thème « système » doit suivre les changements de l'OS en direct.
