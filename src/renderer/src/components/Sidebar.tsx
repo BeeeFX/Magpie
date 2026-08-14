@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CollectionInfo, LabelColor, Platform, PostKind } from '@shared/types'
-import { LABELS, PLATFORMS } from '@shared/types'
+import { LABELS, PUBLIC_PLATFORMS } from '@shared/types'
 import { magpie } from '../bridge'
 import { PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
@@ -9,8 +9,10 @@ import { LabelPicker } from './LabelPicker'
 import { Logo } from './Logo'
 import { PlatformIcon } from './PlatformIcon'
 import {
+  IconCheck,
   IconCollections,
   IconGrid,
+  IconHeart,
   IconImage,
   IconLink,
   IconPlus,
@@ -37,9 +39,12 @@ export function Sidebar(): React.JSX.Element {
   const resetQuery = useStore((s) => s.resetQuery)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const posts = useStore((s) => s.posts)
+  const contentSources = useStore((s) => s.contentSources)
 
   const [showAllTags, setShowAllTags] = useState(false)
   const [collections, setCollections] = useState<CollectionInfo[]>([])
+  const [creatingCollection, setCreatingCollection] = useState(false)
+  const [collectionDraft, setCollectionDraft] = useState('')
 
   useEffect(() => {
     void magpie.listCollections().then(setCollections)
@@ -63,6 +68,7 @@ export function Sidebar(): React.JSX.Element {
   const shown = showAllTags ? tags : tags.slice(0, TAGS_COLLAPSED)
   const isAll =
     query.platforms.length === 0 &&
+    query.sources.length === 0 &&
     query.kinds.length === 0 &&
     !query.favoritesOnly &&
     !query.tag &&
@@ -78,11 +84,14 @@ export function Sidebar(): React.JSX.Element {
     setCollections(await magpie.listCollections())
   }
 
-  const createCollection = async (): Promise<void> => {
-    const name = window.prompt(t('sidebar.collectionName'))
-    if (!name?.trim()) return
-    await magpie.createCollection(name.trim())
+  const createCollection = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault()
+    const name = collectionDraft.trim()
+    if (!name) return
+    await magpie.createCollection(name)
     setCollections(await magpie.listCollections())
+    setCollectionDraft('')
+    setCreatingCollection(false)
   }
 
   return (
@@ -102,6 +111,29 @@ export function Sidebar(): React.JSX.Element {
             <span className="row__label">{t('sidebar.all')}</span>
             <span className="row__count">{stats?.total ?? 0}</span>
           </button>
+
+          {contentSources.length > 1 ? (
+            <>
+              <button
+                type="button"
+                className={`row ${query.sources.length === 1 && query.sources[0] === 'saved' ? 'is-active' : ''}`}
+                onClick={() => setQuery({ sources: ['saved'] })}
+              >
+                <IconGrid />
+                <span className="row__label">{t('sidebar.saved')}</span>
+                <span className="row__count">{stats?.bySource.saved ?? 0}</span>
+              </button>
+              <button
+                type="button"
+                className={`row ${query.sources.length === 1 && query.sources[0] === 'liked' ? 'is-active' : ''}`}
+                onClick={() => setQuery({ sources: ['liked'] })}
+              >
+                <IconHeart />
+                <span className="row__label">{t('sidebar.liked')}</span>
+                <span className="row__count">{stats?.bySource.liked ?? 0}</span>
+              </button>
+            </>
+          ) : null}
 
           <button
             type="button"
@@ -138,7 +170,7 @@ export function Sidebar(): React.JSX.Element {
             </button>
           ))}
 
-          {PLATFORMS.map((platform) => (
+          {PUBLIC_PLATFORMS.map((platform) => (
             <button
               key={platform}
               type="button"
@@ -181,12 +213,29 @@ export function Sidebar(): React.JSX.Element {
             <button
               type="button"
               className="title-btn"
-              onClick={() => void createCollection()}
+              onClick={() => setCreatingCollection((value) => !value)}
               title={t('sidebar.newCollection')}
             >
               <IconPlus size={13} />
             </button>
           </h2>
+          {creatingCollection ? (
+            <form className="collection-create" onSubmit={(event) => void createCollection(event)}>
+              <input
+                autoFocus
+                value={collectionDraft}
+                maxLength={120}
+                placeholder={t('sidebar.collectionName')}
+                onChange={(event) => setCollectionDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setCreatingCollection(false)
+                }}
+              />
+              <button type="submit" className="collection-create__submit" disabled={!collectionDraft.trim()}>
+                <IconCheck size={13} />
+              </button>
+            </form>
+          ) : null}
           {collections.length === 0 ? (
             <p className="sidebar__empty">{t('sidebar.noneYet')}</p>
           ) : (

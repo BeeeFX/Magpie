@@ -1,4 +1,5 @@
 import type {
+  ContentSource,
   LabelColor,
   LibraryStats,
   PlaybackQuality,
@@ -10,7 +11,7 @@ import type {
   TagSource,
   VideoQuality
 } from '@shared/types'
-import { PLATFORMS } from '@shared/types'
+import { PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
 import { getDb } from './index'
 
 interface PostRow {
@@ -50,12 +51,24 @@ export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): P
   const db = getDb()
   const offset = Math.max(0, Math.floor(rawOffset))
   const limit = Math.min(500, Math.max(1, Math.floor(rawLimit)))
-  const where: string[] = ['p.is_archived = 0']
+  const where: string[] = [
+    `p.is_archived = 0`,
+    `p.platform IN (${PUBLIC_PLATFORMS.map(() => '?').join(', ')})`
+  ]
   const params: unknown[] = []
+  params.push(...PUBLIC_PLATFORMS)
 
   if (query.platforms.length > 0) {
     where.push(`p.platform IN (${query.platforms.map(() => '?').join(', ')})`)
     params.push(...query.platforms)
+  }
+
+  if (query.sources.length > 0) {
+    where.push(`EXISTS (
+      SELECT 1 FROM post_sources ps
+      WHERE ps.post_id = p.id AND ps.source IN (${query.sources.map(() => '?').join(', ')})
+    )`)
+    params.push(...query.sources)
   }
 
   if (query.kinds.length > 0) {
@@ -115,6 +128,7 @@ export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): P
   const posts = rows.map(toPost)
   attachMedia(posts)
   attachTags(posts)
+  attachSources(posts)
 
   return {
     posts,
@@ -142,11 +156,13 @@ export function getPostsByIds(rawIds: string[]): Post[] {
   if (ids.length === 0) return []
   const placeholders = ids.map(() => '?').join(',')
   const rows = getDb()
-    .prepare(`${SELECT_POST} WHERE p.is_archived = 0 AND p.id IN (${placeholders})`)
+    .prepare(`${SELECT_POST} WHERE p.is_archived = 0
+      AND p.platform IN ('instagram', 'x') AND p.id IN (${placeholders})`)
     .all(...ids) as PostRow[]
   const posts = rows.map(toPost)
   attachMedia(posts)
   attachTags(posts)
+  attachSources(posts)
   return posts
 }
 
@@ -182,6 +198,10 @@ function attachMedia(posts: Post[]): void {
     kind: string
     thumb_path: string | null
     video_path: string | null
+    remote_url: string | null
+    video_source: string | null
+    source_path: string | null
+    thumb_attempts: number
     width: number | null
     height: number | null
     video_qualities: string | null
@@ -193,7 +213,8 @@ function attachMedia(posts: Post[]): void {
     rows.push(
       ...(getDb()
         .prepare(
-          `SELECT m.post_id, m.idx, m.kind, m.thumb_path, m.video_path, m.width, m.height,
+          `SELECT m.post_id, m.idx, m.kind, m.thumb_path, m.video_path, m.remote_url,
+                  m.video_source, m.source_path, m.thumb_attempts, m.width, m.height,
                   GROUP_CONCAT(v.quality) AS video_qualities
              FROM media m
              LEFT JOIN media_variants v ON v.post_id = m.post_id AND v.idx = m.idx
@@ -213,6 +234,10 @@ function attachMedia(posts: Post[]): void {
       kind: row.kind === 'video' ? 'video' : 'image',
       thumbUrl: row.thumb_path ? `magpie://thumb/${row.thumb_path}` : null,
       videoUrl: row.video_path ? `magpie://video/${row.video_path}` : null,
+      hasSource: Boolean(
+        row.thumb_path || row.video_path || row.source_path || row.remote_url || row.video_source || row.video_qualities
+      ),
+      thumbStatus: row.thumb_path ? 'ready' : row.thumb_attempts >= 3 ? 'failed' : 'pending',
       width: row.width,
       height: row.height
       ,videoQualities: row.video_qualities
@@ -251,6 +276,19 @@ function attachTags(posts: Post[]): void {
   }
 }
 
+function attachSources(posts: Post[]): void {
+  if (posts.length === 0) return
+  const byId = new Map(posts.map((post) => [post.id, post]))
+  for (let offset = 0; offset < posts.length; offset += 500) {
+    const ids = posts.slice(offset, offset + 500).map((post) => post.id)
+    const placeholders = ids.map(() => '?').join(',')
+    const rows = getDb()
+      .prepare(`SELECT post_id, source FROM post_sources WHERE post_id IN (${placeholders})`)
+      .all(...ids) as { post_id: string; source: ContentSource }[]
+    for (const row of rows) byId.get(row.post_id)?.sources.push(row.source)
+  }
+}
+
 function toPost(row: PostRow): Post {
   return {
     id: row.id,
@@ -275,24 +313,40 @@ function toPost(row: PostRow): Post {
     isFavorite: row.is_favorite === 1,
     isArchived: row.is_archived === 1,
     label: (row.label as LabelColor | null) ?? null,
-    tags: []
+    tags: [],
+    sources: []
   }
 }
 
-export function getStats(): LibraryStats {
+export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): LibraryStats {
   const db = getDb()
+  const sources = activeSources.length > 0 ? activeSources : ['saved']
+  const sourceSlots = sources.map(() => '?').join(', ')
+  const active = `EXISTS (SELECT 1 FROM post_sources aps
+    WHERE aps.post_id = p.id AND aps.source IN (${sourceSlots}))`
 
   const byPlatform = Object.fromEntries(PLATFORMS.map((p) => [p, 0])) as Record<Platform, number>
   const platformRows = db
-    .prepare(`SELECT platform, COUNT(*) AS n FROM posts WHERE is_archived = 0 GROUP BY platform`)
-    .all() as { platform: Platform; n: number }[]
+    .prepare(`SELECT platform, COUNT(*) AS n FROM posts p
+      WHERE is_archived = 0 AND platform IN ('instagram', 'x') AND ${active} GROUP BY platform`)
+    .all(...sources) as { platform: Platform; n: number }[]
   for (const row of platformRows) byPlatform[row.platform] = row.n
 
   const total = platformRows.reduce((sum, row) => sum + row.n, 0)
 
+  const bySource: Record<ContentSource, number> = { saved: 0, liked: 0 }
+  const sourceRows = db
+    .prepare(`SELECT source, COUNT(*) AS n FROM post_sources ps
+      JOIN posts p ON p.id = ps.post_id
+      WHERE p.is_archived = 0 AND p.platform IN ('instagram', 'x') GROUP BY source`)
+    .all() as { source: ContentSource; n: number }[]
+  for (const row of sourceRows) bySource[row.source] = row.n
+
   const favorites = db
-    .prepare(`SELECT COUNT(*) AS n FROM posts WHERE is_archived = 0 AND is_favorite = 1`)
-    .get() as { n: number }
+    .prepare(`SELECT COUNT(*) AS n FROM posts p
+      WHERE is_archived = 0 AND platform IN ('instagram', 'x')
+        AND is_favorite = 1 AND ${active}`)
+    .get(...sources) as { n: number }
 
   const topTags = db
     .prepare(
@@ -305,23 +359,25 @@ export function getStats(): LibraryStats {
               COUNT(*) AS count
          FROM post_tags pt
          JOIN tags t ON t.id = pt.tag_id
-         JOIN posts p ON p.id = pt.post_id AND p.is_archived = 0
+         JOIN posts p ON p.id = pt.post_id AND p.is_archived = 0 AND p.platform IN ('instagram', 'x')
+        WHERE ${active}
         GROUP BY t.id
         ORDER BY count DESC, t.name COLLATE NOCASE
         LIMIT 40`
     )
-    .all() as { name: string; count: number; source: TagSource }[]
+    .all(...sources) as { name: string; count: number; source: TagSource }[]
 
   const byLabel: Partial<Record<LabelColor, number>> = {}
   const labelRows = db
     .prepare(
-      `SELECT label, COUNT(*) AS n FROM posts
-        WHERE is_archived = 0 AND label IS NOT NULL GROUP BY label`
+      `SELECT label, COUNT(*) AS n FROM posts p
+        WHERE is_archived = 0 AND platform IN ('instagram', 'x')
+          AND label IS NOT NULL AND ${active} GROUP BY label`
     )
-    .all() as { label: LabelColor; n: number }[]
+    .all(...sources) as { label: LabelColor; n: number }[]
   for (const row of labelRows) byLabel[row.label] = row.n
 
-  return { total, favorites: favorites.n, byPlatform, byLabel, topTags }
+  return { total, favorites: favorites.n, byPlatform, bySource, byLabel, topTags }
 }
 
 export function toggleFavorite(id: string): boolean {
@@ -640,7 +696,11 @@ const upsertPostStmt = () =>
       updated_at   = excluded.updated_at
   `)
 
-export function upsertPosts(posts: PostInput[], media: MediaInput[]): void {
+export function upsertPosts(
+  posts: PostInput[],
+  media: MediaInput[],
+  source: ContentSource = 'saved'
+): void {
   const db = getDb()
   const post = upsertPostStmt()
   const mediaStmt = db.prepare(/* sql */ `
@@ -680,6 +740,13 @@ export function upsertPosts(posts: PostInput[], media: MediaInput[]): void {
     INSERT INTO media_variants (post_id, idx, quality, source, width, height, bitrate)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `)
+  const sourceStmt = db.prepare(/* sql */ `
+    INSERT INTO post_sources (post_id, source, source_rank, source_at, discovered_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(post_id, source) DO UPDATE SET
+      source_rank = COALESCE(post_sources.source_rank, excluded.source_rank),
+      source_at = COALESCE(post_sources.source_at, excluded.source_at)
+  `)
 
   const now = Date.now()
   const run = db.transaction(() => {
@@ -702,6 +769,7 @@ export function upsertPosts(posts: PostInput[], media: MediaInput[]): void {
         is_demo: p.isDemo ? 1 : 0,
         updated_at: now
       })
+      sourceStmt.run(p.id, source, p.savedRank ?? null, p.savedAt ?? null, now)
 
       // Une plateforme peut retirer un élément d'un carrousel ou remplacer une vidéo.
       // Les anciennes lignes ne doivent alors pas survivre au nouveau payload.
@@ -746,10 +814,11 @@ export function upsertPosts(posts: PostInput[], media: MediaInput[]): void {
  * quand il a rejoint l'historique déjà rapatrié, et s'arrêter là plutôt que de tout
  * reparcourir à chaque fois.
  */
-export function knownPostIds(platform: Platform): Set<string> {
+export function knownPostIds(platform: Platform, source: ContentSource = 'saved'): Set<string> {
   const rows = getDb()
-    .prepare('SELECT id FROM posts WHERE platform = ?')
-    .all(platform) as { id: string }[]
+    .prepare(`SELECT p.id FROM posts p JOIN post_sources ps ON ps.post_id = p.id
+      WHERE p.platform = ? AND ps.source = ?`)
+    .all(platform, source) as { id: string }[]
   return new Set(rows.map((row) => row.id))
 }
 
@@ -889,6 +958,63 @@ export function writeAccount(
   })
 }
 
+export interface AccountSourceRow {
+  platform: Platform
+  source: ContentSource
+  lastSyncAt: number | null
+  lastSyncStatus: string | null
+  cursor: string | null
+}
+
+export function readAccountSource(
+  platform: Platform,
+  source: ContentSource
+): AccountSourceRow | null {
+  const row = getDb()
+    .prepare('SELECT * FROM account_sync_sources WHERE platform = ? AND source = ?')
+    .get(platform, source) as
+    | {
+        platform: Platform
+        source: ContentSource
+        last_sync_at: number | null
+        last_sync_status: string | null
+        cursor: string | null
+      }
+    | undefined
+  return row
+    ? {
+        platform: row.platform,
+        source: row.source,
+        lastSyncAt: row.last_sync_at,
+        lastSyncStatus: row.last_sync_status,
+        cursor: row.cursor
+      }
+    : null
+}
+
+export function writeAccountSource(
+  platform: Platform,
+  source: ContentSource,
+  patch: { lastSyncAt?: number; lastSyncStatus?: string; cursor?: string | null }
+): void {
+  getDb()
+    .prepare(`INSERT INTO account_sync_sources
+      (platform, source, last_sync_at, last_sync_status, cursor)
+      VALUES (@platform, @source, @last_sync_at, @last_sync_status, @cursor)
+      ON CONFLICT(platform, source) DO UPDATE SET
+        last_sync_at = COALESCE(excluded.last_sync_at, account_sync_sources.last_sync_at),
+        last_sync_status = COALESCE(excluded.last_sync_status, account_sync_sources.last_sync_status),
+        cursor = CASE WHEN @has_cursor = 1 THEN @cursor ELSE account_sync_sources.cursor END`)
+    .run({
+      platform,
+      source,
+      last_sync_at: patch.lastSyncAt ?? null,
+      last_sync_status: patch.lastSyncStatus ?? null,
+      cursor: patch.cursor ?? null,
+      has_cursor: Object.prototype.hasOwnProperty.call(patch, 'cursor') ? 1 : 0
+    })
+}
+
 /**
  * Répare les comptes qui ont des posts mais aucune date de synchronisation — cas d'un
  * rattrapage interrompu par une fermeture de l'application. La date est déduite de
@@ -915,7 +1041,11 @@ export function repairMissingSyncDates(): number {
 }
 
 export function forgetAccount(platform: Platform): void {
-  getDb().prepare('DELETE FROM accounts WHERE platform = ?').run(platform)
+  const db = getDb()
+  db.transaction(() => {
+    db.prepare('DELETE FROM account_sync_sources WHERE platform = ?').run(platform)
+    db.prepare('DELETE FROM accounts WHERE platform = ?').run(platform)
+  })()
 }
 
 export function countDemoPosts(): number {
@@ -1121,6 +1251,49 @@ export function pendingThumbnails(rawLimit = 400): PendingMedia[] {
         LIMIT ?`
     )
     .all(limit) as PendingMedia[]
+}
+
+/** Vignettes demandées par la portion visible de la grille, dans l'ordre d'affichage. */
+export function pendingThumbnailsForPosts(postIds: string[], rawLimit = 400): PendingMedia[] {
+  const ids = [...new Set(postIds)].filter(Boolean).slice(0, 1000)
+  if (ids.length === 0) return []
+  const limit = Math.min(1000, Math.max(1, Math.floor(rawLimit)))
+  const placeholders = ids.map(() => '?').join(',')
+  return getDb()
+    .prepare(
+      `SELECT m.post_id, m.idx, p.platform, m.source_path, m.remote_url, m.video_source,
+              m.thumb_attempts, m.video_attempts
+         FROM media m JOIN posts p ON p.id = m.post_id
+        WHERE m.post_id IN (${placeholders})
+          AND m.thumb_path IS NULL
+          AND m.thumb_attempts < 3
+          AND (m.source_path IS NOT NULL OR m.remote_url LIKE 'http%')
+        ORDER BY instr(',' || ? || ',', ',' || m.post_id || ','), m.idx
+        LIMIT ?`
+    )
+    .all(...ids, ids.join(','), limit) as PendingMedia[]
+}
+
+export function thumbnailPathsForPosts(postIds: string[]): string[] {
+  const ids = [...new Set(postIds)].filter(Boolean).slice(0, 1000)
+  if (ids.length === 0) return []
+  const placeholders = ids.map(() => '?').join(',')
+  return (
+    getDb()
+      .prepare(`SELECT thumb_path FROM media
+        WHERE post_id IN (${placeholders}) AND thumb_path IS NOT NULL`)
+      .all(...ids) as { thumb_path: string }[]
+  ).map((row) => row.thumb_path)
+}
+
+export function forgetThumbnailPaths(paths: string[]): void {
+  const clean = [...new Set(paths)].filter(Boolean)
+  if (clean.length === 0) return
+  const placeholders = clean.map(() => '?').join(',')
+  getDb()
+    .prepare(`UPDATE media SET thumb_path = NULL, thumb_attempts = 0
+      WHERE thumb_path IN (${placeholders})`)
+    .run(...clean)
 }
 
 export function markThumbnailFailure(postId: string, idx: number): void {

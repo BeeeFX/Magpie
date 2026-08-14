@@ -10,10 +10,11 @@ const DEFAULTS: Settings = {
   accent: 'violet',
   nitrateEnabled: false,
   onboardingDone: false,
+  contentSources: ['saved'],
   videoCacheQuality: '480p',
   mediaStorageMode: 'stream',
   playbackQuality: 'auto',
-  cacheLimitGb: 20,
+  cacheLimitGb: 5,
   trayEnabled: true,
   syncOnLaunch: true,
   syncSchedule: 'manual',
@@ -48,6 +49,10 @@ function sanitize(raw: unknown): Settings {
       : DEFAULTS.accent,
     nitrateEnabled: value.nitrateEnabled === true,
     onboardingDone: value.onboardingDone === true,
+    contentSources:
+      Array.isArray(value.contentSources) && value.contentSources.includes('liked')
+        ? value.contentSources.includes('saved') ? ['saved', 'liked'] : ['liked']
+        : ['saved'],
     videoCacheQuality:
       value.videoCacheQuality === '480p' ||
       value.videoCacheQuality === '720p' ||
@@ -94,7 +99,9 @@ function sanitize(raw: unknown): Settings {
         : DEFAULTS.aiModel,
     aiEndpoint:
       typeof value.aiEndpoint === 'string' ? value.aiEndpoint.trim().slice(0, 500) : '',
-    autoTagEnabled: value.autoTagEnabled === true
+    // The cloud-LLM organizer is intentionally unavailable for now. Always
+    // disable a value left behind by an older Magpie installation as well.
+    autoTagEnabled: false
   }
 }
 

@@ -71,6 +71,8 @@ const api: MagpieApi = {
     kind: 'image' | 'video',
     quality: PlaybackQuality
   ): Promise<string> => ipcRenderer.invoke('media:playbackUrl', postId, mediaIndex, kind, quality),
+  requestThumbnails: (postIds: string[]): Promise<void> =>
+    ipcRenderer.invoke('media:requestThumbnails', postIds),
 
   setLabel: (postId: string, label: LabelColor | null): Promise<void> =>
     ipcRenderer.invoke('posts:setLabel', postId, label),

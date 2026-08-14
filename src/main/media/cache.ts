@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync, rmSync } from 'node:fs'
-import { copyFile, readdir, stat } from 'node:fs/promises'
+import { copyFile, readdir, rm, stat, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import sharp from 'sharp'
@@ -10,11 +10,14 @@ import { downloadMediaToFile, fetchMedia, MediaLimitExceeded } from '../adapters
 import { mediaDir } from '../db'
 import {
   pendingThumbnails,
+  pendingThumbnailsForPosts,
   pendingVideos,
   markThumbnailFailure,
   markVideoCacheResult,
   setThumbnail,
   setVideo,
+  forgetThumbnailPaths,
+  thumbnailPathsForPosts,
 } from '../db/queries'
 import { readSettings } from '../settings'
 
@@ -30,8 +33,8 @@ import { readSettings } from '../settings'
  * page sans charger la moindre image.
  */
 
-const MAX_WIDTH = 640
-const QUALITY = 80
+const MAX_WIDTH = 480
+const QUALITY = 76
 let mediaWarningCount = 0
 
 function warnMedia(postId: string, idx: number, error: unknown): void {
@@ -114,6 +117,45 @@ async function ensureQuota(bytes: number): Promise<void> {
   if ((await cacheBytes()) + bytes > limit) throw new CacheQuotaReached()
 }
 
+async function makeThumbnailRoom(bytes: number, protectedName?: string): Promise<void> {
+  const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
+  let usage = await cacheBytes()
+  if (usage + bytes <= limit) return
+
+  const candidates = await Promise.all(
+    (await readdir(mediaDir()))
+      .filter((name) => THUMB_NAME_PATTERN.test(name) && name !== protectedName)
+      .map(async (name) => {
+        try {
+          const info = await stat(join(mediaDir(), name))
+          return { name, size: info.size, usedAt: Math.max(info.atimeMs, info.mtimeMs) }
+        } catch {
+          return null
+        }
+      })
+  )
+  const removed: string[] = []
+  for (const item of candidates.filter((value): value is NonNullable<typeof value> => Boolean(value)).sort((a, b) => a.usedAt - b.usedAt)) {
+    await rm(join(mediaDir(), item.name), { force: true })
+    removed.push(item.name)
+    usage -= item.size
+    recordCacheDelta(-item.size)
+    if (usage + bytes <= limit * 0.92) break
+  }
+  forgetThumbnailPaths(removed)
+  if (usage + bytes > limit) throw new CacheQuotaReached()
+}
+
+/** Les cartes consultées deviennent les dernières candidates à l'éviction. */
+export async function touchCachedThumbnails(postIds: string[]): Promise<void> {
+  const now = new Date()
+  await Promise.all(
+    thumbnailPathsForPosts(postIds).map((name) =>
+      utimes(join(mediaDir(), name), now, now).catch(() => {})
+    )
+  )
+}
+
 async function remainingQuota(): Promise<number> {
   const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
   return Math.max(0, limit - (await cacheBytes()))
@@ -128,6 +170,7 @@ export function resetCacheUsage(bytes: number | null = null): void {
 async function cacheAdaptiveVideo(source: string, target: string, signal?: AbortSignal): Promise<void> {
   if ((await remainingQuota()) <= 0) throw new CacheQuotaReached()
   const previousSize = await fileSize(target)
+
   const executable = ffmpegPath
   if (!executable) throw new Error('ffmpeg indisponible')
   await new Promise<void>((resolve, reject) => {
@@ -197,6 +240,10 @@ export async function buildThumbnail(
   const name = thumbName(postId, idx)
   const target = join(mediaDir(), name)
   const previousSize = await fileSize(target)
+
+  // Une vignette 480p WebP est généralement bien sous 512 Kio. Cette réserve suffit
+  // à déclencher l'éviction avant le décodage de l'original.
+  await makeThumbnailRoom(512 * 1024, name)
 
   const input = await loadSource(platform, sourcePath, remoteUrl, signal)
 
@@ -278,16 +325,20 @@ export async function processPendingMedia(
   onProgress?: (progress: CacheProgress) => void,
   concurrency = 2,
   shouldPause?: () => boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  requestedPostIds?: string[]
 ): Promise<CacheProgress & { hasMore: boolean }> {
   const thumbnailBatch = 360
   const videoBatch = 120
-  const thumbs = pendingThumbnails(thumbnailBatch).map((t) => ({ type: 'thumb' as const, ...t }))
+  const thumbRows = requestedPostIds
+    ? pendingThumbnailsForPosts(requestedPostIds, thumbnailBatch)
+    : pendingThumbnails(thumbnailBatch)
+  const thumbs = thumbRows.map((t) => ({ type: 'thumb' as const, ...t }))
   const videos =
     readSettings().mediaStorageMode === 'offline'
       ? pendingVideos(videoBatch).map((v) => ({ type: 'video' as const, ...v }))
       : []
-  const hasMore = thumbs.length === thumbnailBatch || videos.length === videoBatch
+  const hasMore = !requestedPostIds && (thumbs.length === thumbnailBatch || videos.length === videoBatch)
   // Trois affiches puis un clip : auparavant, les milliers de vignettes bloquaient toute
   // la file vidéo jusqu'à leur achèvement. L'entrelacement fait progresser les deux sans
   // laisser les gros fichiers ralentir l'apparition du mur.

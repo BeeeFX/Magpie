@@ -60,7 +60,10 @@ export function Detail(): React.JSX.Element | null {
   const [collections, setCollections] = useState<CollectionInfo[]>([])
   const [inCollections, setInCollections] = useState<number[]>([])
   const [notice, setNotice] = useState<string | null>(null)
+  const [creatingCollection, setCreatingCollection] = useState(false)
+  const [collectionDraft, setCollectionDraft] = useState('')
   const [detailImageSrc, setDetailImageSrc] = useState<string | null>(null)
+  const [detailImageError, setDetailImageError] = useState(false)
   const [htmlFullscreen, setHtmlFullscreen] = useState(false)
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
   const fullscreen = htmlFullscreen || nativeFullscreen
@@ -144,16 +147,20 @@ export function Detail(): React.JSX.Element | null {
   useEffect(() => {
     if (!post || selectedMedia?.kind !== 'image') {
       setDetailImageSrc(null)
+      setDetailImageError(false)
       return
     }
     let cancelled = false
     setDetailImageSrc(selectedMedia.thumbUrl)
+    setDetailImageError(false)
     void magpie
       .getMediaPlaybackUrl(post.id, selectedMedia.idx, 'image', 'auto')
       .then((url) => {
         if (!cancelled && url) setDetailImageSrc(url)
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled && !selectedMedia.thumbUrl) setDetailImageError(true)
+      })
     return () => {
       cancelled = true
     }
@@ -260,8 +267,12 @@ export function Detail(): React.JSX.Element | null {
   if (index === null || !post) return null
 
   const media = selectedMedia
-  const isVideo = media?.kind === 'video' && (Boolean(media.videoUrl) || media.videoQualities.length > 0)
-  const hasMedia = Boolean(media?.thumbUrl || media?.videoUrl || media?.videoQualities.length)
+  const isVideo = media?.kind === 'video' && Boolean(
+    media.hasSource || media.videoUrl || media.videoQualities.length > 0
+  )
+  const hasMedia = Boolean(
+    media?.hasSource || media?.thumbUrl || media?.videoUrl || media?.videoQualities.length
+  )
 
   const copy = (): void => {
     void magpie.copyToClipboard(post.url)
@@ -294,14 +305,17 @@ export function Detail(): React.JSX.Element | null {
     )
   }
 
-  const createCollection = async (): Promise<void> => {
-    const name = window.prompt(t('sidebar.collectionName'))
-    if (!name?.trim()) return
-    const created = await magpie.createCollection(name.trim())
+  const createCollection = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault()
+    const name = collectionDraft.trim()
+    if (!name) return
+    const created = await magpie.createCollection(name)
     setCollections(await magpie.listCollections())
     await magpie.addToCollection(created.id, [post.id])
     setInCollections((ids) => [...ids, created.id])
     setNotice(t('detail.addedTo', { name: created.name }))
+    setCollectionDraft('')
+    setCreatingCollection(false)
   }
 
   return (
@@ -349,7 +363,14 @@ export function Detail(): React.JSX.Element | null {
               className="detail__media"
               onError={() => setDetailImageSrc(media?.thumbUrl ?? null)}
             />
-          ) : null}
+          ) : detailImageError ? (
+            <div className="player__error">{t('player.streamError')}</div>
+          ) : (
+            <div className="detail__media-loading" aria-live="polite">
+              <span className="spinner" />
+              <span>{t('card.preparingMedia')}</span>
+            </div>
+          )}
 
           {post.media.length > 1 ? (
             <>
@@ -472,12 +493,29 @@ export function Detail(): React.JSX.Element | null {
               <button
                 type="button"
                 className="collection-chip"
-                onClick={() => void createCollection()}
+                onClick={() => setCreatingCollection(true)}
               >
                 <IconPlus size={13} />
                 {t('detail.newCollection')}
               </button>
             </div>
+            {creatingCollection ? (
+              <form className="collection-create collection-create--detail" onSubmit={(event) => void createCollection(event)}>
+                <input
+                  autoFocus
+                  value={collectionDraft}
+                  maxLength={120}
+                  placeholder={t('sidebar.collectionName')}
+                  onChange={(event) => setCollectionDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setCreatingCollection(false)
+                  }}
+                />
+                <button type="submit" className="collection-create__submit" disabled={!collectionDraft.trim()}>
+                  <IconCheck size={13} />
+                </button>
+              </form>
+            ) : null}
             {notice ? <p className="detail__notice">{notice}</p> : null}
           </section>
 

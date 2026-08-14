@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
+import { PUBLIC_PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
 import { PLATFORM_LABEL } from '../format'
 import { useStore, useT } from '../store'
 import { IconChevronRight, IconSync } from './Icons'
@@ -52,7 +52,7 @@ export function SyncButton(): React.JSX.Element {
   }
 
   if (sync.running) {
-    const active = PLATFORMS.filter((p) => sync.byPlatform[p].phase === 'running')
+    const active = PUBLIC_PLATFORMS.filter((p) => sync.byPlatform[p].phase === 'running')
 
     return (
       <div className="sync-control-wrap" ref={wrapRef}>
@@ -135,7 +135,7 @@ export function SyncButton(): React.JSX.Element {
     )
   }
 
-  const attention = PLATFORMS.filter((p) => sync.byPlatform[p].needsAttention)
+  const attention = PUBLIC_PLATFORMS.filter((p) => sync.byPlatform[p].needsAttention)
   const message = attention.map((p) => sync.byPlatform[p].message).filter(Boolean).join('\n')
 
   return (

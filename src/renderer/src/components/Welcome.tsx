@@ -65,6 +65,8 @@ export function Welcome(): React.JSX.Element {
   const setVideoCacheQuality = useStore((s) => s.setVideoCacheQuality)
   const cacheLimitGb = useStore((s) => s.cacheLimitGb)
   const setCacheLimitGb = useStore((s) => s.setCacheLimitGb)
+  const contentSources = useStore((s) => s.contentSources)
+  const setContentSources = useStore((s) => s.setContentSources)
   const [index, setIndex] = useState(0)
   const [libraryInfo, setLibraryInfo] = useState<LibraryInfo | null>(null)
   const [choosingFolder, setChoosingFolder] = useState(false)
@@ -167,6 +169,34 @@ export function Welcome(): React.JSX.Element {
                 <div>
                   <h2>{t('welcome.storageTitle')}</h2>
                   <p className="welcome__lead welcome__lead--tight">{t('welcome.storageText')}</p>
+                </div>
+              </div>
+
+              <div className="welcome__source-choice">
+                <strong>{t('welcome.sourcesTitle')}</strong>
+                <span>{t('welcome.sourcesText')}</span>
+                <div className="segmented segmented--wide">
+                  <button
+                    type="button"
+                    className={contentSources.length === 1 && contentSources[0] === 'saved' ? 'is-active' : ''}
+                    onClick={() => void setContentSources(['saved'])}
+                  >
+                    {t('source.savedOnly')}
+                  </button>
+                  <button
+                    type="button"
+                    className={contentSources.length === 1 && contentSources[0] === 'liked' ? 'is-active' : ''}
+                    onClick={() => void setContentSources(['liked'])}
+                  >
+                    {t('source.likedOnly')}
+                  </button>
+                  <button
+                    type="button"
+                    className={contentSources.length === 2 ? 'is-active' : ''}
+                    onClick={() => void setContentSources(['saved', 'liked'])}
+                  >
+                    {t('source.both')}
+                  </button>
                 </div>
               </div>
 

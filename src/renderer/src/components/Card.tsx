@@ -93,6 +93,8 @@ function CardImpl({
 
   useEffect(() => {
     setStreamedVideoUrl(null)
+    setLoaded(false)
+    setVideoReady(false)
   }, [post.id, current?.idx])
 
   useEffect(() => {
@@ -128,27 +130,38 @@ function CardImpl({
 
   const stop = (e: React.MouseEvent): void => e.stopPropagation()
 
+  const previewReady = Boolean(current?.thumbUrl || (videoUrl && videoReady))
+  const previewFailed = current?.thumbStatus === 'failed' && !previewReady
+
   const mediaBlock = hasMedia ? (
     <div
-      className={`card__media ${current?.thumbUrl ? '' : 'is-pending'}`}
+      className={`card__media ${!previewReady && !previewFailed ? 'is-pending' : ''}`}
       style={{ background: post.dominantColor ?? 'var(--field)' }}
     >
       {current?.thumbUrl ? (
         <img
-          src={post.thumbUrl ?? undefined}
+          src={current.thumbUrl}
           alt=""
           loading="lazy"
           decoding="async"
           draggable={false}
           className={loaded ? 'is-loaded' : ''}
           onLoad={() => setLoaded(true)}
+          onError={() => setLoaded(false)}
         />
       ) : null}
 
-      {!current?.thumbUrl ? (
+      {!previewReady && !previewFailed ? (
         <span className="card__media-pending" aria-label={t('card.preparingMedia')}>
           <span className="spinner" />
           <span>{t('card.preparingMedia')}</span>
+        </span>
+      ) : null}
+
+      {previewFailed ? (
+        <span className="card__media-pending card__media-pending--failed">
+          <IconPlay size={15} />
+          <span>{t('card.previewUnavailable')}</span>
         </span>
       ) : null}
 

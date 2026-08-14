@@ -8,6 +8,7 @@
 import { existsSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import { libraryDbPath } from './library-path'
+import { MIGRATION_9_SQL } from '../src/main/db/schema'
 
 const dbPath = libraryDbPath()
 
@@ -140,6 +141,43 @@ if (terms.length === 0) {
 }
 
 console.log('\nfiltres et tags')
+const hasSources = Boolean(
+  db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_sources'").get()
+)
+if (hasSources) {
+  const sourced = one<{ n: number }>('SELECT COUNT(DISTINCT post_id) n FROM post_sources').n
+  check('chaque post possède une origine', sourced === total, `${sourced}/${total}`)
+  check(
+    'aucune origine inconnue',
+    one<{ n: number }>("SELECT COUNT(*) n FROM post_sources WHERE source NOT IN ('saved', 'liked')").n === 0
+  )
+  check(
+    'un post liké et sauvegardé ne peut pas être dupliqué',
+    one<{ n: number }>(`SELECT COUNT(*) n FROM (
+      SELECT post_id, source, COUNT(*) c FROM post_sources GROUP BY post_id, source HAVING c > 1
+    )`).n === 0
+  )
+} else {
+  // La base réelle est encore ouverte par la version précédente. On valide la migration
+  // v8 -> v9 sur une copie minimale ; l'application l'appliquera atomiquement au lancement.
+  const migration = new Database(':memory:')
+  migration.exec(`
+    CREATE TABLE posts (id TEXT PRIMARY KEY, saved_rank INTEGER, saved_at INTEGER, discovered_at INTEGER NOT NULL);
+    CREATE TABLE accounts (platform TEXT PRIMARY KEY, last_sync_at INTEGER, last_sync_status TEXT, cursor TEXT);
+    INSERT INTO posts VALUES ('x:1', 4, NULL, 1234), ('instagram:2', 8, NULL, 1235);
+    INSERT INTO accounts VALUES ('x', 1200, 'ok', NULL);
+  `)
+  migration.exec(MIGRATION_9_SQL)
+  const migratedPosts = (
+    migration.prepare('SELECT COUNT(*) n FROM post_sources').get() as { n: number }
+  ).n
+  check('la migration v9 rattache les bibliothèques existantes aux signets', migratedPosts === 2)
+  check(
+    'la migration v9 conserve les points de reprise',
+    (migration.prepare('SELECT COUNT(*) n FROM account_sync_sources').get() as { n: number }).n === 1
+  )
+  migration.close()
+}
 const tagged = one<{ n: number }>('SELECT COUNT(DISTINCT post_id) n FROM post_tags').n
 check('des tags ont été posés par les règles', tagged > 0, `${tagged} posts tagués`)
 check(

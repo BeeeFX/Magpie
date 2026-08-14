@@ -198,12 +198,13 @@ export const redditAdapter: PlatformAdapter = {
     return me.data?.name ? `u/${me.data.name}` : null
   },
 
-  async fetchPage(cursor: string | null, startRank: number): Promise<NormalizedPage> {
+  async fetchPage(source, cursor: string | null, startRank: number): Promise<NormalizedPage> {
     const handle = await this.resolveHandle()
     const username = handle?.replace(/^u\//, '')
     if (!username) throw new Error("Nom d'utilisateur Reddit introuvable")
 
-    const url = new URL(`${ORIGIN}/user/${username}/saved.json`)
+    const feed = source === 'liked' ? 'upvoted' : 'saved'
+    const url = new URL(`${ORIGIN}/user/${username}/${feed}.json`)
     url.searchParams.set('limit', '100')
     url.searchParams.set('raw_json', '1')
     if (cursor) url.searchParams.set('after', cursor)

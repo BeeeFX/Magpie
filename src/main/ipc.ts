@@ -14,7 +14,7 @@ import type {
   PlaybackQuality,
   Settings
 } from '@shared/types'
-import { DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS } from '@shared/types'
+import { CONTENT_SOURCES, DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS } from '@shared/types'
 import { dataDir, getDb, mediaDir, writeDataDirLocation } from './db'
 import {
   addTag,
@@ -66,10 +66,16 @@ function platformValues(value: unknown): Platform[] | undefined {
 
 function postQueryValue(value: unknown): PostQuery {
   const raw = value && typeof value === 'object' ? (value as Partial<PostQuery>) : DEFAULT_QUERY
+  const enabledSources = readSettings().contentSources
+  const requestedSources = Array.isArray(raw.sources)
+    ? raw.sources.slice(0, 2).filter((source) => CONTENT_SOURCES.includes(source as never))
+        .filter((source) => enabledSources.includes(source))
+    : []
   return {
     platforms: Array.isArray(raw.platforms)
       ? raw.platforms.slice(0, 3).map(platformValue)
       : [],
+    sources: requestedSources.length > 0 ? requestedSources : enabledSources,
     kinds: Array.isArray(raw.kinds)
       ? raw.kinds.slice(0, 5).filter((kind) => POST_KINDS.includes(kind as never))
       : [],
@@ -107,6 +113,7 @@ export interface IpcHooks {
   onThemeChange: () => void
   /** Relance le traitement des médias en attente, sérialisé côté processus principal. */
   drainMedia: () => void
+  requestThumbnails: (postIds: string[]) => void
   /** Garantit qu'aucun fichier média n'est écrit pendant une migration de bibliothèque. */
   pauseMedia: () => Promise<void>
   resumeMedia: () => void
@@ -116,6 +123,7 @@ export interface IpcHooks {
 export function registerIpc({
   onThemeChange,
   drainMedia,
+  requestThumbnails,
   pauseMedia,
   resumeMedia,
   onSettingsChange
@@ -138,7 +146,7 @@ export function registerIpc({
     return getPostsByIds(ids)
   })
 
-  ipcMain.handle('stats:get', () => getStats())
+  ipcMain.handle('stats:get', () => getStats(readSettings().contentSources))
 
   ipcMain.handle('posts:toggleFavorite', (_event, id: string) => toggleFavorite(id))
   ipcMain.handle('posts:setFavoriteMany', (_event, ids: string[], value: boolean) => {
@@ -203,6 +211,17 @@ export function registerIpc({
       })()
     }
   )
+
+  ipcMain.handle('media:requestThumbnails', (_event, postIds: string[]) => {
+    if (
+      !Array.isArray(postIds) ||
+      postIds.length > 1000 ||
+      postIds.some((id) => typeof id !== 'string' || id.length > 300)
+    ) {
+      throw new Error('Liste de médias invalide')
+    }
+    requestThumbnails(postIds)
+  })
 
   ipcMain.handle('clipboard:write', (_event, text: string) => {
     clipboard.writeText(String(text))
@@ -474,7 +493,7 @@ export function registerIpc({
   )
   ipcMain.handle('collections:forPost', (_event, postId: string) => collectionsForPost(postId))
 
-  ipcMain.handle('accounts:list', () => Promise.all(PLATFORMS.map(accountInfo)))
+  ipcMain.handle('accounts:list', () => Promise.all(PUBLIC_PLATFORMS.map(accountInfo)))
 
   ipcMain.handle('accounts:connect', async (event, platform: Platform) => {
     platform = platformValue(platform)
@@ -504,6 +523,9 @@ export function registerIpc({
     // `partial` désactive l'arrêt sur les pages déjà connues : toute la pagination est
     // reparcourue, les doublons restant absorbés par les clés primaires SQLite.
     writeAccount(target, { lastSyncStatus: 'partial', cursor: null })
+    getDb()
+      .prepare("UPDATE account_sync_sources SET last_sync_status = 'partial', cursor = NULL WHERE platform = ?")
+      .run(target)
     return syncEngine.syncAll([target])
   })
 

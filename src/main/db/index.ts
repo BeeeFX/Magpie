@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { SCHEMA_SQL, SCHEMA_VERSION } from './schema'
+import { MIGRATION_9_SQL, SCHEMA_SQL, SCHEMA_VERSION } from './schema'
 
 let db: Database.Database | null = null
 
@@ -127,6 +127,9 @@ const MIGRATIONS: Record<number, (conn: Database.Database) => void> = {
       visual BLOB,
       updated_at INTEGER NOT NULL
     )`)
+  },
+  9: (conn) => {
+    conn.exec(MIGRATION_9_SQL)
   }
 }
 

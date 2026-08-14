@@ -76,6 +76,7 @@ function makePosts(count: number): Post[] {
       isArchived: false,
       label: null,
       tags: []
+      ,sources: ['saved']
     } satisfies Post
   })
 }

@@ -5,7 +5,32 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
+
+export const MIGRATION_9_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS post_sources (
+  post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  source TEXT NOT NULL CHECK(source IN ('saved', 'liked')),
+  source_rank INTEGER,
+  source_at INTEGER,
+  discovered_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, source)
+);
+CREATE INDEX IF NOT EXISTS idx_post_sources_feed
+  ON post_sources(source, source_at DESC, source_rank ASC, post_id);
+CREATE TABLE IF NOT EXISTS account_sync_sources (
+  platform TEXT NOT NULL,
+  source TEXT NOT NULL CHECK(source IN ('saved', 'liked')),
+  last_sync_at INTEGER,
+  last_sync_status TEXT,
+  cursor TEXT,
+  PRIMARY KEY (platform, source)
+);
+INSERT OR IGNORE INTO post_sources (post_id, source, source_rank, source_at, discovered_at)
+  SELECT id, 'saved', saved_rank, saved_at, discovered_at FROM posts;
+INSERT OR IGNORE INTO account_sync_sources (platform, source, last_sync_at, last_sync_status, cursor)
+  SELECT platform, 'saved', last_sync_at, last_sync_status, cursor FROM accounts;
+`
 
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
@@ -47,6 +72,16 @@ CREATE INDEX IF NOT EXISTS idx_posts_label     ON posts(label) WHERE label IS NO
 CREATE INDEX IF NOT EXISTS idx_posts_feed      ON posts(
   is_archived, COALESCE(saved_at, discovered_at) DESC, saved_rank ASC, id
 );
+
+CREATE TABLE IF NOT EXISTS post_sources (
+  post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  source        TEXT NOT NULL CHECK(source IN ('saved', 'liked')),
+  source_rank   INTEGER,
+  source_at     INTEGER,
+  discovered_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, source)
+);
+CREATE INDEX IF NOT EXISTS idx_post_sources_feed ON post_sources(source, source_at DESC, source_rank ASC, post_id);
 
 CREATE TABLE IF NOT EXISTS media (
   id          INTEGER PRIMARY KEY,
@@ -130,6 +165,15 @@ CREATE TABLE IF NOT EXISTS accounts (
   last_sync_at     INTEGER,
   last_sync_status TEXT,
   cursor           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS account_sync_sources (
+  platform         TEXT NOT NULL,
+  source           TEXT NOT NULL CHECK(source IN ('saved', 'liked')),
+  last_sync_at     INTEGER,
+  last_sync_status TEXT,
+  cursor           TEXT,
+  PRIMARY KEY (platform, source)
 );
 
 -- Petite signature visuelle calculée localement à partir de la vignette. Elle permet à

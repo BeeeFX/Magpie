@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import type { Platform } from '@shared/types'
+import type { ContentSource, Platform } from '@shared/types'
 import type { MediaInput, PostInput } from '../db/queries'
 
 /** Ce qu'un adaptateur produit pour une page de résultats. */
@@ -28,5 +28,5 @@ export interface PlatformAdapter {
    * Une page de signets. `startRank` continue la numérotation d'ordre entre les pages —
    * elle sert de substitut à la date de sauvegarde là où la plateforme ne l'expose pas.
    */
-  fetchPage(cursor: string | null, startRank: number): Promise<NormalizedPage>
+  fetchPage(source: ContentSource, cursor: string | null, startRank: number): Promise<NormalizedPage>
 }

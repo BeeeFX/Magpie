@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { dataDir } from '../../db'
 import { sessionFor, userAgent } from '../session'
+import type { ContentSource } from '@shared/types'
 
 /**
  * « Apprendre puis rejouer » — voir SPEC.md §5.2.
@@ -38,13 +39,13 @@ const DROPPED = new Set([
   'sec-fetch-site'
 ])
 
-function templateFile(): string {
-  return join(dataDir(), 'x-request-template.json')
+function templateFile(source: ContentSource): string {
+  return join(dataDir(), `x-${source}-request-template.json`)
 }
 
-export function readTemplate(): RequestTemplate | null {
+export function readTemplate(source: ContentSource): RequestTemplate | null {
   try {
-    const file = templateFile()
+    const file = templateFile(source)
     if (!existsSync(file)) return null
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as RequestTemplate
     return parsed.url && parsed.headers ? parsed : null
@@ -53,19 +54,21 @@ export function readTemplate(): RequestTemplate | null {
   }
 }
 
-export function forgetTemplate(): void {
-  rmSync(templateFile(), { force: true })
+export function forgetTemplate(source?: ContentSource): void {
+  for (const item of source ? [source] : (['saved', 'liked'] as const)) {
+    rmSync(templateFile(item), { force: true })
+  }
 }
 
-function saveTemplate(template: RequestTemplate): void {
-  writeFileSync(templateFile(), JSON.stringify(template, null, 2))
+function saveTemplate(source: ContentSource, template: RequestTemplate): void {
+  writeFileSync(templateFile(source), JSON.stringify(template, null, 2))
 }
 
 /**
  * Ouvre la page des signets hors écran et capture la requête GraphQL correspondante.
  * La fenêtre est fermée dès la capture — elle n'existe que le temps d'observer.
  */
-export function learnTemplate(timeoutMs = 45000): Promise<RequestTemplate> {
+export function learnTemplate(source: ContentSource, timeoutMs = 45000): Promise<RequestTemplate> {
   return new Promise((resolve, reject) => {
     const ses = sessionFor('x')
     let settled = false
@@ -109,7 +112,8 @@ export function learnTemplate(timeoutMs = 45000): Promise<RequestTemplate> {
       (details, callback) => {
         callback({ requestHeaders: details.requestHeaders })
 
-        if (settled || !/\/Bookmarks(\?|$)/.test(details.url)) return
+        const operation = source === 'liked' ? 'Likes' : 'Bookmarks'
+        if (settled || !new RegExp(`/${operation}(?:\\?|$)`).test(details.url)) return
 
         const headers: Record<string, string> = {}
         for (const [name, value] of Object.entries(details.requestHeaders)) {
@@ -119,7 +123,7 @@ export function learnTemplate(timeoutMs = 45000): Promise<RequestTemplate> {
 
         finish(() => {
           const template: RequestTemplate = { url: details.url, headers, learnedAt: Date.now() }
-          saveTemplate(template)
+          saveTemplate(source, template)
           resolve(template)
         })
       }
@@ -130,7 +134,23 @@ export function learnTemplate(timeoutMs = 45000): Promise<RequestTemplate> {
       finish(() => reject(new Error(`Chargement de X impossible : ${description}`)))
     })
 
-    void win.loadURL(BOOKMARKS_URL, { userAgent: userAgent() })
+    if (source === 'saved') {
+      void win.loadURL(BOOKMARKS_URL, { userAgent: userAgent() })
+    } else {
+      // Le lien de profil de la session est la seule route stable vers ses likes.
+      win.webContents.once('did-finish-load', () => {
+        void win.webContents
+          .executeJavaScript(
+            `document.querySelector('a[data-testid="AppTabBar_Profile_Link"]')?.href || ''`
+          )
+          .then((profile: string) => {
+            if (profile && !win.isDestroyed()) {
+              void win.loadURL(`${profile.replace(/\/$/, '')}/likes`, { userAgent: userAgent() })
+            }
+          })
+      })
+      void win.loadURL('https://x.com/home', { userAgent: userAgent() })
+    }
   })
 }
 

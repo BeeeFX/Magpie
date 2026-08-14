@@ -1,7 +1,7 @@
 {
   "name": "magpie",
   "version": "0.4.1",
-  "description": "Vos posts sauvegardés d'Instagram, X et Reddit dans un seul mur",
+  "description": "Instagram and X bookmarks and likes in one fast visual library",
   "author": "BeeeFX",
   "license": "MIT",
   "private": true,

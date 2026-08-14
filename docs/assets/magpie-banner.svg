@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="520" viewBox="0 0 1600 520" role="img" aria-labelledby="title desc">
   <title id="title">Magpie</title>
-  <desc id="desc">Your saved internet, beautifully organised.</desc>
+  <desc id="desc">Bookmarks and likes, beautifully organised.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#111116"/>
@@ -19,16 +19,18 @@
   <image href="magpie-logo-transparent.png" x="105" y="82" width="360" height="360"/>
   <g font-family="Segoe UI, Inter, Arial, sans-serif" fill="#fff">
     <text x="520" y="196" font-size="92" font-weight="750" letter-spacing="-4">Magpie</text>
-    <text x="524" y="263" font-size="32" fill="#d4cfdf">Your saved internet, beautifully organised.</text>
+    <text x="524" y="263" font-size="32" fill="#d4cfdf">Bookmarks and likes, beautifully organised.</text>
     <g transform="translate(524 320)" font-size="21" font-weight="600">
       <rect width="152" height="52" rx="26" fill="#26212f" stroke="#443a59"/>
       <text x="76" y="34" text-anchor="middle">Instagram</text>
       <rect x="168" width="72" height="52" rx="26" fill="#26212f" stroke="#443a59"/>
       <text x="204" y="34" text-anchor="middle">X</text>
-      <rect x="256" width="114" height="52" rx="26" fill="#26212f" stroke="#443a59"/>
-      <text x="313" y="34" text-anchor="middle">Reddit</text>
-      <rect x="386" width="140" height="52" rx="26" fill="#6e5bf6"/>
-      <text x="456" y="34" text-anchor="middle">One library</text>
+      <rect x="256" width="142" height="52" rx="26" fill="#26212f" stroke="#443a59"/>
+      <text x="327" y="34" text-anchor="middle">Bookmarks</text>
+      <rect x="414" width="90" height="52" rx="26" fill="#26212f" stroke="#443a59"/>
+      <text x="459" y="34" text-anchor="middle">Likes</text>
+      <rect x="520" width="140" height="52" rx="26" fill="#6e5bf6"/>
+      <text x="590" y="34" text-anchor="middle">One library</text>
     </g>
   </g>
   <path d="M0 455c314-42 540 38 806-2 252-38 473-103 794-50v117H0Z" fill="#745cf7" opacity=".08"/>

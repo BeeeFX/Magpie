@@ -60,8 +60,29 @@ export interface XBookmarksResponse {
     bookmark_timeline_v2?: {
       timeline?: { instructions?: { type?: string; entries?: XEntry[] }[] }
     }
+    [key: string]: unknown
   }
   errors?: { message?: string }[]
+}
+
+function timelineInstructions(value: unknown): { type?: string; entries?: XEntry[] }[] {
+  if (!value || typeof value !== 'object') return []
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = timelineInstructions(item)
+      if (found.length > 0) return found
+    }
+    return []
+  }
+  const object = value as Record<string, unknown>
+  if (Array.isArray(object.instructions)) {
+    return object.instructions as { type?: string; entries?: XEntry[] }[]
+  }
+  for (const child of Object.values(object)) {
+    const found = timelineInstructions(child)
+    if (found.length > 0) return found
+  }
+  return []
 }
 
 /** X enveloppe parfois le tweet dans un objet de visibilité ; on déballe. */
@@ -147,7 +168,7 @@ export function normalizeBookmarks(
   let rank = startRank
   let nextCursor: string | null = null
 
-  const instructions = response.data?.bookmark_timeline_v2?.timeline?.instructions ?? []
+  const instructions = timelineInstructions(response.data)
 
   for (const instruction of instructions) {
     for (const entry of instruction.entries ?? []) {

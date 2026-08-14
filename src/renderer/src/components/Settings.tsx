@@ -31,6 +31,10 @@ const AI_DEFAULT_MODEL: Record<AiProvider, string> = {
   custom: ''
 }
 
+// Conservé derrière un drapeau pour une éventuelle reprise, mais absent du produit
+// tant que l'organisateur local couvre correctement le besoin.
+const LLM_SETTINGS_VISIBLE = false
+
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return '0 Mo'
   const mb = bytes / 1024 / 1024
@@ -57,6 +61,8 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
   const setDensity = useStore((s) => s.setDensity)
   const nitrateEnabled = useStore((s) => s.nitrateEnabled)
   const setNitrateEnabled = useStore((s) => s.setNitrateEnabled)
+  const contentSources = useStore((s) => s.contentSources)
+  const setContentSources = useStore((s) => s.setContentSources)
   const videoCacheQuality = useStore((s) => s.videoCacheQuality)
   const setVideoCacheQuality = useStore((s) => s.setVideoCacheQuality)
   const mediaStorageMode = useStore((s) => s.mediaStorageMode)
@@ -209,6 +215,29 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
               <p>{t('settings.accountsHint')}</p>
             </div>
             <Accounts />
+            <div className="setting setting--compact">
+              <div className="setting__label">
+                <strong>{t('settings.sources')}</strong>
+                <span>{t('settings.sourcesHint')}</span>
+              </div>
+              <div className="segmented segmented--wide">
+                <button
+                  type="button"
+                  className={contentSources.length === 1 && contentSources[0] === 'saved' ? 'is-active' : ''}
+                  onClick={() => void setContentSources(['saved'])}
+                >{t('source.savedOnly')}</button>
+                <button
+                  type="button"
+                  className={contentSources.length === 1 && contentSources[0] === 'liked' ? 'is-active' : ''}
+                  onClick={() => void setContentSources(['liked'])}
+                >{t('source.likedOnly')}</button>
+                <button
+                  type="button"
+                  className={contentSources.length === 2 ? 'is-active' : ''}
+                  onClick={() => void setContentSources(['saved', 'liked'])}
+                >{t('source.both')}</button>
+              </div>
+            </div>
           </section>
 
           <div className="modal__sep" />
@@ -642,6 +671,7 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
             </div>
           </section>
 
+          {LLM_SETTINGS_VISIBLE ? <>
           <div className="modal__sep" />
 
           <section className="setting setting--stack">
@@ -734,6 +764,7 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
             </div>
             <p className="setting__note">{t('settings.aiPrivacy')}</p>
           </section>
+          </> : null}
         </div>
 
         <footer className="modal__foot">

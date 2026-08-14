@@ -5,6 +5,7 @@ import type {
   AccountInfo,
   AiProvider,
   AiTagProgress,
+  ContentSource,
   GridMode,
   LabelColor,
   LibraryStats,
@@ -139,6 +140,7 @@ interface State {
   lang: Language
   accent: AccentName
   nitrateEnabled: boolean
+  contentSources: ContentSource[]
   videoCacheQuality: VideoQuality
   mediaStorageMode: MediaStorageMode
   playbackQuality: PlaybackQuality
@@ -184,6 +186,7 @@ interface State {
   setAccent: (accent: AccentName) => Promise<void>
   setLanguage: (language: LanguageChoice) => Promise<void>
   setNitrateEnabled: (enabled: boolean) => Promise<void>
+  setContentSources: (sources: ContentSource[]) => Promise<void>
   setVideoCacheQuality: (quality: VideoQuality) => Promise<void>
   setMediaStorageMode: (mode: MediaStorageMode) => Promise<void>
   setPlaybackQuality: (quality: PlaybackQuality) => Promise<void>
@@ -251,10 +254,11 @@ export const useStore = create<State>()(
       // Aligné sur les valeurs par défaut du processus principal (main/settings.ts).
       accent: 'violet',
       nitrateEnabled: false,
+      contentSources: ['saved'],
       videoCacheQuality: '480p',
       mediaStorageMode: 'stream',
       playbackQuality: 'auto',
-      cacheLimitGb: 20,
+      cacheLimitGb: 5,
       trayEnabled: true,
       syncOnLaunch: true,
       syncSchedule: 'manual',
@@ -450,6 +454,7 @@ export const useStore = create<State>()(
           lang,
           accent: settings.accent,
           nitrateEnabled: settings.nitrateEnabled,
+          contentSources: settings.contentSources,
           videoCacheQuality: settings.videoCacheQuality,
           mediaStorageMode: settings.mediaStorageMode,
           playbackQuality: settings.playbackQuality,
@@ -498,6 +503,15 @@ export const useStore = create<State>()(
       setNitrateEnabled: async (nitrateEnabled) => {
         set({ nitrateEnabled })
         await magpie.setSettings({ nitrateEnabled })
+      },
+
+      setContentSources: async (contentSources) => {
+        const next = contentSources.length > 0 ? [...new Set(contentSources)] : ['saved' as const]
+        set({ contentSources: next })
+        await magpie.setSettings({ contentSources: next })
+        // Une seule origine active doit aussi devenir la vue courante. Avec les deux,
+        // `[]` conserve le sens ergonomique de « toute la bibliothèque ».
+        get().setQuery({ sources: next.length === 1 ? [next[0]] : [] })
       },
 
       setVideoCacheQuality: async (videoCacheQuality) => {

@@ -50,6 +50,14 @@ export function IconStar({ size = 16, filled = false }: IconProps & { filled?: b
   )
 }
 
+export function IconHeart({ size = 16, filled = false }: IconProps & { filled?: boolean }): React.JSX.Element {
+  return (
+    <svg {...base(size)} fill={filled ? 'currentColor' : 'none'}>
+      <path d="M10 16.9S3 12.8 3 7.2C3 4.8 4.5 3.3 6.6 3.3c1.4 0 2.7.8 3.4 2 .7-1.2 2-2 3.4-2 2.1 0 3.6 1.5 3.6 3.9 0 5.6-7 9.7-7 9.7z" />
+    </svg>
+  )
+}
+
 export function IconTag({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...base(size)}>

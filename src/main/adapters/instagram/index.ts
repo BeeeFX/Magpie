@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import type { Platform } from '@shared/types'
+import type { ContentSource, Platform } from '@shared/types'
 import { getJson } from '../http'
 import { cookiesFor, disconnect, isConnected, openLogin } from '../session'
 import type { NormalizedPage, PlatformAdapter } from '../types'
@@ -59,8 +59,9 @@ export const instagramAdapter: PlatformAdapter = {
     return info.user?.username ? `@${info.user.username}` : null
   },
 
-  async fetchPage(cursor: string | null, startRank: number): Promise<NormalizedPage> {
-    const url = new URL(`${ORIGIN}/api/v1/feed/saved/posts/`)
+  async fetchPage(source: ContentSource, cursor: string | null, startRank: number): Promise<NormalizedPage> {
+    const path = source === 'liked' ? 'liked/' : 'saved/posts/'
+    const url = new URL(`${ORIGIN}/api/v1/feed/${path}`)
     if (cursor) url.searchParams.set('max_id', cursor)
 
     const response = await getJson<IgSavedResponse>('instagram', url.toString(), {

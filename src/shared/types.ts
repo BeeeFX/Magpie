@@ -2,6 +2,8 @@
 
 export const PLATFORMS = ['instagram', 'x', 'reddit'] as const
 export type Platform = (typeof PLATFORMS)[number]
+/** Reddit reste implémenté mais est retiré du produit tant que son flux bloque les sessions. */
+export const PUBLIC_PLATFORMS = ['instagram', 'x'] as const satisfies readonly Platform[]
 
 /** Plafond de pages parcourues en une passe. Il sert aussi de repère visuel à la barre
  * de progression : les plateformes ne publient pas le nombre total de pages à l'avance. */
@@ -13,6 +15,8 @@ export const SYNC_PAGE_LIMITS: Record<Platform, number> = {
 
 export const POST_KINDS = ['image', 'carousel', 'video', 'text', 'link'] as const
 export type PostKind = (typeof POST_KINDS)[number]
+export const CONTENT_SOURCES = ['saved', 'liked'] as const
+export type ContentSource = (typeof CONTENT_SOURCES)[number]
 
 /** Origine d'un tag — détermine son rendu et ce qu'une purge en masse efface. */
 export type TagSource = 'user' | 'rule' | 'ai'
@@ -57,6 +61,8 @@ export interface Post {
   /** Étiquette de couleur, ou null si le post n'en porte pas. */
   label: LabelColor | null
   tags: TagRef[]
+  /** Un post présent dans les deux flux reste une seule entrée dans la bibliothèque. */
+  sources: ContentSource[]
 }
 
 export interface TagRef {
@@ -72,6 +78,10 @@ export interface PostMedia {
   thumbUrl: string | null
   /** URL `magpie://video/…` du clip en cache, pour la lecture au survol. */
   videoUrl: string | null
+  /** Une source locale ou distante existe, même si la vignette n'est pas encore prête. */
+  hasSource?: boolean
+  /** Permet de distinguer une vignette en cours d'un échec définitif. */
+  thumbStatus?: 'ready' | 'pending' | 'failed'
   width: number | null
   height: number | null
   /** Qualités que la plateforme expose pour ce clip. */
@@ -117,6 +127,8 @@ export interface Settings {
   nitrateEnabled: boolean
   /** Faux au premier lancement : la présentation s'affiche à la place de l'application. */
   onboardingDone: boolean
+  /** Flux importés depuis chaque compte connecté. Au moins une origine est toujours active. */
+  contentSources: ContentSource[]
   /** Qualité maximale mise en cache automatiquement. */
   videoCacheQuality: VideoQuality
   /** `stream` conserve seulement les vignettes ; `offline` garde aussi les clips. */
@@ -253,6 +265,8 @@ export interface UpdateState {
 export interface PostQuery {
   /** Vide = toutes les plateformes. */
   platforms: Platform[]
+  /** Vide = toutes les origines activées. */
+  sources: ContentSource[]
   /** Vide = tous les types. */
   kinds: PostKind[]
   favoritesOnly: boolean
@@ -268,6 +282,7 @@ export interface PostQuery {
 
 export const DEFAULT_QUERY: PostQuery = {
   platforms: [],
+  sources: [],
   kinds: [],
   favoritesOnly: false,
   untaggedOnly: false,
@@ -283,6 +298,7 @@ export interface LibraryStats {
   total: number
   favorites: number
   byPlatform: Record<Platform, number>
+  bySource: Record<ContentSource, number>
   /** Nombre de posts par étiquette de couleur ; les teintes inutilisées sont absentes. */
   byLabel: Partial<Record<LabelColor, number>>
   topTags: { name: string; count: number; source: TagSource }[]
@@ -321,6 +337,8 @@ export interface MagpieApi {
     kind: 'image' | 'video',
     quality: PlaybackQuality
   ): Promise<string>
+  /** Priorise les vignettes visibles dans le cache intelligent. */
+  requestThumbnails(postIds: string[]): Promise<void>
 
   setLabel(postId: string, label: LabelColor | null): Promise<void>
   setCollectionColor(collectionId: number, color: LabelColor | null): Promise<void>

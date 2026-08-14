@@ -1,11 +1,19 @@
-import type { Platform, PlatformSync, SyncState } from '@shared/types'
-import { idleSyncState, PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
+import type { ContentSource, Platform, PlatformSync, SyncState } from '@shared/types'
+import { idleSyncState, PLATFORMS, PUBLIC_PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
 import { AuthExpired, ChallengeRequired, RateLimited } from '../adapters/http'
 import type { PlatformAdapter } from '../adapters/types'
 import { instagramAdapter } from '../adapters/instagram'
 import { redditAdapter } from '../adapters/reddit'
 import { xAdapter } from '../adapters/x'
-import { knownPostIds, readAccount, upsertPosts, writeAccount } from '../db/queries'
+import {
+  knownPostIds,
+  readAccount,
+  readAccountSource,
+  upsertPosts,
+  writeAccount,
+  writeAccountSource
+} from '../db/queries'
+import { readSettings } from '../settings'
 import { applyRuleTags } from '../tagging/rules'
 
 /**
@@ -117,7 +125,7 @@ class SyncEngine {
    * est bien attendu.
    */
   async syncAll(platforms?: Platform[]): Promise<SyncState> {
-    const targets = platforms ?? PLATFORMS
+    const targets = platforms ?? [...PUBLIC_PLATFORMS]
     const started: Promise<void>[] = []
 
     for (const platform of targets) {
@@ -143,6 +151,14 @@ class SyncEngine {
   }
 
   private async syncOne(platform: Platform): Promise<void> {
+    for (const source of readSettings().contentSources) {
+      if (this.cancelled.has(platform)) return
+      await this.syncSource(platform, source)
+      if (this.state.byPlatform[platform].phase === 'error') return
+    }
+  }
+
+  private async syncSource(platform: Platform, source: ContentSource): Promise<void> {
     const adapter = ADAPTERS[platform]
     const maxPages = SYNC_PAGE_LIMITS[platform]
 
@@ -155,8 +171,8 @@ class SyncEngine {
       needsAttention: false
     })
 
-    const known = knownPostIds(platform)
-    const account = readAccount(platform)
+    const known = knownPostIds(platform, source)
+    const account = readAccountSource(platform, source)
     const resume = decodeResumeCursor(account?.cursor ?? null)
     const isBackfill = resume !== null || !account?.lastSyncAt || account?.lastSyncStatus === 'partial'
     let cursor: string | null = resume?.cursor ?? null
@@ -170,7 +186,7 @@ class SyncEngine {
 
     for (let page = 0; page < maxPages; page++) {
       if (this.cancelled.has(platform)) {
-        writeAccount(platform, { lastSyncStatus: 'partial' })
+        writeAccountSource(platform, source, { lastSyncStatus: 'partial' })
         this.patch(platform, { phase: 'cancelled' })
         return
       }
@@ -182,7 +198,7 @@ class SyncEngine {
 
       let result: Awaited<ReturnType<PlatformAdapter['fetchPage']>>
       try {
-        result = await adapter.fetchPage(cursor, rank)
+        result = await adapter.fetchPage(source, cursor, rank)
       } catch (err) {
         if (err instanceof ChallengeRequired) {
           // Arrêt définitif : réessayer une vérification de sécurité est exactement le
@@ -192,6 +208,7 @@ class SyncEngine {
             needsAttention: true,
             message: `${label(platform)} demande une vérification de sécurité. Ouvrez le site dans votre navigateur, débloquez le compte, puis reconnectez-le ici.`
           })
+          writeAccountSource(platform, source, { lastSyncStatus: 'challenge' })
           writeAccount(platform, { lastSyncStatus: 'challenge' })
           return
         }
@@ -202,6 +219,7 @@ class SyncEngine {
             needsAttention: true,
             message: `La session ${label(platform)} a expiré. Reconnectez le compte dans les réglages.`
           })
+          writeAccountSource(platform, source, { lastSyncStatus: 'expired' })
           writeAccount(platform, { lastSyncStatus: 'expired' })
           return
         }
@@ -213,6 +231,7 @@ class SyncEngine {
               phase: 'error',
               message: `${label(platform)} limite toujours le débit après plusieurs tentatives.`
             })
+            writeAccountSource(platform, source, { lastSyncStatus: 'error' })
             writeAccount(platform, { lastSyncStatus: 'error' })
             return
           }
@@ -225,6 +244,7 @@ class SyncEngine {
         }
 
         this.patch(platform, { phase: 'error', message: `${label(platform)} : ${(err as Error).message}` })
+        writeAccountSource(platform, source, { lastSyncStatus: 'error' })
         writeAccount(platform, { lastSyncStatus: 'error' })
         return
       }
@@ -241,7 +261,7 @@ class SyncEngine {
       for (const post of fresh) known.add(post.id)
 
       if (result.posts.length > 0) {
-        upsertPosts(result.posts, result.media)
+        upsertPosts(result.posts, result.media, source)
         // Les règles ne s'appliquent qu'aux nouveaux : les re-jouer sur du déjà connu
         // ressusciterait des tags que l'utilisateur a pu retirer à la main.
         if (fresh.length > 0) applyRuleTags(fresh)
@@ -250,7 +270,7 @@ class SyncEngine {
         // enregistrés au fil de l'eau, donc un rattrapage interrompu laissait des données
         // en base sans aucune trace de synchronisation — le compte s'affichait alors
         // « jamais synchronisé » alors qu'il l'avait été.
-        writeAccount(platform, {
+        const checkpoint = {
           lastSyncAt: Date.now(),
           lastSyncStatus: isBackfill ? 'partial' : 'ok',
           ...(isBackfill
@@ -260,7 +280,9 @@ class SyncEngine {
                   : null
               }
             : {})
-        })
+        }
+        writeAccountSource(platform, source, checkpoint)
+        writeAccount(platform, checkpoint)
       }
 
       this.patch(platform, { fetched, added, page: page + 1, message: null })
@@ -283,18 +305,22 @@ class SyncEngine {
       await this.pause(platform)
     }
 
-    writeAccount(platform, {
-      handle: (await adapter.resolveHandle().catch(() => null)) ?? undefined,
+    const finalCheckpoint = {
       lastSyncAt: Date.now(),
       lastSyncStatus: completed ? 'ok' : 'partial',
       ...(isBackfill && completed ? { cursor: null } : {})
+    }
+    writeAccountSource(platform, source, finalCheckpoint)
+    writeAccount(platform, {
+      ...finalCheckpoint,
+      handle: (await adapter.resolveHandle().catch(() => null)) ?? undefined
     })
 
     this.patch(platform, {
       phase: 'done',
       fetched,
       added,
-      message: completed ? null : `${label(platform)} : import mis en pause, reprise disponible.`
+      message: completed ? null : `${label(platform)} : import ${source === 'liked' ? 'des likes' : 'des signets'} mis en pause, reprise disponible.`
     })
   }
 }
@@ -307,7 +333,7 @@ export const syncEngine = new SyncEngine()
 
 export async function connectedPlatforms(): Promise<Platform[]> {
   const entries = await Promise.all(
-    PLATFORMS.map(async (platform) => [platform, await ADAPTERS[platform].isConnected()] as const)
+    PUBLIC_PLATFORMS.map(async (platform) => [platform, await ADAPTERS[platform].isConnected()] as const)
   )
   return entries.filter(([, connected]) => connected).map(([platform]) => platform)
 }

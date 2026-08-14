@@ -10,7 +10,7 @@ import type {
   SyncState,
   UpdateState
 } from '@shared/types'
-import { idleSyncState, PLATFORMS } from '@shared/types'
+import { idleSyncState, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
 
 /**
  * Accès au processus principal.
@@ -49,6 +49,10 @@ function previewStats(posts: Post[]): LibraryStats {
     total: posts.length,
     favorites: posts.filter((p) => p.isFavorite).length,
     byPlatform,
+    bySource: {
+      saved: posts.filter((post) => post.sources?.includes('saved') ?? true).length,
+      liked: posts.filter((post) => post.sources?.includes('liked')).length
+    },
     byLabel: {},
     topTags: [...counts.entries()]
       .map(([name, count]) => ({ name, count, source: 'rule' as const }))
@@ -66,10 +70,11 @@ const PREVIEW_DEFAULTS: Settings = {
   language: 'system',
   accent: 'violet',
   nitrateEnabled: false,
+  contentSources: ['saved'],
   videoCacheQuality: '480p',
   mediaStorageMode: 'stream',
   playbackQuality: 'auto',
-  cacheLimitGb: 20,
+  cacheLimitGb: 5,
   trayEnabled: true,
   syncOnLaunch: true,
   syncSchedule: 'manual',
@@ -185,6 +190,7 @@ const previewApi: MagpieApi = {
   openDataFolder: async () => {},
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),
   getMediaPlaybackUrl: async () => '',
+  requestThumbnails: async () => {},
 
   // Les mutations n'ont pas de base derrière elles en aperçu : elles renvoient l'état
   // courant sans rien modifier, plutôt que de simuler une persistance qui mentirait.
@@ -201,7 +207,7 @@ const previewApi: MagpieApi = {
   // La connexion des comptes n'a pas d'équivalent hors Electron : l'aperçu se contente
   // d'annoncer trois comptes déconnectés, ce qui suffit à juger de l'interface.
   listAccounts: async () =>
-    PLATFORMS.map((platform) => ({
+    PUBLIC_PLATFORMS.map((platform) => ({
       platform,
       connected: false,
       handle: null,

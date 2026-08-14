@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Platform } from '@shared/types'
-import { PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
+import { PUBLIC_PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
 import { formatDateTime, formatTime, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
@@ -53,7 +53,7 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
 
   return (
     <div className="accounts">
-      {PLATFORMS.map((platform) => {
+      {PUBLIC_PLATFORMS.map((platform) => {
         const account = accounts.find((a) => a.platform === platform)
         const connected = account?.connected ?? false
         const noteKey = account?.lastSyncStatus ? STATUS_NOTE[account.lastSyncStatus] : undefined

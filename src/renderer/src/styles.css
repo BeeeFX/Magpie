@@ -1807,6 +1807,13 @@ html.window-is-moving .app *::after {
   height: 16px;
 }
 
+.card__media-pending--failed {
+  gap: 7px;
+  padding: 18px;
+  color: color-mix(in srgb, var(--muted) 84%, var(--text));
+  text-align: center;
+}
+
 @keyframes media-pending-shine {
   to { transform: translateX(100%); }
 }
@@ -2991,6 +2998,33 @@ html.window-is-moving .app *::after {
   gap: 10px;
 }
 
+.welcome__source-choice {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(250px, 1.35fr);
+  align-items: center;
+  gap: 3px 18px;
+  padding: 13px 15px;
+  border: 1px solid var(--hairline);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--field) 88%, var(--accent) 12%);
+}
+
+.welcome__source-choice > strong {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.welcome__source-choice > span {
+  grid-column: 1;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.welcome__source-choice > .segmented {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
 .welcome__storage-option {
   position: relative;
   display: flex;
@@ -3112,6 +3146,16 @@ html.window-is-moving .app *::after {
 @media (max-width: 620px) {
   .welcome__storage-options {
     grid-template-columns: 1fr;
+  }
+
+  .welcome__source-choice {
+    grid-template-columns: 1fr;
+  }
+
+  .welcome__source-choice > .segmented {
+    grid-column: 1;
+    grid-row: auto;
+    margin-top: 7px;
   }
 }
 
@@ -3305,6 +3349,48 @@ html.window-is-moving .app *::after {
 .collection-row__colour .label-picker {
   gap: 4px;
   flex-wrap: nowrap;
+}
+
+.collection-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 5px;
+  padding: 0 7px 6px;
+  animation: modal-in 0.18s var(--spring) both;
+}
+
+.collection-create--detail {
+  padding: 0;
+}
+
+.collection-create input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--hairline));
+  border-radius: 10px;
+  outline: none;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.collection-create input:focus {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.collection-create__submit {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+
+.collection-create__submit:disabled {
+  opacity: 0.4;
 }
 
 /* ============================================================== lecteur vidéo */
@@ -3516,6 +3602,24 @@ html.window-is-moving .app *::after {
   text-align: center;
   transform: translate(-50%, -50%);
   backdrop-filter: blur(12px);
+}
+
+.player__loading,
+.detail__media-loading {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: rgb(255 255 255 / 0.68);
+  font-size: 11.5px;
+  transform: translate(-50%, -50%);
+}
+
+.player__loading .spinner,
+.detail__media-loading .spinner {
+  width: 16px;
+  height: 16px;
 }
 
 /* Le curseur de volume s'ouvre au survol : il est là quand on le cherche, absent sinon. */

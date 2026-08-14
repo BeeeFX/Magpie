@@ -177,6 +177,17 @@ export function Grid(): React.JSX.Element {
       })),
     [layout, postsById, scroll, viewport.height]
   )
+
+  /* Le cache intelligent suit le viewport. `visibleItems` inclut déjà une marge au-dessus
+     et au-dessous, ce qui donne aux miniatures le temps d'arriver avant le scroll. */
+  useEffect(() => {
+    const ids = visible
+      .filter((item) => item.post.media.some((media) => media.thumbStatus === 'pending'))
+      .map((item) => item.post.id)
+    if (ids.length === 0) return
+    const timer = setTimeout(() => void magpie.requestThumbnails(ids), 80)
+    return () => clearTimeout(timer)
+  }, [visible])
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
   const onCopy = useCallback((post: Post) => {

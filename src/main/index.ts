@@ -24,7 +24,7 @@ import {
   repairMissingSyncDates
 } from './db/queries'
 import { backfillRuleTags } from './tagging/rules'
-import { processPendingMedia, THUMB_NAME_PATTERN, VIDEO_NAME_PATTERN } from './media/cache'
+import { processPendingMedia, THUMB_NAME_PATTERN, touchCachedThumbnails, VIDEO_NAME_PATTERN } from './media/cache'
 import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
 import { repairOversizedVideos } from './sync/repair'
@@ -67,7 +67,6 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
-let hiddenToTray = false
 let windowInteractionActive = false
 let windowInteractionTimer: NodeJS.Timeout | null = null
 let scheduleTimer: NodeJS.Timeout | null = null
@@ -146,14 +145,12 @@ function createWindow(): void {
   })
 
   mainWindow.once('ready-to-show', () => {
-    hiddenToTray = false
     mainWindow?.show()
     updateTray()
   })
   mainWindow.on('close', (event) => {
     if (!quitting && readSettings().trayEnabled) {
       event.preventDefault()
-      hiddenToTray = true
       mainWindow?.hide()
       updateTray()
     }
@@ -185,14 +182,15 @@ function createWindow(): void {
 
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) createWindow()
-  hiddenToTray = false
   mainWindow?.show()
   mainWindow?.focus()
   updateTray()
 }
 
 function updateTray(): void {
-  const shouldShow = readSettings().trayEnabled && hiddenToTray
+  // L'icône représente le processus en arrière-plan, pas l'état de la fenêtre.
+  // Elle reste donc présente tant que Magpie tourne.
+  const shouldShow = readSettings().trayEnabled
   if (shouldShow && !tray) {
     const icon = nativeImage.createFromPath(appIconPath()).resize({
       width: 18,
@@ -379,6 +377,13 @@ let mediaQueuedAgain = false
 let mediaPaused = false
 let mediaPauseWaiters: Array<() => void> = []
 let mediaAbortController: AbortController | null = null
+const requestedThumbnailPostIds = new Set<string>()
+
+function requestThumbnailDrain(postIds: string[]): void {
+  void touchCachedThumbnails(postIds)
+  for (const id of postIds) requestedThumbnailPostIds.add(id)
+  void drainMediaQueue()
+}
 
 async function pauseMediaQueue(): Promise<void> {
   mediaPaused = true
@@ -413,13 +418,20 @@ async function drainMediaQueue(): Promise<void> {
     do {
       mediaQueuedAgain = false
       mediaAbortController = new AbortController()
+      const settings = readSettings()
+      const requested = [...requestedThumbnailPostIds]
+      requestedThumbnailPostIds.clear()
+      // Le mode léger ne parcourt jamais les milliers de médias en attente : seules
+      // les cartes visibles (et leur petite marge de préchargement) alimentent la file.
+      if (settings.mediaStorageMode === 'stream' && requested.length === 0) break
       const result = await processPendingMedia(
         (progress) => mainWindow?.webContents.send('cache:progress', progress),
         mainWindow?.isVisible() ? 2 : 3,
         () => mediaPaused,
-        mediaAbortController.signal
+        mediaAbortController.signal,
+        settings.mediaStorageMode === 'stream' ? requested : undefined
       )
-      hasMore = result.hasMore
+      hasMore = result.hasMore || requestedThumbnailPostIds.size > 0
       if (result.total > 0) mainWindow?.webContents.send('library:updated')
       // Rend régulièrement la main à Electron entre deux lots afin que déplacer ou
       // redimensionner la fenêtre reste instantané pendant un gros rattrapage.
@@ -473,6 +485,7 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
   registerIpc({
     onThemeChange: syncTheme,
     drainMedia: () => void drainMediaQueue(),
+    requestThumbnails: requestThumbnailDrain,
     pauseMedia: pauseMediaQueue,
     resumeMedia: resumeMediaQueue,
     onSettingsChange: () => {

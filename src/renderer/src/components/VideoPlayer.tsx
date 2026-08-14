@@ -60,6 +60,7 @@ export function VideoPlayer({
   const [qualityBusy, setQualityBusy] = useState(false)
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
   const [sourceError, setSourceError] = useState(false)
+  const [mediaLoading, setMediaLoading] = useState(true)
   const qualitySignature = qualities.join('|')
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export function VideoPlayer({
     setDuration(0)
     setScrubValue(null)
     setSourceError(false)
+    setMediaLoading(true)
     setQualityBusy(true)
     void magpie
       .getMediaPlaybackUrl(postId, mediaIndex, 'video', preferred)
@@ -189,6 +191,7 @@ export function VideoPlayer({
           if (!scrubbingRef.current) setTime(e.currentTarget.currentTime)
         }}
         onLoadedMetadata={(e) => {
+          setMediaLoading(false)
           const video = e.currentTarget
           setDuration(video.duration)
           const resume = resumeAfterQualityRef.current
@@ -200,12 +203,16 @@ export function VideoPlayer({
           }
         }}
         onDurationChange={(e) => setDuration(e.currentTarget.duration)}
+        onCanPlay={() => setMediaLoading(false)}
+        onWaiting={() => setMediaLoading(true)}
+        onPlaying={() => setMediaLoading(false)}
         onEnded={(e) => {
           e.currentTarget.currentTime = 0
           setTime(0)
           void e.currentTarget.play().catch(() => setPlaying(false))
         }}
         onError={() => {
+          setMediaLoading(false)
           if (src && activeSrc !== src) {
             setQuality('auto')
             setActiveSrc(src)
@@ -216,6 +223,12 @@ export function VideoPlayer({
         }}
       />
 
+      {mediaLoading && !sourceError ? (
+        <div className="player__loading" aria-live="polite">
+          <span className="spinner" />
+          <span>{t('player.loading')}</span>
+        </div>
+      ) : null}
       {sourceError ? <div className="player__error">{t('player.streamError')}</div> : null}
 
       <div className="player__bar">

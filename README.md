@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/magpie-banner.png" alt="Magpie — Your saved internet, beautifully organised" width="100%">
+  <img src="docs/assets/magpie-banner.png" alt="Magpie — Bookmarks and likes, beautifully organised" width="100%">
 </p>
 
 <p align="center">
@@ -8,66 +8,67 @@
 </p>
 
 <p align="center">
-  <strong>Instagram, X and Reddit bookmarks — together in one calm, visual library.</strong><br>
-  Browse them like a moodboard, find them again with tags, and keep the whole collection on your own computer.
+  <strong>Your Instagram and X bookmarks and likes, together in one calm visual library.</strong><br>
+  Browse thousands of saved posts like a moodboard, organise them locally, and find them again.
 </p>
 
 <p align="center"><sub>Windows 10/11 · Free and open source · English & French · Light & dark themes</sub></p>
 
-![Magpie visual bookmark library](docs/assets/magpie-library.png)
+![Magpie visual library with bookmarks and likes](docs/assets/magpie-library.png)
 
-## Stop losing the things you saved
+## The things you saved, finally useful
 
-Magpie turns hundreds of scattered saved posts into a fast Pinterest-style wall. Connect your accounts once, then browse everything together or focus on a single platform. Your scroll position, filters and open posts stay where you left them.
+Magpie turns scattered posts into a fast Pinterest-style wall. Connect Instagram or X, choose **Bookmarks**, **Likes**, or **Both**, then browse everything together or filter it instantly. A post that appears in both feeds stays a single item.
 
-| See everything | Make it yours | Find it later |
+| Browse naturally | Organise your way | Stay fast at scale |
 | --- | --- | --- |
-| Responsive masonry grid, images, carousels and an integrated video player. | Favourites, coloured labels, tags, collections and bulk actions. | Search, platform and media filters, automatic tags and multiple sorting options. |
+| Masonry or card grid, hover previews, carousels and an integrated video player. | Collections, tags, favourites, colour labels, search and bulk actions. | Virtualised scrolling and a bounded smart cache designed for libraries with tens of thousands of posts. |
 
-### Designed for real collections
+### Made for large libraries
 
-- Connect **Instagram, X and Reddit** and sync them at the same time.
-- Watch each account’s progress and resume long imports safely.
-- Choose the grid density, light/dark theme and colour accent.
-- Choose lightweight on-demand streaming or an offline video library, with a configurable cache limit.
-- Pick the streaming resolution from the player’s compact quality menu.
-- Select many posts at once to tag, favourite, copy or add to a collection.
-- Optionally organise new posts with OpenAI, Claude, Gemini, DeepSeek or another compatible model.
-- Move the whole library to another drive whenever it gets large.
-- Receive **automatic Windows updates** in the background from version 0.2.0 onward.
+- Sync Instagram and X in parallel, with visible progress and resumable long imports.
+- Keep your last search, filters, sorting and scroll position between sessions.
+- Stream full images and videos only when opened; choose video quality in the player.
+- Use the default **Smart cache** to prepare only the 480p thumbnails you browse.
+- Set a disk limit: recently viewed thumbnails stay available while older ones are replaced automatically.
+- Choose offline video storage only if you explicitly want a larger local archive.
+- Move the complete library and cache to another drive at any time.
+- Receive automatic Windows updates in the background.
 
-### AI suggests. You decide.
+## Organise locally — no LLM or API key
 
-Magpie can analyse your video descriptions, thumbnails and existing tags, then propose a collection plan. Nothing is created immediately: rename categories, exclude any you do not want, or merge related ideas — for example guitar, DJ sets and production into one **Music** collection — before applying the plan.
+Magpie can compare captions, hashtags, tags, creators and local visual signatures to suggest useful collections. The analysis runs on your computer and works incrementally, including on very large libraries.
 
-![Reviewing and merging AI collection suggestions in Magpie](docs/assets/magpie-ai-organizer.png)
+Nothing is filed without your approval: rename a category, exclude it, or merge related suggestions before creating the collections.
+
+![Magpie local collection organiser](docs/assets/magpie-organizer.png)
 
 <p align="center">
-  <img src="docs/assets/magpie-settings.png" alt="Magpie settings" width="48%">
-  <img src="docs/assets/magpie-updates.png" alt="Magpie automatic updates and AI tagging" width="48%">
+  <img src="docs/assets/magpie-welcome.png" alt="Magpie welcome tour with source and smart cache choices" width="48%">
+  <img src="docs/assets/magpie-settings.png" alt="Magpie account, source and local organisation settings" width="48%">
 </p>
 
 ## Install in a minute
 
 1. Open the **[latest Magpie release](https://github.com/BeeeFX/Magpie/releases/latest)**.
 2. Download `Magpie-Setup-x.y.z.exe` and follow the installer.
-3. Open Magpie and connect your first account in the welcome tour.
+3. Open Magpie, choose where its library should live, then connect Instagram or X.
 
 > Magpie is not code-signed yet, so Windows SmartScreen may show a warning. Check that the publisher page is this repository before continuing.
 
-Users upgrading from 0.1.1 need to install 0.2.0 manually once. After that, Magpie checks stable GitHub releases automatically, downloads updates in the background and asks before restarting to install them.
+Magpie checks stable GitHub releases automatically, downloads updates in the background, and asks before restarting to install one.
 
 ## Private by default
 
-Your posts, tags, collections and cached media stay on your computer. In space-saver mode, full media is requested directly from its platform only when you view it and is not added to Magpie’s media cache. Platform sessions live in separate Chromium partitions, and Magpie never sees the password entered on the platform’s real login page.
+Your posts, tags, collections, database and cached thumbnails stay on your computer. In Smart cache mode, full media is streamed from its platform only when you open it and is not stored permanently. Platform sessions live in separate Chromium partitions, and Magpie never sees the password entered on the platform's real login page.
 
-AI tagging is off by default. If enabled, post text and a thumbnail may be sent to the provider you choose. The API key is encrypted using the operating system’s secure storage.
+Local organisation does not send captions, thumbnails or account data to an external AI service.
 
 ## Good to know
 
-Magpie is an independent project and is not affiliated with Meta, X Corp. or Reddit. It reads the same private web endpoints used by their websites, which may change over time. Sync reasonably and follow the terms that apply to your accounts.
+Magpie is an independent project and is not affiliated with Meta or X Corp. It uses the private web endpoints used by the platforms themselves, which may change over time. Sync reasonably and follow the terms that apply to your accounts.
 
-macOS and Linux packages are planned; their builds are configured but not yet signed or tested for this first release.
+Reddit support is currently hidden while its integration is being redesigned. macOS and Linux packages are planned but are not yet tested or signed.
 
 <details>
 <summary><strong>For developers and contributors</strong></summary>
@@ -86,6 +87,9 @@ Checks and Windows packaging:
 ```bash
 npm run typecheck
 npm run check:layout
+npm run check:db
+npm run check:media
+npm run check:organizer
 npm run build
 npm run dist:win
 ```
@@ -95,7 +99,7 @@ npm run dist:win
 - Electron for the desktop shell, isolated platform sessions, background work and updates;
 - React + Zustand for the interface;
 - SQLite/FTS5 for local storage and search;
-- Sharp for thumbnails and FFmpeg for adaptive video streams;
+- Sharp for bounded 480p thumbnails and FFmpeg for adaptive video streams;
 - electron-builder + electron-updater for NSIS releases and differential updates.
 
 A tag matching the `package.json` version triggers the Windows release workflow. It publishes the installer, blockmap and `latest.yml` update manifest to GitHub Releases.
