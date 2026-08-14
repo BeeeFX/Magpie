@@ -2,7 +2,8 @@ import { performance } from 'node:perf_hooks'
 import type { VideoOrganizationItem } from '../src/main/db/queries'
 import {
   buildLocalCollectionPlan,
-  extractLocalVisualFeature
+  extractLocalVisualFeature,
+  resolveLocalThumbnailPath
 } from '../src/main/tagging/organize'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -24,6 +25,11 @@ console.log('Vérification de l’organisateur local')
 
 const visual = await extractLocalVisualFeature('build/icon.png')
 assert(visual !== null && visual.length > 100, 'une vignette produit une signature visuelle locale')
+assert(
+  resolveLocalThumbnailPath('thumbnail.webp', 'D:\\Magpie\\media') ===
+    'D:\\Magpie\\media\\thumbnail.webp',
+  'un nom de vignette stocké en base est résolu dans le dossier média'
+)
 
 const sample: VideoOrganizationItem[] = [
   item('g1', 'A new guitar riff and pedalboard setup', 'strings'),

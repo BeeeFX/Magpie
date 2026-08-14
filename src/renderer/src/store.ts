@@ -30,6 +30,7 @@ export const DENSITY_MAX = 400
 export const POST_PAGE_SIZE = 300
 let pageGeneration = 0
 let lastStatsRefresh = 0
+let flushDeferredUiStorage = (): void => {}
 
 async function fetchStats(): Promise<LibraryStats> {
   const stats = await magpie.getStats()
@@ -58,7 +59,15 @@ function deferredStorage(): StateStorage {
     pending.clear()
   }
 
+  // Un changement de filtre ou de tri appelle également ce flush explicitement. Les
+  // autres mutations fréquentes (notamment le scroll) restent regroupées pour ne pas
+  // solliciter Chromium en continu.
+  flushDeferredUiStorage = flush
   window.addEventListener('pagehide', flush)
+  window.addEventListener('beforeunload', flush)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flush()
+  })
 
   return {
     getItem: (name) => {
@@ -359,11 +368,13 @@ export const useStore = create<State>()(
 
       setQuery: (patch) => {
         set({ query: { ...get().query, ...patch }, scrollTop: 0, detailIndex: null })
+        flushDeferredUiStorage()
         void get().refresh(true)
       },
 
       resetQuery: () => {
         set({ query: DEFAULT_QUERY, scrollTop: 0 })
+        flushDeferredUiStorage()
         void get().refresh(true)
       },
 
@@ -372,6 +383,7 @@ export const useStore = create<State>()(
         // toujours le même ordre.
         const randomSeed = sort === 'random' ? Math.floor(Math.random() * 2 ** 31) : get().query.randomSeed
         set({ query: { ...get().query, sort, randomSeed }, scrollTop: 0 })
+        flushDeferredUiStorage()
         void get().refresh(true)
       },
 
@@ -689,7 +701,18 @@ export const useStore = create<State>()(
         muted: state.muted,
         hoverAudio: state.hoverAudio,
         scrollTop: state.scrollTop
-      })
+      }),
+      // Zustand fusionne normalement seulement le premier niveau. Fusionner aussi la
+      // requête permet aux nouveaux filtres ajoutés dans une future version de recevoir
+      // leur valeur par défaut sans effacer les préférences déjà enregistrées.
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<State>
+        return {
+          ...current,
+          ...saved,
+          query: { ...DEFAULT_QUERY, ...(saved.query ?? {}) }
+        }
+      }
     }
   )
 )

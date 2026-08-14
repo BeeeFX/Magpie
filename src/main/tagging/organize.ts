@@ -5,6 +5,7 @@ import type {
   OrganizerProgress
 } from '@shared/types'
 import { app } from 'electron'
+import { isAbsolute, join } from 'node:path'
 import sharp from 'sharp'
 import {
   localVideoFeatures,
@@ -13,6 +14,7 @@ import {
   type LocalVideoFeature,
   type VideoOrganizationItem
 } from '../db/queries'
+import { mediaDir } from '../db'
 import { readSettings } from '../settings'
 
 const MAX_CATEGORIES = 24
@@ -219,6 +221,17 @@ export async function extractLocalVisualFeature(path: string): Promise<Float32Ar
   }
 }
 
+/**
+ * La base conserve seulement le nom des vignettes mises en cache. Les passer directement
+ * à sharp les faisait chercher dans le dossier d'installation de Magpie. Après quelques
+ * milliers d'ouvertures invalides en parallèle, libvips pouvait terminer brutalement le
+ * processus principal sous Windows. Accepter aussi un chemin absolu garde cette fonction
+ * testable et reste compatible avec d'anciennes bibliothèques.
+ */
+export function resolveLocalThumbnailPath(path: string, baseDir = mediaDir()): string {
+  return isAbsolute(path) ? path : join(baseDir, path)
+}
+
 function normalizeVector(vector: Float32Array): void {
   let magnitude = 0
   for (const value of vector) magnitude += value * value
@@ -268,7 +281,9 @@ async function loadVisuals(items: VideoOrganizationItem[]): Promise<Map<string, 
     while (cursor < pending.length) {
       const item = pending[cursor]
       cursor += 1
-      const visual = item.thumbPath ? await extractLocalVisualFeature(item.thumbPath) : null
+      const visual = item.thumbPath
+        ? await extractLocalVisualFeature(resolveLocalThumbnailPath(item.thumbPath))
+        : null
       result.set(item.id, visual)
       writes.push({ postId: item.id, thumbPath: item.thumbPath, visual: visual ? encodeVisual(visual) : null })
       done += 1
@@ -279,7 +294,9 @@ async function loadVisuals(items: VideoOrganizationItem[]): Promise<Map<string, 
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(4, pending.length) }, () => worker()))
+  // sharp/libvips parallélise déjà le décodage en interne. Deux travaux simultanés gardent
+  // l'analyse rapide sans soumettre le module natif à une rafale de milliers de lectures.
+  await Promise.all(Array.from({ length: Math.min(2, pending.length) }, () => worker()))
   flush()
   return result
 }

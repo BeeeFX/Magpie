@@ -39,6 +39,12 @@ import { sessionFor, userAgent } from './adapters/session'
 
 const isDev = !app.isPackaged
 const APP_ID = 'tv.electrictheatre.magpie'
+const isPrimaryInstance = app.requestSingleInstanceLock()
+
+// Une seule instance doit posséder la base et les workers média. Sans ce verrou, chaque
+// clic sur le raccourci lançait une nouvelle copie complète de Magpie qui travaillait sur
+// la même bibliothèque et multipliait fortement la mémoire et la charge disque.
+if (!isPrimaryInstance) app.quit()
 
 // Le raccourci NSIS et le processus doivent annoncer exactement la même identité.
 // Sinon Windows peut créer un second bouton dans la barre des tâches au lancement.
@@ -70,6 +76,15 @@ let quitting = false
 const previousSyncPhase: Partial<Record<string, SyncPhase>> = {}
 const previousSyncAdded: Partial<Record<string, number>> = {}
 const syncStartedAt: Partial<Record<string, number>> = {}
+
+if (isPrimaryInstance) {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
+}
 
 /** Hauteur de notre barre de titre ; les boutons système s'y superposent. Doit rester
  *  égale à la hauteur de `.topbar` côté CSS, sinon les boutons sont décalés. */
@@ -453,7 +468,7 @@ async function bootstrap(): Promise<void> {
   })
 }
 
-void app.whenReady().then(async () => {
+if (isPrimaryInstance) void app.whenReady().then(async () => {
   registerMediaProtocol()
   registerIpc({
     onThemeChange: syncTheme,
