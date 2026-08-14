@@ -65,6 +65,8 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
   const setCacheLimitGb = useStore((s) => s.setCacheLimitGb)
   const trayEnabled = useStore((s) => s.trayEnabled)
   const setTrayEnabled = useStore((s) => s.setTrayEnabled)
+  const syncOnLaunch = useStore((s) => s.syncOnLaunch)
+  const setSyncOnLaunch = useStore((s) => s.setSyncOnLaunch)
   const syncSchedule = useStore((s) => s.syncSchedule)
   const setSyncSchedule = useStore((s) => s.setSyncSchedule)
   const aiProvider = useStore((s) => s.aiProvider)
@@ -225,6 +227,21 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
                   {t(`schedule.${schedule}` as TranslationKey)}
                 </button>
               ))}
+            </div>
+            <div className="setting setting--compact">
+              <div className="setting__label">
+                <strong>{t('settings.syncOnLaunch')}</strong>
+                <span>{t('settings.syncOnLaunchHint')}</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={syncOnLaunch}
+                className={`switch ${syncOnLaunch ? 'is-on' : ''}`}
+                onClick={() => void setSyncOnLaunch(!syncOnLaunch)}
+              >
+                <span className="switch__knob" />
+              </button>
             </div>
             <div className="setting setting--compact">
               <div className="setting__label">

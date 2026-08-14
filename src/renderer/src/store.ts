@@ -133,6 +133,7 @@ interface State {
   playbackQuality: PlaybackQuality
   cacheLimitGb: number
   trayEnabled: boolean
+  syncOnLaunch: boolean
   syncSchedule: SyncSchedule
   aiProvider: AiProvider
   aiModel: string
@@ -176,6 +177,7 @@ interface State {
   setPlaybackQuality: (quality: PlaybackQuality) => Promise<void>
   setCacheLimitGb: (limit: number) => Promise<void>
   setTrayEnabled: (enabled: boolean) => Promise<void>
+  setSyncOnLaunch: (enabled: boolean) => Promise<void>
   setSyncSchedule: (schedule: SyncSchedule) => Promise<void>
   setAiSettings: (patch: Partial<Pick<State, 'aiProvider' | 'aiModel' | 'aiEndpoint' | 'autoTagEnabled'>>) => Promise<void>
   setAiProgress: (progress: AiTagProgress | null) => void
@@ -241,6 +243,7 @@ export const useStore = create<State>()(
       playbackQuality: 'auto',
       cacheLimitGb: 20,
       trayEnabled: true,
+      syncOnLaunch: true,
       syncSchedule: 'manual',
       aiProvider: 'openai',
       aiModel: 'gpt-4.1-mini',
@@ -435,6 +438,7 @@ export const useStore = create<State>()(
           playbackQuality: settings.playbackQuality,
           cacheLimitGb: settings.cacheLimitGb,
           trayEnabled: settings.trayEnabled,
+          syncOnLaunch: settings.syncOnLaunch,
           syncSchedule: settings.syncSchedule,
           aiProvider: settings.aiProvider,
           aiModel: settings.aiModel,
@@ -498,6 +502,11 @@ export const useStore = create<State>()(
       setTrayEnabled: async (trayEnabled) => {
         set({ trayEnabled })
         await magpie.setSettings({ trayEnabled })
+      },
+
+      setSyncOnLaunch: async (syncOnLaunch) => {
+        set({ syncOnLaunch })
+        await magpie.setSettings({ syncOnLaunch })
       },
 
       setSyncSchedule: async (syncSchedule) => {

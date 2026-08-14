@@ -70,6 +70,7 @@ const PREVIEW_DEFAULTS: Settings = {
   playbackQuality: 'auto',
   cacheLimitGb: 20,
   trayEnabled: true,
+  syncOnLaunch: true,
   syncSchedule: 'manual',
   aiProvider: 'openai',
   aiModel: 'gpt-4.1-mini',

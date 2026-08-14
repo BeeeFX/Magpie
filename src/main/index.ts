@@ -399,6 +399,15 @@ void app.whenReady().then(async () => {
 
   await bootstrap()
 
+  // Une vérification incrémentale au lancement ne reparcourt pas tout l'historique : le
+  // moteur s'arrête dès qu'il retrouve quelques pages déjà connues. Le premier compte
+  // connecté déclenche déjà son propre rattrapage depuis l'accueil.
+  const startupSettings = readSettings()
+  if (startupSettings.onboardingDone && startupSettings.syncOnLaunch) {
+    lastScheduledSync = Date.now()
+    void syncEngine.syncAll()
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

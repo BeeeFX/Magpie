@@ -14,6 +14,7 @@ const DEFAULTS: Settings = {
   playbackQuality: 'auto',
   cacheLimitGb: 20,
   trayEnabled: true,
+  syncOnLaunch: true,
   syncSchedule: 'manual',
   aiProvider: 'openai',
   aiModel: 'gpt-4.1-mini',
@@ -66,6 +67,7 @@ function sanitize(raw: unknown): Settings {
         ? value.cacheLimitGb
         : DEFAULTS.cacheLimitGb,
     trayEnabled: value.trayEnabled !== false,
+    syncOnLaunch: value.syncOnLaunch !== false,
     syncSchedule:
       value.syncSchedule === 'hourly' ||
       value.syncSchedule === '6h' ||

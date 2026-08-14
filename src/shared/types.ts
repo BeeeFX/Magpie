@@ -123,6 +123,8 @@ export interface Settings {
   /** Plafond du cache média, en Gio. */
   cacheLimitGb: number
   trayEnabled: boolean
+  /** Vérifie les nouveaux signets à chaque lancement, indépendamment de la répétition. */
+  syncOnLaunch: boolean
   syncSchedule: SyncSchedule
   aiProvider: AiProvider
   aiModel: string
