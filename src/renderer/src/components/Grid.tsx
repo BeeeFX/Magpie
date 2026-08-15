@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Post } from '@shared/types'
 import { magpie } from '../bridge'
-import { computeLayout, visibleItems } from '../layout'
+import { alignItemsToPosts, computeLayout, visibleItems } from '../layout'
 import { useStore, useT } from '../store'
 import { Card } from './Card'
 
@@ -190,14 +190,16 @@ export function Grid(): React.JSX.Element {
     }
   }, [hasMore, loadingMore, layout.totalHeight, scroll, viewport.height, loadMore])
 
-  const postsById = useMemo(() => new Map(posts.map((post) => [post.id, post])), [posts])
+  /* Une fois par lot, hors du chemin de défilement : voir `alignItemsToPosts`, dont
+     l'identité stable est ce qui rend le `memo` de Card réellement efficace. */
+  const itemsById = useMemo(() => alignItemsToPosts(layout, posts), [layout, posts])
+
   const visible = useMemo(
     () =>
-      visibleItems(layout, scroll, viewport.height).map((item) => ({
-        ...item,
-        post: postsById.get(item.post.id) ?? item.post
-      })),
-    [layout, postsById, scroll, viewport.height]
+      visibleItems(layout, scroll, viewport.height).map(
+        (item) => itemsById.get(item.post.id) ?? item
+      ),
+    [itemsById, layout, scroll, viewport.height]
   )
 
   /* Le cache intelligent suit le viewport. `visibleItems` inclut déjà une marge au-dessus

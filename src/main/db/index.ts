@@ -1,8 +1,15 @@
 import { app } from 'electron'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { MIGRATION_9_SQL, MIGRATION_10_SQL, SCHEMA_SQL, SCHEMA_VERSION } from './schema'
+import {
+  MIGRATION_9_SQL,
+  MIGRATION_10_SQL,
+  MIGRATION_11_SQL,
+  MIGRATION_12_SQL,
+  SCHEMA_SQL,
+  SCHEMA_VERSION
+} from './schema'
 
 let db: Database.Database | null = null
 
@@ -61,12 +68,37 @@ export function getDb(): Database.Database {
 
   const current = db.pragma('user_version', { simple: true }) as number
   if (current > 0 && current < SCHEMA_VERSION) {
-    const backup = join(dataDir(), `magpie-before-v${SCHEMA_VERSION}-${Date.now()}.db`)
-    db.exec(`VACUUM INTO '${backup.replaceAll("'", "''")}'`)
+    const name = `magpie-before-v${SCHEMA_VERSION}-${Date.now()}.db`
+    db.exec(`VACUUM INTO '${join(dataDir(), name).replaceAll("'", "''")}'`)
+    console.log(`[magpie] Sauvegarde avant migration : ${name}.`)
+    pruneMigrationBackups(name)
   }
 
   migrate(db)
   return db
+}
+
+const BACKUP_NAME_PATTERN = /^magpie-before-v\d+-\d+\.db$/
+
+/**
+ * Le filet posé avant chaque migration est une copie intégrale de la bibliothèque. Sans
+ * purge, chaque palier de schéma en laissait une de plus dans le dossier, indéfiniment et
+ * sans que personne le sache. On ne garde que la dernière : celle qui permet de revenir en
+ * arrière si la migration qui vient de s'exécuter tourne mal. Les précédentes décrivent des
+ * schémas que cette version ne sait de toute façon plus relire.
+ */
+function pruneMigrationBackups(keep: string): void {
+  try {
+    for (const name of readdirSync(dataDir())) {
+      if (name === keep || !BACKUP_NAME_PATTERN.test(name)) continue
+      rmSync(join(dataDir(), name), { force: true })
+      console.log(`[magpie] Sauvegarde de migration périmée retirée : ${name}.`)
+    }
+  } catch (error) {
+    // Un fichier verrouillé ne doit pas empêcher la migration : la place perdue est un
+    // désagrément, une bibliothèque qui refuse de s'ouvrir en serait un autre.
+    console.warn('[magpie] Purge des sauvegardes de migration impossible', error)
+  }
 }
 
 /**
@@ -133,6 +165,12 @@ const MIGRATIONS: Record<number, (conn: Database.Database) => void> = {
   },
   10: (conn) => {
     conn.exec(MIGRATION_10_SQL)
+  },
+  11: (conn) => {
+    conn.exec(MIGRATION_11_SQL)
+  },
+  12: (conn) => {
+    conn.exec(MIGRATION_12_SQL)
   }
 }
 

@@ -161,6 +161,14 @@ const previewApi: MagpieApi = {
     added: choices.reduce((total, choice) => total + choice.postIds.length, 0),
     alreadyThere: 0
   }),
+  // Un classement fictif « déjà appliqué », pour que l'aperçu visuel montre aussi la porte
+  // de sortie et pas seulement le parcours heureux.
+  lastOrganizerApplication: async () => ({
+    appliedAt: Date.now() - 45 * 60 * 1000,
+    collections: 9,
+    posts: 412
+  }),
+  undoOrganizerApplication: async () => ({ removed: 412, collectionsDeleted: 9 }),
   copyToClipboard: async (text) => {
     await navigator.clipboard.writeText(text)
   },

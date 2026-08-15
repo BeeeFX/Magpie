@@ -5,7 +5,8 @@ import {
   buildLocalCollectionPlan,
   extractLocalVisualFeature,
   rememberedOrganizerDestinations,
-  resolveLocalThumbnailPath
+  resolveLocalThumbnailPath,
+  withoutRemovedPosts
 } from '../src/main/tagging/organize'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -57,7 +58,7 @@ const sample: VideoOrganizationItem[] = [
   item('u1', null, 'unknown')
 ]
 
-const plan = buildLocalCollectionPlan(sample, new Map(), 'en')
+const plan = await buildLocalCollectionPlan(sample, new Map(), 'en')
 const names = new Set(plan.suggestions.map((suggestion) => suggestion.name))
 assert(names.has('Guitar'), 'la guitare est reconnue')
 assert(names.has('Skateboarding'), 'le skateboard est reconnu')
@@ -126,6 +127,27 @@ assert(
   'la redistribution automatique ne force pas les nouveaux contenus ambigus'
 )
 
+// Le classement automatique repart des mêmes signaux à chaque synchronisation. Sans mémoire
+// des retraits, il remettait le post exactement là où l'utilisateur venait de l'enlever.
+const threeD = collectionIdFor('3D & Blender') ?? -1
+const afterRemoval = rememberedOrganizerDestinations(
+  plan.routes,
+  rememberedRules,
+  new Map([[threeD, new Set(['l1'])]])
+)
+assert(
+  !afterRemoval.get(threeD)?.includes('l1'),
+  'un post retiré à la main ne retourne pas dans sa collection au sync suivant'
+)
+assert(
+  ![...afterRemoval.values()].some((postIds) => postIds.includes('l1')),
+  'il n’est pas non plus reversé dans la destination suivante'
+)
+assert(
+  (afterRemoval.get(threeD)?.length ?? 0) > 0,
+  'les autres vidéos de la collection continuent d’être classées'
+)
+
 const large: VideoOrganizationItem[] = Array.from({ length: 10_000 }, (_, index) => {
   const kind = index % 4
   if (kind === 0) return item(`large-${index}`, 'guitar riff music lesson', `artist-${index % 200}`)
@@ -134,11 +156,60 @@ const large: VideoOrganizationItem[] = Array.from({ length: 10_000 }, (_, index)
   return item(`large-${index}`, 'DJ mix rekordbox turntable', `artist-${index % 200}`)
 })
 const started = performance.now()
-const largePlan = buildLocalCollectionPlan(large, new Map(), 'fr')
+const largePlan = await buildLocalCollectionPlan(large, new Map(), 'fr')
 const elapsed = performance.now() - started
 assert(largePlan.analysedVideos === 10_000, 'les 10 000 vidéos sont prises en compte')
 assert(largePlan.unassignedVideos === 0, 'les signaux nets sont tous classés')
 assert(elapsed < 5_000, `le regroupement de 10 000 vidéos reste rapide (${Math.round(elapsed)} ms)`)
+
+/*
+ * Le regroupement tourne sur le processus principal. Découpé, il doit rendre la main
+ * régulièrement — sinon la fenêtre reste figée après chaque synchronisation. On mesure donc
+ * le plus long créneau pendant lequel la boucle d'événements n'a pas pu tourner.
+ */
+let longestBlock = 0
+let lastTick = performance.now()
+const heartbeat = setInterval(() => {
+  longestBlock = Math.max(longestBlock, performance.now() - lastTick)
+  lastTick = performance.now()
+}, 10)
+await buildLocalCollectionPlan(large, new Map(), 'fr', () =>
+  new Promise<void>((resolve) => setImmediate(resolve))
+)
+clearInterval(heartbeat)
+assert(
+  longestBlock < 250,
+  `le regroupement rend la main au fil de l'eau (plus long blocage : ${Math.round(longestBlock)} ms)`
+)
+
+console.log('\nretraits manuels dans la proposition')
+const removedPlan = withoutRemovedPosts(
+  plan,
+  (ruleKeys, name) => (ruleKeys.includes('3d') || name === '3D & Blender' ? 7 : null),
+  new Map([[7, new Set(['b1'])]])
+)
+const threeDBefore = plan.suggestions.find((s) => s.name === '3D & Blender')
+const threeDAfter = removedPlan.suggestions.find((s) => s.name === '3D & Blender')
+assert(
+  threeDBefore?.postIds.includes('b1') && !threeDAfter?.postIds.includes('b1'),
+  'une vidéo retirée à la main n’est plus reproposée pour cette collection'
+)
+assert(
+  (threeDAfter?.postIds.length ?? 0) === (threeDBefore?.postIds.length ?? 0) - 1,
+  'les autres vidéos de la catégorie sont conservées'
+)
+assert(
+  !removedPlan.routes.find((route) => route.postId === 'b1')?.rankedRuleKeys.includes('3d'),
+  'la redistribution ne peut pas l’y ramener par la bande'
+)
+assert(
+  removedPlan.unassignedVideos === plan.unassignedVideos + 1,
+  'elle est recomptée parmi les vidéos sans catégorie'
+)
+assert(
+  withoutRemovedPosts(plan, () => 7, new Map()) === plan,
+  'sans aucun retrait, le plan n’est pas retouché'
+)
 
 console.log('\nTout est vert.')
 }

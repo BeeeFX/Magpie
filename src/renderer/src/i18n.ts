@@ -249,6 +249,15 @@ const fr = {
   'organizer.cancel': 'Annuler',
   'organizer.create': 'Créer les collections',
   'organizer.applying': 'Création…',
+  'organizer.undo': 'Annuler ce classement',
+  'organizer.undoing': 'Annulation…',
+  'organizer.undoLast':
+    'Dernier classement : {collections} collections, {posts} vidéos rangées {when}.',
+  'organizer.undoHint':
+    'Les vidéos ressortent de ces collections et celles créées pour l’occasion disparaissent si elles se retrouvent vides. Rien n’est supprimé de votre bibliothèque.',
+  'organizer.undoDone':
+    '{removed} vidéos sorties de leurs collections, {collections} collections retirées.',
+  'organizer.undoError': 'Impossible d’annuler ce classement.',
   'ai.openai': 'OpenAI',
   'ai.anthropic': 'Claude',
   'ai.gemini': 'Gemini',
@@ -620,6 +629,14 @@ const en: Record<TranslationKey, string> = {
   'organizer.cancel': 'Cancel',
   'organizer.create': 'Create collections',
   'organizer.applying': 'Creating…',
+  'organizer.undo': 'Undo this filing',
+  'organizer.undoing': 'Undoing…',
+  'organizer.undoLast': 'Last filing: {collections} collections, {posts} videos sorted {when}.',
+  'organizer.undoHint':
+    'Videos come back out of those collections, and the ones created for the occasion disappear if they end up empty. Nothing is removed from your library.',
+  'organizer.undoDone':
+    '{removed} videos taken back out of their collections, {collections} collections removed.',
+  'organizer.undoError': 'This filing could not be undone.',
   'ai.openai': 'OpenAI',
   'ai.anthropic': 'Claude',
   'ai.gemini': 'Gemini',

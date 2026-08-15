@@ -92,7 +92,11 @@ export interface PostMedia {
  * l'utilisateur atteigne le bas, donnant un scroll continu sans charger 10 000 posts. */
 export interface PostPage {
   posts: Post[]
-  total: number
+  /** Taille du jeu de résultats, comptée à la première tranche seulement : le COUNT coûte
+   *  à lui seul bien plus que la page (près de trente fois plus à 60 000 posts) et sa
+   *  valeur ne change pas d'une tranche à l'autre. `null` sur les suivantes — l'appelant
+   *  conserve alors le total qu'il connaît déjà. */
+  total: number | null
   offset: number
   hasMore: boolean
 }
@@ -325,6 +329,8 @@ export interface MagpieApi {
     choices: AiCollectionChoice[],
     memory: AiCollectionMemoryOptions
   ): Promise<AiCollectionApplyResult>
+  lastOrganizerApplication(): Promise<OrganizerApplicationSummary | null>
+  undoOrganizerApplication(): Promise<OrganizerUndoResult>
   copyToClipboard(text: string): Promise<void>
   openExternal(url: string): Promise<void>
   sendToNitrate(url: string): Promise<void>
@@ -432,6 +438,18 @@ export interface AiCollectionApplyResult {
   collections: number
   added: number
   alreadyThere: number
+}
+
+/** Dernier classement appliqué, tel qu'on peut le proposer à l'annulation. */
+export interface OrganizerApplicationSummary {
+  appliedAt: number
+  collections: number
+  posts: number
+}
+
+export interface OrganizerUndoResult {
+  removed: number
+  collectionsDeleted: number
 }
 
 /** Événements poussés par le processus principal. Chaque abonnement rend son désabonnement. */

@@ -15,7 +15,9 @@ import type {
   LibraryStats,
   MagpieApi,
   MagpieEvents,
+  OrganizerApplicationSummary,
   OrganizerProgress,
+  OrganizerUndoResult,
   PlaybackQuality,
   Platform,
   Post,
@@ -53,6 +55,10 @@ const api: MagpieApi = {
     memory: AiCollectionMemoryOptions
   ): Promise<AiCollectionApplyResult> =>
     ipcRenderer.invoke('ai:applyCollections', choices, memory),
+  lastOrganizerApplication: (): Promise<OrganizerApplicationSummary | null> =>
+    ipcRenderer.invoke('organizer:lastApplication'),
+  undoOrganizerApplication: (): Promise<OrganizerUndoResult> =>
+    ipcRenderer.invoke('organizer:undo'),
   copyToClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
   sendToNitrate: (url: string): Promise<void> => ipcRenderer.invoke('nitrate:send', url),

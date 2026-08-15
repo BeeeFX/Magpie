@@ -27,13 +27,16 @@ import {
   forgetAccount,
   getPostsByIds,
   getStats,
+  lastOrganizerApplication,
   listCollections,
   listPostPage,
   listPosts,
   readAccount,
   playbackMediaSource,
+  recordOrganizerApplication,
   rememberOrganizerRules,
   removeFromCollection,
+  revertOrganizerApplication,
   removeTag,
   setCollectionColor,
   setLabel,
@@ -244,25 +247,43 @@ export function registerIpc({
           listCollections().map((collection) => [collection.name.toLocaleLowerCase(), collection])
         )
         const learned: Array<{ ruleKey: string; collectionId: number }> = []
+        // De quoi défaire exactement ce classement, et rien d'autre : les collections qu'il
+        // fait naître, et les seules vidéos qu'il range réellement.
+        const createdCollectionIds: number[] = []
+        const filed: Array<{ collectionId: number; postIds: string[] }> = []
         let added = 0
         let alreadyThere = 0
         for (const [key, group] of merged) {
-          const collection = existing.get(key) ?? createCollection(group.name)
+          const known = existing.get(key)
+          const collection = known ?? createCollection(group.name)
+          if (!known) createdCollectionIds.push(collection.id)
           existing.set(key, collection)
           const result = addToCollection(collection.id, [...group.postIds])
           added += result.added
           alreadyThere += result.alreadyThere.length
+          const untouched = new Set(result.alreadyThere)
+          const freshly = [...group.postIds].filter((postId) => !untouched.has(postId))
+          if (freshly.length > 0) filed.push({ collectionId: collection.id, postIds: freshly })
           for (const ruleKey of group.ruleKeys) {
             learned.push({ ruleKey, collectionId: collection.id })
           }
         }
         if (remember) rememberOrganizerRules(learned, ignoredRuleKeys)
+        recordOrganizerApplication({
+          collections: merged.size,
+          posts: added,
+          createdCollectionIds,
+          filed
+        })
         return { collections: merged.size, added, alreadyThere }
       })()
       writeSettings({ autoOrganizeEnabled: remember })
       return result
     }
   )
+
+  ipcMain.handle('organizer:lastApplication', () => lastOrganizerApplication())
+  ipcMain.handle('organizer:undo', () => revertOrganizerApplication())
 
   ipcMain.handle('media:requestThumbnails', (_event, postIds: string[]) => {
     if (

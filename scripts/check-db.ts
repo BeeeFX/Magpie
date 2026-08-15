@@ -8,7 +8,12 @@
 import { existsSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import { libraryDbPath } from './library-path'
-import { MIGRATION_9_SQL, MIGRATION_10_SQL } from '../src/main/db/schema'
+import {
+  MIGRATION_9_SQL,
+  MIGRATION_10_SQL,
+  MIGRATION_11_SQL,
+  MIGRATION_12_SQL
+} from '../src/main/db/schema'
 
 const dbPath = libraryDbPath()
 
@@ -231,6 +236,55 @@ if (hasOrganizerRules) {
   check(
     'plusieurs catégories fusionnées peuvent viser la même collection',
     (migration.prepare('SELECT COUNT(DISTINCT collection_id) n FROM organizer_rules').get() as { n: number }).n === 1
+  )
+  migration.close()
+}
+
+const hasRemovals = Boolean(
+  db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collection_removals'").get()
+)
+if (hasRemovals) {
+  check(
+    'aucun post à la fois retiré et présent dans la même collection',
+    one<{ n: number }>(`SELECT COUNT(*) n FROM collection_removals r
+      JOIN collection_posts cp
+        ON cp.collection_id = r.collection_id AND cp.post_id = r.post_id`).n === 0
+  )
+} else {
+  const migration = new Database(':memory:')
+  migration.exec(`
+    CREATE TABLE collections (id INTEGER PRIMARY KEY);
+    CREATE TABLE posts (id TEXT PRIMARY KEY);
+  `)
+  migration.exec(MIGRATION_11_SQL)
+  migration.exec(`
+    INSERT INTO collections VALUES (1);
+    INSERT INTO posts VALUES ('instagram:1');
+    INSERT INTO collection_removals VALUES (1, 'instagram:1', 1);
+  `)
+  check(
+    'la migration v11 prépare la mémoire des retraits manuels',
+    (migration.prepare('SELECT COUNT(*) n FROM collection_removals').get() as { n: number }).n === 1
+  )
+  migration.close()
+}
+
+const hasApplications = Boolean(
+  db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'organizer_applications'").get()
+)
+if (hasApplications) {
+  check(
+    'un seul classement reste annulable à la fois',
+    one<{ n: number }>('SELECT COUNT(*) n FROM organizer_applications').n <= 1
+  )
+} else {
+  const migration = new Database(':memory:')
+  migration.exec(MIGRATION_12_SQL)
+  migration.exec(`INSERT INTO organizer_applications
+    (applied_at, collections, posts, created_ids, filed) VALUES (1, 2, 30, '[4]', '[]')`)
+  check(
+    'la migration v12 prépare l’annulation du dernier classement',
+    (migration.prepare('SELECT COUNT(*) n FROM organizer_applications').get() as { n: number }).n === 1
   )
   migration.close()
 }

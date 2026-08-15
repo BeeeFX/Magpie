@@ -11,7 +11,7 @@ import type {
   TagSource,
   VideoQuality
 } from '@shared/types'
-import { PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
+import { CONTENT_SOURCES, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
 import { getDb } from './index'
 
 interface PostRow {
@@ -122,23 +122,33 @@ export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): P
   }
 
   const condition = where.join(' AND ')
-  const total = (
-    db.prepare(`SELECT COUNT(*) AS n FROM posts p WHERE ${condition}`).get(...params) as { n: number }
-  ).n
-  const sql = `${SELECT_POST} WHERE ${condition} ORDER BY ${orderBy(query.sort, query.randomSeed)} LIMIT ? OFFSET ?`
-  const rows = db.prepare(sql).all(...params, limit, offset) as PostRow[]
 
-  const posts = rows.map(toPost)
+  // Le COUNT parcourt tout le jeu de résultats : à 60 000 posts il pèse une trentaine de
+  // millisecondes contre une fraction de milliseconde pour la page elle-même, et
+  // better-sqlite3 étant synchrone, il gèle d'autant le processus principal. Le refaire à
+  // chaque `loadMore` revenait donc à payer le mur entier à chaque palier de défilement.
+  // On ne le calcule qu'à la première tranche ; le total ne varie pas d'une page à l'autre.
+  const total =
+    offset === 0
+      ? (
+          db.prepare(`SELECT COUNT(*) AS n FROM posts p WHERE ${condition}`).get(...params) as {
+            n: number
+          }
+        ).n
+      : null
+
+  // Une ligne de plus que demandé : sa présence dit exactement s'il reste quelque chose
+  // après cette tranche, sans avoir à connaître le total.
+  const sql = `${SELECT_POST} WHERE ${condition} ORDER BY ${orderBy(query.sort, query.randomSeed)} LIMIT ? OFFSET ?`
+  const rows = db.prepare(sql).all(...params, limit + 1, offset) as PostRow[]
+  const hasMore = rows.length > limit
+
+  const posts = rows.slice(0, limit).map(toPost)
   attachMedia(posts)
   attachTags(posts)
   attachSources(posts)
 
-  return {
-    posts,
-    total,
-    offset,
-    hasMore: offset + posts.length < total
-  }
+  return { posts, total, offset, hasMore }
 }
 
 /** Lecture exhaustive réservée aux outils hors interface, notamment l'instantané visuel. */
@@ -321,35 +331,68 @@ function toPost(row: PostRow): Post {
   }
 }
 
+const PUBLIC_PLATFORM_SLOTS = PUBLIC_PLATFORMS.map(() => '?').join(', ')
+
 export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): LibraryStats {
   const db = getDb()
   const sources = activeSources.length > 0 ? activeSources : ['saved']
+
+  // Tout post porte au moins une origine. Quand elles sont toutes actives — le cas courant
+  // dès qu'on suit signets *et* likes — la condition est vraie partout et ne fait que
+  // payer une sous-requête corrélée par ligne : à elle seule, près de la moitié du temps
+  // de cette fonction sur une grande bibliothèque.
+  const filtersSources = sources.length < CONTENT_SOURCES.length
   const sourceSlots = sources.map(() => '?').join(', ')
-  const active = `EXISTS (SELECT 1 FROM post_sources aps
-    WHERE aps.post_id = p.id AND aps.source IN (${sourceSlots}))`
+  const sourceArgs = filtersSources ? sources : []
+
+  // Une ligne par post : la sous-requête corrélée est ici évaluée 60 000 fois au plus, et
+  // reste la forme la plus rapide.
+  const activePost = filtersSources
+    ? ` AND EXISTS (SELECT 1 FROM post_sources aps
+         WHERE aps.post_id = p.id AND aps.source IN (${sourceSlots}))`
+    : ''
+
+  // Une ligne par *lien de tag* : la même sous-requête corrélée serait évaluée autant de
+  // fois qu'il existe de liens — 135 000 sur une bibliothèque réellement taguée, soit
+  // 350 ms à elle seule. Sous forme d'ensemble, elle n'est construite qu'une fois.
+  const activeTagged = filtersSources
+    ? ` AND p.id IN (SELECT post_id FROM post_sources WHERE source IN (${sourceSlots}))`
+    : ''
+
+  // Plateformes, favoris et étiquettes en une seule passe : trois requêtes parcouraient
+  // trois fois la même table pour trois découpages du même décompte.
+  const rollup = db
+    .prepare(`SELECT p.platform, p.label, SUM(p.is_favorite) AS favorites, COUNT(*) AS n
+        FROM posts p
+       WHERE p.is_archived = 0 AND p.platform IN (${PUBLIC_PLATFORM_SLOTS})${activePost}
+       GROUP BY p.platform, p.label`)
+    .all(...PUBLIC_PLATFORMS, ...sourceArgs) as {
+    platform: Platform
+    label: LabelColor | null
+    favorites: number
+    n: number
+  }[]
 
   const byPlatform = Object.fromEntries(PLATFORMS.map((p) => [p, 0])) as Record<Platform, number>
-  const platformRows = db
-    .prepare(`SELECT platform, COUNT(*) AS n FROM posts p
-      WHERE is_archived = 0 AND platform IN ('instagram', 'x') AND ${active} GROUP BY platform`)
-    .all(...sources) as { platform: Platform; n: number }[]
-  for (const row of platformRows) byPlatform[row.platform] = row.n
+  const byLabel: Partial<Record<LabelColor, number>> = {}
+  let total = 0
+  let favorites = 0
+  for (const row of rollup) {
+    byPlatform[row.platform] += row.n
+    total += row.n
+    favorites += row.favorites
+    if (row.label) byLabel[row.label] = (byLabel[row.label] ?? 0) + row.n
+  }
 
-  const total = platformRows.reduce((sum, row) => sum + row.n, 0)
-
+  // Volontairement sans `active` : les deux compteurs d'origine restent affichés en entier,
+  // c'est ce qui permet de choisir entre Signets et Likes en connaissance de cause.
   const bySource: Record<ContentSource, number> = { saved: 0, liked: 0 }
   const sourceRows = db
     .prepare(`SELECT source, COUNT(*) AS n FROM post_sources ps
       JOIN posts p ON p.id = ps.post_id
-      WHERE p.is_archived = 0 AND p.platform IN ('instagram', 'x') GROUP BY source`)
-    .all() as { source: ContentSource; n: number }[]
+      WHERE p.is_archived = 0 AND p.platform IN (${PUBLIC_PLATFORM_SLOTS}) GROUP BY source`)
+    .all(...PUBLIC_PLATFORMS) as { source: ContentSource; n: number }[]
   for (const row of sourceRows) bySource[row.source] = row.n
-
-  const favorites = db
-    .prepare(`SELECT COUNT(*) AS n FROM posts p
-      WHERE is_archived = 0 AND platform IN ('instagram', 'x')
-        AND is_favorite = 1 AND ${active}`)
-    .get(...sources) as { n: number }
 
   const topTags = db
     .prepare(
@@ -362,25 +405,20 @@ export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): L
               COUNT(*) AS count
          FROM post_tags pt
          JOIN tags t ON t.id = pt.tag_id
-         JOIN posts p ON p.id = pt.post_id AND p.is_archived = 0 AND p.platform IN ('instagram', 'x')
-        WHERE ${active}
+         JOIN posts p ON p.id = pt.post_id AND p.is_archived = 0
+          AND p.platform IN (${PUBLIC_PLATFORM_SLOTS})
+        WHERE 1 = 1${activeTagged}
         GROUP BY t.id
         ORDER BY count DESC, t.name COLLATE NOCASE
         LIMIT 40`
     )
-    .all(...sources) as { name: string; count: number; source: TagSource }[]
+    .all(...PUBLIC_PLATFORMS, ...sourceArgs) as {
+    name: string
+    count: number
+    source: TagSource
+  }[]
 
-  const byLabel: Partial<Record<LabelColor, number>> = {}
-  const labelRows = db
-    .prepare(
-      `SELECT label, COUNT(*) AS n FROM posts p
-        WHERE is_archived = 0 AND platform IN ('instagram', 'x')
-          AND label IS NOT NULL AND ${active} GROUP BY label`
-    )
-    .all(...sources) as { label: LabelColor; n: number }[]
-  for (const row of labelRows) byLabel[row.label] = row.n
-
-  return { total, favorites: favorites.n, byPlatform, bySource, byLabel, topTags }
+  return { total, favorites, byPlatform, bySource, byLabel, topTags }
 }
 
 export function toggleFavorite(id: string): boolean {
@@ -740,6 +778,10 @@ export function upsertPosts(
       video_source = excluded.video_source
   `)
   const deleteVariants = db.prepare('DELETE FROM media_variants WHERE post_id = ? AND idx = ?')
+  // Compilées une fois, pas une fois par post : `prepare` reconstruit le plan à chaque
+  // appel, et une page de synchronisation en faisait deux de plus par élément.
+  const trimMedia = db.prepare('DELETE FROM media WHERE post_id = ? AND idx >= ?')
+  const trimVariants = db.prepare('DELETE FROM media_variants WHERE post_id = ? AND idx >= ?')
   const variantStmt = db.prepare(/* sql */ `
     INSERT INTO media_variants (post_id, idx, quality, source, width, height, bitrate)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -777,14 +819,8 @@ export function upsertPosts(
 
       // Une plateforme peut retirer un élément d'un carrousel ou remplacer une vidéo.
       // Les anciennes lignes ne doivent alors pas survivre au nouveau payload.
-      db.prepare('DELETE FROM media WHERE post_id = ? AND idx >= ?').run(
-        p.id,
-        p.mediaCount ?? 0
-      )
-      db.prepare('DELETE FROM media_variants WHERE post_id = ? AND idx >= ?').run(
-        p.id,
-        p.mediaCount ?? 0
-      )
+      trimMedia.run(p.id, p.mediaCount ?? 0)
+      trimVariants.run(p.id, p.mediaCount ?? 0)
     }
     for (const m of media) {
       mediaStmt.run({
@@ -1165,8 +1201,15 @@ export function addToCollection(
   const insert = db.prepare(
     'INSERT INTO collection_posts (collection_id, post_id, added_at) VALUES (?, ?, ?)'
   )
+  // Un ajout est toujours un geste explicite — depuis la vue détaillée ou depuis un plan
+  // d'organisation validé. Il lève donc le retrait précédent : le classement automatique a
+  // de nouveau le droit de proposer ce post pour cette collection.
+  const forget = db.prepare(
+    'DELETE FROM collection_removals WHERE collection_id = ? AND post_id = ?'
+  )
   const now = Date.now()
   db.transaction(() => {
+    for (const id of postIds) forget.run(collectionId, id)
     for (const id of fresh) insert.run(collectionId, id, now)
     if (readd) {
       const touch = db.prepare(
@@ -1186,9 +1229,140 @@ export function addToCollection(
 }
 
 export function removeFromCollection(collectionId: number, postId: string): void {
-  getDb()
-    .prepare('DELETE FROM collection_posts WHERE collection_id = ? AND post_id = ?')
-    .run(collectionId, postId)
+  const db = getDb()
+  db.transaction(() => {
+    db.prepare('DELETE FROM collection_posts WHERE collection_id = ? AND post_id = ?').run(
+      collectionId,
+      postId
+    )
+    // Le retrait est mémorisé, pas seulement appliqué. Le classement automatique repart
+    // sinon des mêmes signaux à chaque synchronisation et remet le post exactement là où
+    // il vient d'être enlevé — le seul endroit où Magpie défaisait un geste explicite.
+    db.prepare(
+      `INSERT INTO collection_removals (collection_id, post_id, removed_at) VALUES (?, ?, ?)
+       ON CONFLICT(collection_id, post_id) DO UPDATE SET removed_at = excluded.removed_at`
+    ).run(collectionId, postId, Date.now())
+  })()
+}
+
+export interface OrganizerApplication {
+  appliedAt: number
+  collections: number
+  posts: number
+  /** Collections nées de ce classement : elles disparaissent si on l'annule. */
+  createdCollectionIds: number[]
+  /** Ce qu'il a réellement rangé — et donc tout ce que l'annulation doit retirer. */
+  filed: Array<{ collectionId: number; postIds: string[] }>
+}
+
+/** Ne conserve que le dernier classement : « annuler » ne remonte pas un historique. */
+export function recordOrganizerApplication(
+  entry: Omit<OrganizerApplication, 'appliedAt'>
+): void {
+  const db = getDb()
+  db.transaction(() => {
+    db.prepare('DELETE FROM organizer_applications').run()
+    db.prepare(
+      `INSERT INTO organizer_applications
+         (applied_at, collections, posts, created_ids, filed)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(
+      Date.now(),
+      entry.collections,
+      entry.posts,
+      JSON.stringify(entry.createdCollectionIds),
+      JSON.stringify(entry.filed)
+    )
+  })()
+}
+
+export function lastOrganizerApplication(): OrganizerApplication | null {
+  const row = getDb()
+    .prepare(
+      `SELECT applied_at, collections, posts, created_ids, filed
+         FROM organizer_applications ORDER BY applied_at DESC LIMIT 1`
+    )
+    .get() as
+    | { applied_at: number; collections: number; posts: number; created_ids: string; filed: string }
+    | undefined
+  if (!row) return null
+  try {
+    return {
+      appliedAt: row.applied_at,
+      collections: row.collections,
+      posts: row.posts,
+      createdCollectionIds: JSON.parse(row.created_ids) as number[],
+      filed: JSON.parse(row.filed) as OrganizerApplication['filed']
+    }
+  } catch {
+    // Une trace illisible ne doit pas empêcher d'ouvrir l'organisateur.
+    return null
+  }
+}
+
+export function forgetOrganizerApplication(): void {
+  getDb().prepare('DELETE FROM organizer_applications').run()
+}
+
+/**
+ * Défait le dernier classement : les vidéos sortent des collections où il les avait mises,
+ * et celles qu'il avait créées disparaissent si plus rien ne s'y trouve.
+ *
+ * Les retraits sont **mémorisés comme des retraits manuels**. Sans cela, le classement
+ * automatique — dont les règles viennent justement d'être apprises — remettrait tout en
+ * place à la synchronisation suivante, et l'annulation n'aurait tenu que quelques minutes.
+ */
+export function revertOrganizerApplication(): { removed: number; collectionsDeleted: number } {
+  const application = lastOrganizerApplication()
+  if (!application) return { removed: 0, collectionsDeleted: 0 }
+
+  const db = getDb()
+  return db.transaction(() => {
+    const unfile = db.prepare(
+      'DELETE FROM collection_posts WHERE collection_id = ? AND post_id = ?'
+    )
+    const remember = db.prepare(
+      `INSERT INTO collection_removals (collection_id, post_id, removed_at) VALUES (?, ?, ?)
+       ON CONFLICT(collection_id, post_id) DO UPDATE SET removed_at = excluded.removed_at`
+    )
+    const now = Date.now()
+    let removed = 0
+    for (const entry of application.filed) {
+      for (const postId of entry.postIds) {
+        if (unfile.run(entry.collectionId, postId).changes > 0) removed++
+        remember.run(entry.collectionId, postId, now)
+      }
+    }
+
+    // Une collection née de ce classement mais que l'utilisateur a depuis remplie lui-même
+    // n'est pas la nôtre à supprimer.
+    const isEmpty = db.prepare('SELECT COUNT(*) AS n FROM collection_posts WHERE collection_id = ?')
+    const dropCollection = db.prepare('DELETE FROM collections WHERE id = ?')
+    let collectionsDeleted = 0
+    for (const collectionId of application.createdCollectionIds) {
+      if ((isEmpty.get(collectionId) as { n: number }).n > 0) continue
+      // La cascade emporte aussi les règles et les retraits qui la visaient.
+      if (dropCollection.run(collectionId).changes > 0) collectionsDeleted++
+    }
+
+    db.prepare('DELETE FROM organizer_applications').run()
+    return { removed, collectionsDeleted }
+  })()
+}
+
+/** Posts retirés à la main, par collection. Lu avant tout classement automatique. */
+export function collectionRemovals(): Map<number, Set<string>> {
+  const rows = getDb()
+    .prepare('SELECT collection_id, post_id FROM collection_removals')
+    .all() as { collection_id: number; post_id: string }[]
+
+  const byCollection = new Map<number, Set<string>>()
+  for (const row of rows) {
+    const posts = byCollection.get(row.collection_id) ?? new Set<string>()
+    posts.add(row.post_id)
+    byCollection.set(row.collection_id, posts)
+  }
+  return byCollection
 }
 
 export function collectionsForPost(postId: string): number[] {

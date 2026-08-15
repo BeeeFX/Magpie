@@ -10,6 +10,8 @@ import { app } from 'electron'
 import { isAbsolute, join } from 'node:path'
 import sharp from 'sharp'
 import {
+  collectionRemovals,
+  listCollections,
   localVideoFeatures,
   organizerRules,
   saveLocalVideoFeatures,
@@ -26,6 +28,21 @@ const MAX_CATEGORIES = 24
 const VISUAL_SIZE = 6
 const VISUAL_THRESHOLD = 0.94
 const VISUAL_MARGIN = 0.035
+
+/**
+ * Rend la main entre deux tranches de calcul.
+ *
+ * Le regroupement est du calcul pur, et il tourne sur le processus principal : sur une
+ * grande vidéothèque il l'occupait sans interruption pendant près d'une seconde après
+ * *chaque* synchronisation, fenêtre figée comprise. Le coût est global — il ne dépend pas
+ * du nombre de posts rapportés — donc espacer les analyses n'aurait fait que le repousser.
+ * On le découpe donc, pour que l'IPC et le rendu passent entre les tranches.
+ */
+export type Breathe = () => Promise<void>
+
+const NO_BREATHE: Breathe = () => Promise.resolve()
+/** Assez large pour que le surcoût soit invisible, assez court pour que la fenêtre réponde. */
+const BREATHE_EVERY = 400
 
 interface Topic {
   id: string
@@ -316,15 +333,20 @@ function centroid(vectors: Float32Array[]): Float32Array | null {
   return result
 }
 
-function createChoices(items: PreparedItem[], lang: Language): Map<string, CategoryDefinition> {
+async function createChoices(
+  items: PreparedItem[],
+  lang: Language,
+  breathe: Breathe
+): Promise<Map<string, CategoryDefinition>> {
   const definitions = new Map<string, CategoryDefinition>()
   const documentFrequency = new Map<string, number>()
   const totalWeight = new Map<string, number>()
-  for (const prepared of items) {
+  for (const [index, prepared] of items.entries()) {
     for (const [term, weight] of prepared.terms) {
       documentFrequency.set(term, (documentFrequency.get(term) ?? 0) + 1)
       totalWeight.set(term, (totalWeight.get(term) ?? 0) + weight)
     }
+    if (index % BREATHE_EVERY === BREATHE_EVERY - 1) await breathe()
   }
 
   const minimum = items.length < 100 ? 2 : 3
@@ -362,7 +384,9 @@ function createChoices(items: PreparedItem[], lang: Language): Map<string, Categ
     })
   }
 
-  for (const prepared of items) {
+  // Passe la plus lourde du regroupement : chaque vidéo est confrontée à tous les thèmes
+  // fixes puis à tous les termes retenus.
+  for (const [index, prepared] of items.entries()) {
     const normalizedText = ` ${normalizePhrase(`${prepared.item.text ?? ''} ${prepared.item.tags.join(' ')}`)} `
     const scores: { id: string; score: number }[] = []
     for (const topic of TOPICS) {
@@ -376,14 +400,16 @@ function createChoices(items: PreparedItem[], lang: Language): Map<string, Categ
       scores.push({ id: `term:${candidate.term}`, score: weight * specificity })
     }
     prepared.choices = scores.sort((left, right) => right.score - left.score)
+    if (index % BREATHE_EVERY === BREATHE_EVERY - 1) await breathe()
   }
   return definitions
 }
 
-function assignCategories(
+async function assignCategories(
   items: PreparedItem[],
-  definitions: Map<string, CategoryDefinition>
-): { groups: Map<string, PreparedItem[]>; routes: AiCollectionRoute[] } {
+  definitions: Map<string, CategoryDefinition>,
+  breathe: Breathe
+): Promise<{ groups: Map<string, PreparedItem[]>; routes: AiCollectionRoute[] }> {
   const minimum = items.length < 100 ? 2 : 3
   const firstCounts = new Map<string, number>()
   for (const item of items) {
@@ -434,7 +460,8 @@ function assignCategories(
     const center = centroid(members.map((member) => member.visual).filter((value): value is Float32Array => value !== null))
     if (center && members.length >= 3) centroids.set(id, center)
   }
-  for (const item of items) {
+  // Chaque vidéo restante est comparée à tous les barycentres : l'autre passe coûteuse.
+  for (const [index, item] of items.entries()) {
     if (assigned.has(item) || !item.visual) continue
     const matches = [...centroids]
       .map(([id, center]) => ({ id, score: similarity(item.visual as Float32Array, center) }))
@@ -446,6 +473,7 @@ function assignCategories(
       groups.get(matches[0].id)?.push(item)
       assigned.set(item, matches[0].id)
     }
+    if (index % BREATHE_EVERY === BREATHE_EVERY - 1) await breathe()
   }
 
   for (const [id, members] of [...groups]) {
@@ -494,19 +522,24 @@ function categoryDescription(
 
 let currentProposal: Promise<AiCollectionPlan> | null = null
 
-export function buildLocalCollectionPlan(
+export async function buildLocalCollectionPlan(
   items: VideoOrganizationItem[],
   visuals: Map<string, Float32Array | null> = new Map(),
-  lang: Language = 'en'
-): AiCollectionPlan {
-  const prepared: PreparedItem[] = items.map((item) => ({
-    item,
-    terms: prepareTerms(item),
-    visual: visuals.get(item.id) ?? null,
-    choices: []
-  }))
-  const definitions = createChoices(prepared, lang)
-  const { groups, routes } = assignCategories(prepared, definitions)
+  lang: Language = 'en',
+  breathe: Breathe = NO_BREATHE
+): Promise<AiCollectionPlan> {
+  const prepared: PreparedItem[] = []
+  for (const [index, item] of items.entries()) {
+    prepared.push({
+      item,
+      terms: prepareTerms(item),
+      visual: visuals.get(item.id) ?? null,
+      choices: []
+    })
+    if (index % BREATHE_EVERY === BREATHE_EVERY - 1) await breathe()
+  }
+  const definitions = await createChoices(prepared, lang, breathe)
+  const { groups, routes } = await assignCategories(prepared, definitions, breathe)
   const suggestions: AiCollectionSuggestion[] = [...groups]
     .sort((left, right) => right[1].length - left[1].length)
     .map(([id, members], index) => {
@@ -528,6 +561,74 @@ export function buildLocalCollectionPlan(
   }
 }
 
+/**
+ * Retire du plan les vidéos que l'utilisateur avait sorties à la main de la collection que
+ * cette catégorie alimente.
+ *
+ * Le chemin automatique honorait déjà ces retraits, mais l'écran de proposition, lui,
+ * continuait de les afficher — et « tout appliquer » les remettait donc en place. Une
+ * catégorie n'est reliée à une collection que par une règle mémorisée ou par son nom :
+ * c'est exactement la résolution que fait l'application du plan, d'où le résolveur passé
+ * en paramètre plutôt qu'un accès direct à la base.
+ */
+export function withoutRemovedPosts(
+  plan: AiCollectionPlan,
+  resolveCollectionId: (ruleKeys: string[], name: string) => number | null,
+  removals: Map<number, Set<string>>
+): AiCollectionPlan {
+  if (removals.size === 0) return plan
+
+  // Chaque règle apprend quelles vidéos elle n'a plus le droit de proposer.
+  const blockedByRuleKey = new Map<string, Set<string>>()
+  const suggestions = plan.suggestions.map((suggestion) => {
+    const collectionId = resolveCollectionId(suggestion.ruleKeys, suggestion.name)
+    const removed = collectionId === null ? undefined : removals.get(collectionId)
+    if (!removed) return suggestion
+    for (const ruleKey of suggestion.ruleKeys) {
+      const blocked = blockedByRuleKey.get(ruleKey) ?? new Set<string>()
+      for (const postId of removed) blocked.add(postId)
+      blockedByRuleKey.set(ruleKey, blocked)
+    }
+    return { ...suggestion, postIds: suggestion.postIds.filter((postId) => !removed.has(postId)) }
+  })
+
+  // La redistribution suit : une vidéo écartée d'une catégorie ne doit pas y revenir par la
+  // bande lorsqu'une autre catégorie est exclue.
+  const routes = plan.routes.map((route) => ({
+    ...route,
+    rankedRuleKeys: route.rankedRuleKeys.filter(
+      (ruleKey) => !blockedByRuleKey.get(ruleKey)?.has(route.postId)
+    )
+  }))
+
+  const assigned = new Set(suggestions.flatMap((suggestion) => suggestion.postIds))
+  return {
+    suggestions: suggestions.filter((suggestion) => suggestion.postIds.length > 0),
+    routes,
+    analysedVideos: plan.analysedVideos,
+    unassignedVideos: Math.max(0, plan.analysedVideos - assigned.size)
+  }
+}
+
+/** Résolution identique à celle de l'application d'un plan : règle mémorisée, sinon nom. */
+function organizerCollectionResolver(): (ruleKeys: string[], name: string) => number | null {
+  const byRuleKey = new Map(
+    organizerRules()
+      .filter((rule) => !rule.ignored && rule.collectionId !== null)
+      .map((rule) => [rule.ruleKey, rule.collectionId as number])
+  )
+  const byName = new Map(
+    listCollections().map((collection) => [collection.name.toLocaleLowerCase(), collection.id])
+  )
+  return (ruleKeys, name) => {
+    for (const ruleKey of ruleKeys) {
+      const known = byRuleKey.get(ruleKey)
+      if (known !== undefined) return known
+    }
+    return byName.get(name.trim().toLocaleLowerCase()) ?? null
+  }
+}
+
 async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
   const items = videoOrganizationItems()
   if (items.length === 0) {
@@ -538,9 +639,11 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
   const visuals = await loadVisuals(items)
   setProgress({ stage: 'grouping', done: 0, total: items.length, running: true })
 
-  const plan = buildLocalCollectionPlan(items, visuals, language())
+  const plan = await buildLocalCollectionPlan(items, visuals, language(), () =>
+    new Promise<void>((resolve) => setImmediate(resolve))
+  )
   setProgress({ stage: 'grouping', done: items.length, total: items.length, running: true })
-  return plan
+  return withoutRemovedPosts(plan, organizerCollectionResolver(), collectionRemovals())
 }
 
 export function proposeVideoCollections(): Promise<AiCollectionPlan> {
@@ -556,7 +659,8 @@ let automaticApply: Promise<AiCollectionApplyResult> | null = null
 
 export function rememberedOrganizerDestinations(
   routes: AiCollectionRoute[],
-  rules: OrganizerRuleRow[]
+  rules: OrganizerRuleRow[],
+  removals: Map<number, Set<string>> = new Map()
 ): Map<number, string[]> {
   const remembered = new Map(rules.map((rule) => [rule.ruleKey, rule]))
   const postsByCollection = new Map<number, string[]>()
@@ -565,6 +669,10 @@ export function rememberedOrganizerDestinations(
       .map((ruleKey) => remembered.get(ruleKey))
       .find((rule) => rule && !rule.ignored && rule.collectionId !== null)
     if (!destination?.collectionId) continue
+    // Un post que l'utilisateur a sorti de cette collection n'y retourne pas, et n'est pas
+    // non plus reversé dans la destination suivante : il a écarté ce rangement-là, il n'a
+    // pas demandé qu'on lui en cherche un autre.
+    if (removals.get(destination.collectionId)?.has(route.postId)) continue
     const posts = postsByCollection.get(destination.collectionId) ?? []
     posts.push(route.postId)
     postsByCollection.set(destination.collectionId, posts)
@@ -580,7 +688,11 @@ export function applyRememberedOrganizerRules(): Promise<AiCollectionApplyResult
     if (remembered.length === 0) return { collections: 0, added: 0, alreadyThere: 0 }
 
     const plan = await proposeVideoCollections()
-    const postsByCollection = rememberedOrganizerDestinations(plan.routes, remembered)
+    const postsByCollection = rememberedOrganizerDestinations(
+      plan.routes,
+      remembered,
+      collectionRemovals()
+    )
 
     let added = 0
     let alreadyThere = 0

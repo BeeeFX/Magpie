@@ -196,6 +196,30 @@ function finalize(
 }
 
 /**
+ * Réaligne la mise en page sur la version courante des posts, en **préservant l'identité**
+ * des éléments inchangés.
+ *
+ * La géométrie ne se recalcule qu'au changement de largeur, de densité ou de nombre de
+ * cartes ; le contenu d'un post, lui, évolue à chaque vignette produite. Il faut donc
+ * rafraîchir les références que transporte la mise en page — mais une seule fois par lot,
+ * jamais dans la boucle de défilement.
+ *
+ * C'est ce que garantit le renvoi de l'élément d'origine quand rien n'a bougé : les objets
+ * restent strictement identiques d'une frame à l'autre, et `memo(Card)` peut réellement
+ * court-circuiter le rendu des dizaines de cartes visibles. Reconstruire ces objets à
+ * chaque frame rendait ce `memo` purement décoratif.
+ */
+export function alignItemsToPosts(layout: Layout, posts: Post[]): Map<string, LayoutItem> {
+  const postsById = new Map(posts.map((post) => [post.id, post]))
+  const aligned = new Map<string, LayoutItem>()
+  for (const item of layout.byTop) {
+    const post = postsById.get(item.post.id)
+    aligned.set(item.post.id, post && post !== item.post ? { ...item, post } : item)
+  }
+  return aligned
+}
+
+/**
  * Sous-ensemble réellement visible. On cherche par dichotomie le premier élément qui peut
  * intersecter la fenêtre, puis on avance tant que les suivants commencent avant le bas.
  *

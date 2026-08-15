@@ -39,6 +39,29 @@ async function fetchStats(): Promise<LibraryStats> {
   return stats
 }
 
+let statsTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Recompte les compteurs de la barre latérale sans faire attendre le geste qui les a
+ * changés.
+ *
+ * Ce décompte parcourt toute la bibliothèque : plus de 200 ms sur un mur de 60 000 posts
+ * bien tagué, et l'attendre avant d'afficher un tag ajouté rendait chaque clic poussif
+ * alors que le tag, lui, était déjà écrit. Les chiffres suivent donc le contenu au lieu de
+ * le précéder, et une rafale d'étiquetages ne déclenche qu'un seul recompte.
+ */
+function refreshStatsSoon(): void {
+  if (statsTimer !== null) return
+  statsTimer = setTimeout(() => {
+    statsTimer = null
+    void fetchStats()
+      .then((stats) => useStore.setState({ stats }))
+      .catch(() => {
+        // Un décompte manqué se rattrape au prochain rafraîchissement de la grille.
+      })
+  }, 150)
+}
+
 /**
  * Zustand appelle le stockage après chaque mutation, même lorsque la partie persistée n'a
  * pas changé. Sur une grosse synchronisation cela faisait des milliers d'écritures
@@ -315,6 +338,10 @@ export const useStore = create<State>()(
           nextOffset = get().nextOffset + fresh.length
         }
 
+        // `refresh` demande toujours la première tranche, donc le total est recompté ici.
+        // Le `??` n'est qu'un filet : sans total on garde celui déjà affiché.
+        const total = page.total ?? get().resultTotal
+
         set({
           posts,
           stats,
@@ -323,8 +350,8 @@ export const useStore = create<State>()(
               ? get().layoutRevision + 1
               : get().layoutRevision,
           loading: false,
-          hasMore: nextOffset < page.total,
-          resultTotal: page.total,
+          hasMore: nextOffset < total,
+          resultTotal: total,
           nextOffset
         })
       },
@@ -364,7 +391,9 @@ export const useStore = create<State>()(
             posts,
             layoutRevision:
               fresh.length > 0 ? get().layoutRevision + 1 : get().layoutRevision,
-            resultTotal: page.total,
+            // Les tranches suivantes ne recomptent pas : le total reste celui de la
+            // première, que `refresh` remet à jour au fil des synchronisations.
+            resultTotal: page.total ?? get().resultTotal,
             nextOffset: offset + page.posts.length,
             hasMore: page.hasMore
           })
@@ -433,9 +462,9 @@ export const useStore = create<State>()(
         set({
           posts: get().posts.map((post) =>
             selected.has(post.id) ? { ...post, isFavorite: true } : post
-          ),
-          stats: await fetchStats()
+          )
         })
+        refreshStatsSoon()
       },
       tagSelection: async (name) => {
         const ids = get().selectedIds
@@ -453,9 +482,9 @@ export const useStore = create<State>()(
           posts,
           layoutRevision:
             posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: await fetchStats()
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
         })
+        refreshStatsSoon()
       },
 
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
@@ -605,9 +634,9 @@ export const useStore = create<State>()(
           posts,
           layoutRevision:
             posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: await fetchStats()
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
         })
+        refreshStatsSoon()
       },
 
       removeTag: async (postId, name) => {
@@ -637,9 +666,9 @@ export const useStore = create<State>()(
           posts,
           layoutRevision:
             posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: await fetchStats()
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
         })
+        refreshStatsSoon()
       },
 
       setLabel: async (postId, label) => {
@@ -654,9 +683,9 @@ export const useStore = create<State>()(
           posts,
           layoutRevision:
             posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: await fetchStats()
+          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
         })
+        refreshStatsSoon()
       },
 
       /** Navigation dans la vue détaillée, bornée aux extrémités plutôt que circulaire. */

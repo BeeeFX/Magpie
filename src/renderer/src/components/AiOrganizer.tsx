@@ -3,12 +3,14 @@ import type {
   AiCollectionApplyResult,
   AiCollectionPlan,
   AiCollectionSuggestion,
+  OrganizerApplicationSummary,
   OrganizerProgress,
+  OrganizerUndoResult,
   Post
 } from '@shared/types'
 import { redistributeOrganizerRoutes } from '@shared/organizer'
 import { magpie, magpieEvents } from '../bridge'
-import { displayName } from '../format'
+import { displayName, formatDateTime } from '../format'
 import { useStore, useT } from '../store'
 import { IconChevronRight, IconClose } from './Icons'
 import { PlatformIcon } from './PlatformIcon'
@@ -40,6 +42,9 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
   const [previewPosts, setPreviewPosts] = useState<Post[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(false)
+  const [lastApplication, setLastApplication] = useState<OrganizerApplicationSummary | null>(null)
+  const [undoing, setUndoing] = useState(false)
+  const [undone, setUndone] = useState<OrganizerUndoResult | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const previewRequestRef = useRef(0)
 
@@ -55,6 +60,11 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     setPreviewPosts([])
     setPreviewLoading(false)
     setPreviewError(false)
+    setUndoing(false)
+    setUndone(null)
+    // Un classement se regrette souvent après avoir refermé la fenêtre : la proposition
+    // d'annulation doit donc être là dès l'ouverture, pas seulement juste après coup.
+    void magpie.lastOrganizerApplication().then(setLastApplication).catch(() => {})
     requestAnimationFrame(() => panelRef.current?.focus())
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
@@ -166,6 +176,53 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     }
   }
 
+  const undo = async (): Promise<void> => {
+    setUndoing(true)
+    setError(null)
+    try {
+      const result = await magpie.undoOrganizerApplication()
+      setUndone(result)
+      setLastApplication(null)
+      await refresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t('organizer.undoError'))
+    } finally {
+      setUndoing(false)
+    }
+  }
+
+  /** Bandeau d'annulation, proposé tant qu'un classement reste défaisable. */
+  const undoPanel = (): React.JSX.Element | null => {
+    if (undone) {
+      return (
+        <p className="organizer-undo organizer-undo--done" aria-live="polite">
+          {t('organizer.undoDone', {
+            removed: undone.removed,
+            collections: undone.collectionsDeleted
+          })}
+        </p>
+      )
+    }
+    if (!lastApplication) return null
+    return (
+      <div className="organizer-undo">
+        <div>
+          <strong>
+            {t('organizer.undoLast', {
+              collections: lastApplication.collections,
+              posts: lastApplication.posts,
+              when: formatDateTime(lastApplication.appliedAt)
+            })}
+          </strong>
+          <span>{t('organizer.undoHint')}</span>
+        </div>
+        <button type="button" className="btn" disabled={undoing} onClick={() => void undo()}>
+          {undoing ? t('organizer.undoing') : t('organizer.undo')}
+        </button>
+      </div>
+    )
+  }
+
   const apply = async (): Promise<void> => {
     setPhase('applying')
     setError(null)
@@ -188,6 +245,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
       setResult(applied)
       await loadSettings()
       await refresh()
+      setLastApplication(await magpie.lastOrganizerApplication().catch(() => null))
       setPhase('done')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -232,6 +290,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                 {t('organizer.start')}
               </button>
               <small>{t('organizer.costNote')}</small>
+              {undoPanel()}
             </div>
           ) : null}
 
@@ -434,6 +493,8 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                 posts: result?.added ?? 0
               })}</p>
               {rememberChoices ? <p>{t('organizer.rememberDone')}</p> : null}
+              {error ? <p className="organizer-error">{error}</p> : null}
+              {undoPanel()}
               <button type="button" className="btn btn--primary" onClick={onClose}>{t('organizer.close')}</button>
             </div>
           ) : null}

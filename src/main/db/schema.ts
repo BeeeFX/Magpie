@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 10
+export const SCHEMA_VERSION = 12
 
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
@@ -42,6 +42,26 @@ CREATE TABLE IF NOT EXISTS organizer_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_organizer_rules_collection
   ON organizer_rules(collection_id) WHERE collection_id IS NOT NULL;
+`
+
+export const MIGRATION_11_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS collection_removals (
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  removed_at    INTEGER NOT NULL,
+  PRIMARY KEY (collection_id, post_id)
+);
+`
+
+export const MIGRATION_12_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS organizer_applications (
+  id            INTEGER PRIMARY KEY,
+  applied_at    INTEGER NOT NULL,
+  collections   INTEGER NOT NULL,
+  posts         INTEGER NOT NULL,
+  created_ids   TEXT NOT NULL,
+  filed         TEXT NOT NULL
+);
 `
 
 export const SCHEMA_SQL = /* sql */ `
@@ -168,6 +188,29 @@ CREATE TABLE IF NOT EXISTS collection_posts (
   post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   added_at      INTEGER NOT NULL,
   PRIMARY KEY (collection_id, post_id)
+);
+
+-- Retraits décidés à la main. Le classement automatique les relit avant d'ajouter quoi que
+-- ce soit : sans cette trace, un post sorti d'une collection y revenait à la
+-- synchronisation suivante, le rangement défaisant alors le geste de l'utilisateur.
+CREATE TABLE IF NOT EXISTS collection_removals (
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  removed_at    INTEGER NOT NULL,
+  PRIMARY KEY (collection_id, post_id)
+);
+
+-- Trace du dernier classement appliqué, et d'elle seule. Créer douze collections et y
+-- verser des milliers de vidéos est une action lourde derrière un seul bouton : sans de
+-- quoi revenir en arrière, elle demande une confiance qu'on n'a pas encore gagnée.
+-- La colonne created_ids liste les collections nées de ce classement, filed ce qu'il a rangé.
+CREATE TABLE IF NOT EXISTS organizer_applications (
+  id            INTEGER PRIMARY KEY,
+  applied_at    INTEGER NOT NULL,
+  collections   INTEGER NOT NULL,
+  posts         INTEGER NOT NULL,
+  created_ids   TEXT NOT NULL,
+  filed         TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
