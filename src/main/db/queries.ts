@@ -465,6 +465,7 @@ export function videoOrganizationItems(): VideoOrganizationItem[] {
          LEFT JOIN post_tags pt ON pt.post_id = p.id
          LEFT JOIN tags t ON t.id = pt.tag_id
         WHERE p.is_archived = 0
+          AND p.platform IN ('instagram', 'x')
           AND EXISTS (SELECT 1 FROM media m WHERE m.post_id = p.id AND m.kind = 'video')
         GROUP BY p.id
         ORDER BY p.discovered_at DESC`

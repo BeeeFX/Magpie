@@ -119,26 +119,31 @@ const previewApi: MagpieApi = {
   hasAiKey: async () => true,
   setAiKey: async () => {},
   startAiTagging: async () => ({ done: 0, total: 0, tagged: 0, failed: 0, running: false }),
-  proposeAiCollections: async (): Promise<AiCollectionPlan> => ({
-    analysedVideos: 18,
-    unassignedVideos: 2,
-    suggestions: [
-      {
-        id: 'music',
-        ruleKeys: ['guitar', 'dj', 'music-production'],
-        name: 'Music',
-        description: 'Guitar, DJ sets and music production.',
-        postIds: ['demo-music-1', 'demo-music-2', 'demo-music-3']
-      },
-      {
-        id: 'visual',
-        ruleKeys: ['animation', 'art'],
-        name: 'Visual inspiration',
-        description: 'Motion, photography and art direction.',
-        postIds: ['demo-visual-1', 'demo-visual-2']
-      }
-    ]
-  }),
+  proposeAiCollections: async (): Promise<AiCollectionPlan> => {
+    const videos = (await previewPosts())
+      .filter((post) => post.media.some((media) => media.kind === 'video'))
+      .slice(0, 18)
+    return {
+      analysedVideos: videos.length,
+      unassignedVideos: Math.max(0, videos.length - 12),
+      suggestions: [
+        {
+          id: 'music',
+          ruleKeys: ['guitar', 'dj', 'music-production'],
+          name: 'Music',
+          description: 'Guitar, DJ sets and music production.',
+          postIds: videos.slice(0, 6).map((post) => post.id)
+        },
+        {
+          id: 'visual',
+          ruleKeys: ['animation', 'art'],
+          name: 'Visual inspiration',
+          description: 'Motion, photography and art direction.',
+          postIds: videos.slice(6, 12).map((post) => post.id)
+        }
+      ].filter((suggestion) => suggestion.postIds.length > 0)
+    }
+  },
   applyAiCollections: async (choices) => ({
     collections: choices.length,
     added: choices.reduce((total, choice) => total + choice.postIds.length, 0),

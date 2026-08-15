@@ -1432,19 +1432,59 @@ h1, h2, h3 {
 }
 
 .organizer-category__side {
-  display: grid;
-  grid-template-columns: auto auto;
-  align-items: baseline;
-  gap: 2px 5px;
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 5px;
   min-width: 150px;
-  text-align: right;
 }
 
-.organizer-category__side span { color: var(--faint); font-size: 10px; }
+.organizer-category__preview-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 1px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  text-align: left;
+}
+
+.organizer-category__preview-trigger:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.organizer-category__count {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.organizer-category__count > span {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.organizer-category__preview-label {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.organizer-category__preview-label svg {
+  transition: transform 180ms var(--ease);
+}
+
+.organizer-category__preview-trigger[aria-expanded='true'] .organizer-category__preview-label svg {
+  transform: rotate(90deg);
+}
+
 .organizer-category__side select {
-  grid-column: 1 / -1;
   width: 100%;
-  margin-top: 4px;
   padding: 6px 8px;
   border: 1px solid var(--hairline);
   border-radius: 9px;
@@ -1453,6 +1493,120 @@ h1, h2, h3 {
   color: var(--muted);
   font: inherit;
   font-size: 10.5px;
+}
+
+.organizer-category__preview {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 11px;
+  border-top: 1px solid var(--hairline);
+  animation: organizer-preview-in 220ms var(--ease) both;
+}
+
+@keyframes organizer-preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+
+.organizer-category__preview-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 92px;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.organizer-category__preview-state .spinner {
+  width: 14px;
+  height: 14px;
+}
+
+.organizer-category__preview-grid {
+  display: grid;
+  grid-auto-columns: 160px;
+  grid-auto-flow: column;
+  gap: 8px;
+  padding-bottom: 5px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-color: var(--field-hover) transparent;
+  scrollbar-width: thin;
+}
+
+.organizer-preview-card {
+  display: flex;
+  min-width: 0;
+  padding: 0 0 9px;
+  overflow: hidden;
+  flex-direction: column;
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  color: var(--text);
+  text-align: left;
+  transition: border-color var(--fast) var(--ease), transform var(--fast) var(--spring);
+}
+
+.organizer-preview-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--hairline));
+  transform: translateY(-2px);
+}
+
+.organizer-preview-card__media {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: var(--backdrop);
+  color: var(--faint);
+}
+
+.organizer-preview-card__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.organizer-preview-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 9px 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.organizer-preview-card__meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organizer-preview-card__text {
+  display: -webkit-box;
+  min-height: 28px;
+  margin-top: 5px;
+  padding: 0 9px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.organizer-category__preview-more {
+  display: block;
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 10.5px;
+  text-align: right;
 }
 
 .organizer-error {
@@ -2343,7 +2497,10 @@ html.window-is-moving .app *::after {
   position: relative;
   display: grid;
   place-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
   background: var(--backdrop);
   overflow: hidden;
 }
@@ -2391,9 +2548,16 @@ html.window-is-moving .app *::after {
 }
 
 .detail__media {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
+  object-position: center;
   display: block;
 }
 

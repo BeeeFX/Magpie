@@ -3,11 +3,14 @@ import type {
   AiCollectionApplyResult,
   AiCollectionPlan,
   AiCollectionSuggestion,
-  OrganizerProgress
+  OrganizerProgress,
+  Post
 } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
+import { displayName } from '../format'
 import { useStore, useT } from '../store'
-import { IconClose } from './Icons'
+import { IconChevronRight, IconClose } from './Icons'
+import { PlatformIcon } from './PlatformIcon'
 
 interface Props {
   open: boolean
@@ -17,6 +20,8 @@ interface Props {
 interface EditableSuggestion extends AiCollectionSuggestion {
   included: boolean
 }
+
+const PREVIEW_LIMIT = 12
 
 export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null {
   const t = useT()
@@ -30,7 +35,12 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<AiCollectionApplyResult | null>(null)
   const [rememberChoices, setRememberChoices] = useState(false)
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const [previewPosts, setPreviewPosts] = useState<Post[]>([])
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+  const previewRequestRef = useRef(0)
 
   useEffect(() => {
     if (!open) return
@@ -40,6 +50,10 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     setError(null)
     setResult(null)
     setRememberChoices(autoOrganizeEnabled)
+    setPreviewId(null)
+    setPreviewPosts([])
+    setPreviewLoading(false)
+    setPreviewError(false)
     requestAnimationFrame(() => panelRef.current?.focus())
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
@@ -71,6 +85,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
       const next = await magpie.proposeAiCollections()
       setPlan(next)
       setSuggestions(next.suggestions.map((suggestion) => ({ ...suggestion, included: true })))
+      setPreviewId(null)
       setPhase('review')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -80,6 +95,8 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
 
   const merge = (sourceId: string, targetId: string): void => {
     if (!targetId || sourceId === targetId) return
+    setPreviewId(null)
+    setPreviewPosts([])
     setSuggestions((current) => {
       const source = current.find((item) => item.id === sourceId)
       if (!source) return current
@@ -95,6 +112,31 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
             : item
         )
     })
+  }
+
+  const togglePreview = async (suggestion: EditableSuggestion): Promise<void> => {
+    if (previewId === suggestion.id) {
+      previewRequestRef.current += 1
+      setPreviewId(null)
+      setPreviewPosts([])
+      setPreviewLoading(false)
+      setPreviewError(false)
+      return
+    }
+
+    const request = ++previewRequestRef.current
+    setPreviewId(suggestion.id)
+    setPreviewPosts([])
+    setPreviewLoading(true)
+    setPreviewError(false)
+    try {
+      const posts = await magpie.getPostsByIds(suggestion.postIds.slice(0, PREVIEW_LIMIT))
+      if (previewRequestRef.current === request) setPreviewPosts(posts)
+    } catch {
+      if (previewRequestRef.current === request) setPreviewError(true)
+    } finally {
+      if (previewRequestRef.current === request) setPreviewLoading(false)
+    }
   }
 
   const apply = async (): Promise<void> => {
@@ -251,8 +293,23 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                       <p>{suggestion.description}</p>
                     </div>
                     <div className="organizer-category__side">
-                      <strong>{suggestion.postIds.length}</strong>
-                      <span>{t('organizer.items')}</span>
+                      <button
+                        type="button"
+                        className="organizer-category__preview-trigger"
+                        disabled={phase === 'applying'}
+                        aria-expanded={previewId === suggestion.id}
+                        aria-controls={`organizer-preview-${suggestion.id}`}
+                        onClick={() => void togglePreview(suggestion)}
+                      >
+                        <span className="organizer-category__count">
+                          <strong>{suggestion.postIds.length}</strong>
+                          <span>{t('organizer.items')}</span>
+                        </span>
+                        <span className="organizer-category__preview-label">
+                          {t(previewId === suggestion.id ? 'organizer.hidePreview' : 'organizer.preview')}
+                          <IconChevronRight size={13} />
+                        </span>
+                      </button>
                       <select
                         value=""
                         disabled={phase === 'applying' || suggestions.length < 2}
@@ -265,6 +322,62 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                           .map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}
                       </select>
                     </div>
+                    {previewId === suggestion.id ? (
+                      <div
+                        className="organizer-category__preview"
+                        id={`organizer-preview-${suggestion.id}`}
+                      >
+                        {previewLoading ? (
+                          <div className="organizer-category__preview-state" aria-live="polite">
+                            <span className="spinner" />
+                            <span>{t('organizer.previewLoading')}</span>
+                          </div>
+                        ) : previewError || previewPosts.length === 0 ? (
+                          <div className="organizer-category__preview-state">
+                            {t(previewError ? 'organizer.previewError' : 'organizer.previewEmpty')}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="organizer-category__preview-grid">
+                              {previewPosts.map((post) => {
+                                const thumb =
+                                  post.media.find((media) => media.kind === 'video')?.thumbUrl ??
+                                  post.thumbUrl
+                                return (
+                                  <button
+                                    type="button"
+                                    className="organizer-preview-card"
+                                    key={post.id}
+                                    title={t('organizer.openOriginal')}
+                                    onClick={() => void magpie.openExternal(post.url)}
+                                  >
+                                    <span className="organizer-preview-card__media">
+                                      {thumb ? (
+                                        <img src={thumb} alt="" loading="lazy" />
+                                      ) : (
+                                        <PlatformIcon platform={post.platform} size={22} coloured />
+                                      )}
+                                    </span>
+                                    <span className="organizer-preview-card__meta">
+                                      <PlatformIcon platform={post.platform} size={12} coloured />
+                                      <span>{displayName(post)}</span>
+                                    </span>
+                                    {post.text ? <span className="organizer-preview-card__text">{post.text}</span> : null}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                            {suggestion.postIds.length > previewPosts.length ? (
+                              <span className="organizer-category__preview-more">
+                                {t('organizer.previewMore', {
+                                  count: suggestion.postIds.length - previewPosts.length
+                                })}
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+                    ) : null}
                   </article>
                 ))}
               </div>
