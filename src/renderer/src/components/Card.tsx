@@ -40,6 +40,8 @@ interface Props {
 
 /** Cadence de défilement d'un carrousel au survol. */
 const CAROUSEL_INTERVAL = 1400
+/** Laisse le temps de franchir le petit espace entre l'icône et le curseur. */
+const VOLUME_CLOSE_DELAY = 420
 
 function CardImpl({
   item,
@@ -67,14 +69,37 @@ function CardImpl({
   const [index, setIndex] = useState(0)
   const [videoReady, setVideoReady] = useState(false)
   const [streamedVideoUrl, setStreamedVideoUrl] = useState<string | null>(null)
+  const [volumeOpen, setVolumeOpen] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const rootRef = useRef<HTMLElement>(null)
+  const volumeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const media = post.media
   const current = media[index] ?? media[0]
   const isCarousel = media.length > 1
   const hasMedia = post.kind !== 'text' && post.kind !== 'link'
   const hasVideo = post.kind === 'video' || media.some((m) => m.kind === 'video')
+
+  const openVolume = (): void => {
+    if (volumeCloseTimer.current !== null) clearTimeout(volumeCloseTimer.current)
+    volumeCloseTimer.current = null
+    setVolumeOpen(true)
+  }
+
+  const closeVolumeSoon = (): void => {
+    if (volumeCloseTimer.current !== null) clearTimeout(volumeCloseTimer.current)
+    volumeCloseTimer.current = setTimeout(() => {
+      volumeCloseTimer.current = null
+      setVolumeOpen(false)
+    }, VOLUME_CLOSE_DELAY)
+  }
+
+  useEffect(
+    () => () => {
+      if (volumeCloseTimer.current !== null) clearTimeout(volumeCloseTimer.current)
+    },
+    []
+  )
 
   /* Un carrousel défile tant que la souris reste dessus, et repart de la première image
      quand elle sort — revenir sur une carte doit toujours montrer la même chose. */
@@ -316,7 +341,11 @@ function CardImpl({
             là qu'on s'en rend compte, pas dans la barre d'outils. Le réglage reste
             global — une seule décision, pas une par vignette. */}
         {hasVideo ? (
-          <div className="card-volume">
+          <div
+            className={`card-volume ${volumeOpen ? 'is-open' : ''}`}
+            onMouseEnter={openVolume}
+            onMouseLeave={closeVolumeSoon}
+          >
             <button
               type="button"
               className={`icon-btn ${hoverAudio ? 'is-active' : ''}`}

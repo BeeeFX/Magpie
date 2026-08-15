@@ -77,6 +77,8 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
   const setSyncOnLaunch = useStore((s) => s.setSyncOnLaunch)
   const syncSchedule = useStore((s) => s.syncSchedule)
   const setSyncSchedule = useStore((s) => s.setSyncSchedule)
+  const autoOrganizeEnabled = useStore((s) => s.autoOrganizeEnabled)
+  const setAutoOrganizeEnabled = useStore((s) => s.setAutoOrganizeEnabled)
   const aiProvider = useStore((s) => s.aiProvider)
   const aiModel = useStore((s) => s.aiModel)
   const aiEndpoint = useStore((s) => s.aiEndpoint)
@@ -95,6 +97,8 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
   const [libraryMove, setLibraryMove] = useState<LibraryMoveProgress | null>(null)
   const [choosingLibrary, setChoosingLibrary] = useState(false)
   const [libraryMoveError, setLibraryMoveError] = useState<string | null>(null)
+  const [rendered, setRendered] = useState(open)
+  const [closing, setClosing] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
@@ -104,6 +108,24 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
     void magpie.getUpdateState().then(setUpdateState)
     void loadAccounts()
   }, [open, loadAccounts])
+
+  /* Le store se ferme tout de suite, mais le panneau reste monté le temps de revenir
+     doucement vers l'arrière-plan. Une réouverture pendant la sortie annule proprement
+     le démontage. */
+  useEffect(() => {
+    if (open) {
+      setRendered(true)
+      setClosing(false)
+      return
+    }
+    if (!rendered) return
+    setClosing(true)
+    const timer = setTimeout(() => {
+      setRendered(false)
+      setClosing(false)
+    }, 230)
+    return () => clearTimeout(timer)
+  }, [open, rendered])
 
   useEffect(() => {
     if (!open) return
@@ -154,7 +176,7 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
     }
   }, [open, setOpen])
 
-  if (!open) return null
+  if (!rendered) return null
 
   const clearCache = async (): Promise<void> => {
     setClearing(true)
@@ -187,7 +209,10 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
   const aiProviders: AiProvider[] = ['openai', 'anthropic', 'gemini', 'deepseek', 'custom']
 
   return (
-    <div className="modal" onMouseDown={() => setOpen(false)}>
+    <div
+      className={`modal settings-modal ${closing ? 'is-closing' : ''}`}
+      onMouseDown={() => setOpen(false)}
+    >
       <div
         ref={panelRef}
         className="modal__panel"
@@ -250,6 +275,21 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
             <div className="setting__actions">
               <button type="button" className="btn btn--primary" onClick={onOpenAiOrganizer}>
                 {t('settings.aiOrganize')}
+              </button>
+            </div>
+            <div className="setting setting--compact">
+              <div className="setting__label">
+                <strong>{t('settings.autoOrganize')}</strong>
+                <span>{t('settings.autoOrganizeHint')}</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoOrganizeEnabled}
+                className={`switch ${autoOrganizeEnabled ? 'is-on' : ''}`}
+                onClick={() => void setAutoOrganizeEnabled(!autoOrganizeEnabled)}
+              >
+                <span className="switch__knob" />
               </button>
             </div>
             <p className="setting__note">{t('settings.localOrganizerNote')}</p>

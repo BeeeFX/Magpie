@@ -1,4 +1,5 @@
 import type {
+  AiCollectionApplyResult,
   AiCollectionPlan,
   AiCollectionSuggestion,
   Language,
@@ -9,8 +10,10 @@ import { isAbsolute, join } from 'node:path'
 import sharp from 'sharp'
 import {
   localVideoFeatures,
+  organizerRules,
   saveLocalVideoFeatures,
   videoOrganizationItems,
+  addToCollection,
   type LocalVideoFeature,
   type VideoOrganizationItem
 } from '../db/queries'
@@ -493,6 +496,7 @@ export function buildLocalCollectionPlan(
       const definition = definitions.get(id) as CategoryDefinition
       return {
         id: `local-${index}`,
+        ruleKeys: [id],
         name: definition.name,
         description: categoryDescription(members, definition, lang),
         postIds: members.map((member) => member.item.id)
@@ -526,4 +530,34 @@ export function proposeVideoCollections(): Promise<AiCollectionPlan> {
     setProgress({ ...progress, running: false })
   })
   return currentProposal
+}
+
+let automaticApply: Promise<AiCollectionApplyResult> | null = null
+
+/** Applique les destinations apprises sans recréer ni renommer les collections. */
+export function applyRememberedOrganizerRules(): Promise<AiCollectionApplyResult> {
+  if (automaticApply) return automaticApply
+  automaticApply = (async () => {
+    const remembered = new Map(organizerRules().map((rule) => [rule.ruleKey, rule]))
+    if (remembered.size === 0) return { collections: 0, added: 0, alreadyThere: 0 }
+
+    const plan = await proposeVideoCollections()
+    const touchedCollections = new Set<number>()
+    let added = 0
+    let alreadyThere = 0
+    for (const suggestion of plan.suggestions) {
+      const destination = suggestion.ruleKeys
+        .map((ruleKey) => remembered.get(ruleKey))
+        .find((rule) => rule && !rule.ignored && rule.collectionId !== null)
+      if (!destination?.collectionId) continue
+      const result = addToCollection(destination.collectionId, suggestion.postIds)
+      touchedCollections.add(destination.collectionId)
+      added += result.added
+      alreadyThere += result.alreadyThere.length
+    }
+    return { collections: touchedCollections.size, added, alreadyThere }
+  })().finally(() => {
+    automaticApply = null
+  })
+  return automaticApply
 }

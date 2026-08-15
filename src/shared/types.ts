@@ -145,6 +145,8 @@ export interface Settings {
   aiModel: string
   aiEndpoint: string
   autoTagEnabled: boolean
+  /** Range les nouveaux contenus après chaque synchronisation selon les choix locaux mémorisés. */
+  autoOrganizeEnabled: boolean
 }
 
 export interface CollectionInfo {
@@ -271,8 +273,10 @@ export interface PostQuery {
   kinds: PostKind[]
   favoritesOnly: boolean
   untaggedOnly: boolean
-  tag: string | null
-  collectionId: number | null
+  /** Vide = tous les tags ; plusieurs valeurs sont combinées avec OU. */
+  tags: string[]
+  /** Vide = toutes les collections ; plusieurs valeurs sont combinées avec OU. */
+  collectionIds: number[]
   label: LabelColor | null
   search: string
   sort: SortKey
@@ -286,8 +290,8 @@ export const DEFAULT_QUERY: PostQuery = {
   kinds: [],
   favoritesOnly: false,
   untaggedOnly: false,
-  tag: null,
-  collectionId: null,
+  tags: [],
+  collectionIds: [],
   label: null,
   search: '',
   sort: 'saved',
@@ -317,7 +321,10 @@ export interface MagpieApi {
   setAiKey(provider: AiProvider, key: string): Promise<void>
   startAiTagging(postIds?: string[]): Promise<AiTagProgress>
   proposeAiCollections(): Promise<AiCollectionPlan>
-  applyAiCollections(choices: AiCollectionChoice[]): Promise<AiCollectionApplyResult>
+  applyAiCollections(
+    choices: AiCollectionChoice[],
+    memory: AiCollectionMemoryOptions
+  ): Promise<AiCollectionApplyResult>
   copyToClipboard(text: string): Promise<void>
   openExternal(url: string): Promise<void>
   sendToNitrate(url: string): Promise<void>
@@ -388,6 +395,8 @@ export interface OrganizerProgress {
 
 export interface AiCollectionSuggestion {
   id: string
+  /** Identifiants sémantiques stables utilisés pour mémoriser renommages et fusions. */
+  ruleKeys: string[]
   name: string
   /** Courte explication destinée à aider l'utilisateur à arbitrer ou fusionner. */
   description: string
@@ -403,6 +412,12 @@ export interface AiCollectionPlan {
 export interface AiCollectionChoice {
   name: string
   postIds: string[]
+  ruleKeys: string[]
+}
+
+export interface AiCollectionMemoryOptions {
+  remember: boolean
+  ignoredRuleKeys: string[]
 }
 
 export interface AiCollectionApplyResult {
@@ -423,6 +438,7 @@ export interface MagpieEvents {
   onUpdateState(cb: (state: UpdateState) => void): () => void
   onLibraryMoveProgress(cb: (progress: LibraryMoveProgress) => void): () => void
   onWindowInteraction(cb: (active: boolean) => void): () => void
+  onWindowFullscreen(cb: (fullscreen: boolean) => void): () => void
 }
 
 declare global {

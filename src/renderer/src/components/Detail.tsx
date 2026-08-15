@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CollectionInfo, Post } from '@shared/types'
-import { magpie } from '../bridge'
+import { magpie, magpieEvents } from '../bridge'
 import {
   avatarHue,
   displayName,
@@ -176,6 +176,11 @@ export function Detail(): React.JSX.Element | null {
     document.addEventListener('fullscreenchange', update)
     return () => document.removeEventListener('fullscreenchange', update)
   }, [])
+
+  /* Le plein écran natif peut aussi être quitté par Échap ou les contrôles système.
+     On reflète donc l'état réel de la fenêtre au lieu de supposer que seul notre bouton
+     peut le modifier. */
+  useEffect(() => magpieEvents.onWindowFullscreen(setNativeFullscreen), [])
 
   const toggleFullscreen = useCallback(async (): Promise<void> => {
     if (document.fullscreenElement) {
@@ -539,15 +544,17 @@ export function Detail(): React.JSX.Element | null {
             >
               <IconExternal size={15} />
             </button>
-            <button
-              type="button"
-              className={`btn btn--icon ${fullscreen ? 'is-active' : ''}`}
-              onClick={() => void toggleFullscreen().catch(() => {})}
-              title={`${t('detail.fullscreen')}  ·  F`}
-              aria-pressed={fullscreen}
-            >
-              <IconExpand size={15} />
-            </button>
+            {!isVideo ? (
+              <button
+                type="button"
+                className="btn btn--icon"
+                onClick={() => void toggleFullscreen().catch(() => {})}
+                title={`${t('detail.fullscreen')}  ·  F`}
+                aria-pressed={fullscreen}
+              >
+                <IconExpand size={15} />
+              </button>
+            ) : null}
             {nitrateEnabled && hasVideo(post) ? (
               <button
                 type="button"

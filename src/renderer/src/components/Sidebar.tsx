@@ -64,17 +64,53 @@ export function Sidebar(): React.JSX.Element {
     setQuery({ kinds: only ? [] : [kind] })
   }
 
+  /**
+   * Les catégories sont exclusives entre elles, mais indépendantes des filtres.
+   * Changer de catégorie conserve donc plateforme, type, couleur, « sans tag »,
+   * recherche et tri, au lieu de reconstruire toute la requête.
+   */
+  const selectCategory = (
+    patch: Partial<Pick<typeof query, 'sources' | 'favoritesOnly' | 'tags' | 'collectionIds'>> = {}
+  ): void => {
+    setQuery({
+      sources: [],
+      favoritesOnly: false,
+      tags: [],
+      collectionIds: [],
+      // Â« Tous les tags Â» et Â« Sans tag Â» ne peuvent pas être vrais ensemble.
+      ...(patch.tags?.length ? { untaggedOnly: false } : {}),
+      ...patch
+    })
+  }
+
   const tags = stats?.topTags ?? []
   const shown = showAllTags ? tags : tags.slice(0, TAGS_COLLAPSED)
+  const allTagsSelected =
+    tags.length > 0 && tags.every((tag) => query.tags.includes(tag.name))
+  const allCollectionsSelected =
+    collections.length > 0 &&
+    collections.every((collection) => query.collectionIds.includes(collection.id))
+
+  const toggleTag = (name: string): void => {
+    const active = query.tags.includes(name)
+    selectCategory({
+      tags: active ? query.tags.filter((tag) => tag !== name) : [...query.tags, name]
+    })
+  }
+
+  const toggleCollection = (id: number): void => {
+    const active = query.collectionIds.includes(id)
+    selectCategory({
+      collectionIds: active
+        ? query.collectionIds.filter((collectionId) => collectionId !== id)
+        : [...query.collectionIds, id]
+    })
+  }
   const isAll =
-    query.platforms.length === 0 &&
     query.sources.length === 0 &&
-    query.kinds.length === 0 &&
     !query.favoritesOnly &&
-    !query.tag &&
-    query.collectionId === null &&
-    query.label === null &&
-    !query.untaggedOnly
+    query.tags.length === 0 &&
+    query.collectionIds.length === 0
 
   /** Teintes réellement utilisées : une palette de sept cases vides serait du bruit. */
   const labelledColors = LABELS.filter((color) => (stats?.byLabel[color] ?? 0) > 0)
@@ -112,33 +148,45 @@ export function Sidebar(): React.JSX.Element {
             <span className="row__count">{stats?.total ?? 0}</span>
           </button>
 
-          {contentSources.length > 1 ? (
-            <>
+          {contentSources.includes('saved') ? (
               <button
                 type="button"
                 className={`row ${query.sources.length === 1 && query.sources[0] === 'saved' ? 'is-active' : ''}`}
-                onClick={() => setQuery({ sources: ['saved'] })}
+                onClick={() =>
+                  selectCategory(
+                    query.sources.length === 1 && query.sources[0] === 'saved'
+                      ? {}
+                      : { sources: ['saved'] }
+                  )
+                }
               >
                 <IconGrid />
                 <span className="row__label">{t('sidebar.saved')}</span>
                 <span className="row__count">{stats?.bySource.saved ?? 0}</span>
               </button>
+          ) : null}
+          {contentSources.includes('liked') ? (
               <button
                 type="button"
                 className={`row ${query.sources.length === 1 && query.sources[0] === 'liked' ? 'is-active' : ''}`}
-                onClick={() => setQuery({ sources: ['liked'] })}
+                onClick={() =>
+                  selectCategory(
+                    query.sources.length === 1 && query.sources[0] === 'liked'
+                      ? {}
+                      : { sources: ['liked'] }
+                  )
+                }
               >
                 <IconHeart />
                 <span className="row__label">{t('sidebar.liked')}</span>
                 <span className="row__count">{stats?.bySource.liked ?? 0}</span>
               </button>
-            </>
           ) : null}
 
           <button
             type="button"
             className={`row ${query.favoritesOnly ? 'is-active' : ''}`}
-            onClick={() => setQuery({ favoritesOnly: !query.favoritesOnly })}
+            onClick={() => selectCategory(query.favoritesOnly ? {} : { favoritesOnly: true })}
           >
             <IconStar filled={query.favoritesOnly} />
             <span className="row__label">{t('sidebar.favorites')}</span>
@@ -152,7 +200,12 @@ export function Sidebar(): React.JSX.Element {
           <button
             type="button"
             className={`row ${query.untaggedOnly ? 'is-active' : ''}`}
-            onClick={() => setQuery({ untaggedOnly: !query.untaggedOnly })}
+            onClick={() =>
+              setQuery({
+                untaggedOnly: !query.untaggedOnly,
+                tags: []
+              })
+            }
           >
             <IconTag />
             <span className="row__label">{t('sidebar.untagged')}</span>
@@ -209,7 +262,22 @@ export function Sidebar(): React.JSX.Element {
 
         <div className="sidebar__group">
           <h2 className="sidebar__title">
-            {t('sidebar.collections')}
+            <button
+              type="button"
+              className={`sidebar__title-filter ${allCollectionsSelected ? 'is-active' : ''}`}
+              aria-pressed={allCollectionsSelected}
+              disabled={collections.length === 0}
+              title={t('sidebar.allCollections')}
+              onClick={() =>
+                selectCategory({
+                  collectionIds: allCollectionsSelected
+                    ? []
+                    : collections.map((collection) => collection.id)
+                })
+              }
+            >
+              {t('sidebar.collections')}
+            </button>
             <button
               type="button"
               className="title-btn"
@@ -243,17 +311,14 @@ export function Sidebar(): React.JSX.Element {
               <div key={collection.id} className="collection-row">
                 <button
                   type="button"
-                  className={`row ${query.collectionId === collection.id ? 'is-active' : ''}`}
+                  className={`row ${query.collectionIds.includes(collection.id) ? 'is-active' : ''}`}
+                  aria-pressed={query.collectionIds.includes(collection.id)}
                   style={
                     collection.color
                       ? ({ '--label': `var(--label-${collection.color})` } as React.CSSProperties)
                       : undefined
                   }
-                  onClick={() =>
-                    setQuery({
-                      collectionId: query.collectionId === collection.id ? null : collection.id
-                    })
-                  }
+                  onClick={() => toggleCollection(collection.id)}
                 >
                   <IconCollections
                     className={collection.color ? 'is-coloured' : undefined}
@@ -278,14 +343,28 @@ export function Sidebar(): React.JSX.Element {
         </div>
 
         <div className="sidebar__group sidebar__group--tags">
-          <h2 className="sidebar__title">{t('sidebar.tags')}</h2>
+          <h2 className="sidebar__title">
+            <button
+              type="button"
+              className={`sidebar__title-filter ${allTagsSelected ? 'is-active' : ''}`}
+              aria-pressed={allTagsSelected}
+              disabled={tags.length === 0}
+              title={t('sidebar.allTags')}
+              onClick={() =>
+                selectCategory({ tags: allTagsSelected ? [] : tags.map((tag) => tag.name) })
+              }
+            >
+              {t('sidebar.tags')}
+            </button>
+          </h2>
           <div className="tag-list">
             {shown.map((tag) => (
               <button
                 key={tag.name}
                 type="button"
-                className={`row ${query.tag === tag.name ? 'is-active' : ''}`}
-                onClick={() => setQuery({ tag: query.tag === tag.name ? null : tag.name })}
+                className={`row ${query.tags.includes(tag.name) ? 'is-active' : ''}`}
+                aria-pressed={query.tags.includes(tag.name)}
+                onClick={() => toggleTag(tag.name)}
               >
                 <span className="row__hash">#</span>
                 <span className="row__label">{tag.name}</span>

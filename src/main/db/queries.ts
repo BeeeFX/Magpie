@@ -97,19 +97,22 @@ export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): P
     params.push(query.label)
   }
 
-  if (query.collectionId !== null) {
-    where.push(
-      'EXISTS (SELECT 1 FROM collection_posts cp WHERE cp.post_id = p.id AND cp.collection_id = ?)'
-    )
-    params.push(query.collectionId)
+  if (query.collectionIds.length > 0) {
+    where.push(`EXISTS (
+      SELECT 1 FROM collection_posts cp
+      WHERE cp.post_id = p.id
+        AND cp.collection_id IN (${query.collectionIds.map(() => '?').join(', ')})
+    )`)
+    params.push(...query.collectionIds)
   }
 
-  if (query.tag) {
+  if (query.tags.length > 0) {
     where.push(`EXISTS (
       SELECT 1 FROM post_tags pt JOIN tags t ON t.id = pt.tag_id
-      WHERE pt.post_id = p.id AND t.name = ? COLLATE NOCASE
+      WHERE pt.post_id = p.id
+        AND t.name COLLATE NOCASE IN (${query.tags.map(() => '?').join(', ')})
     )`)
-    params.push(query.tag)
+    params.push(...query.tags)
   }
 
   const match = toFtsQuery(query.search)
@@ -1192,6 +1195,48 @@ export function collectionsForPost(postId: string): number[] {
     .prepare('SELECT collection_id FROM collection_posts WHERE post_id = ?')
     .all(postId) as { collection_id: number }[]
   return rows.map((row) => row.collection_id)
+}
+
+export interface OrganizerRuleRow {
+  ruleKey: string
+  collectionId: number | null
+  ignored: boolean
+}
+
+export function organizerRules(): OrganizerRuleRow[] {
+  return (
+    getDb()
+      .prepare(
+        `SELECT rule_key AS ruleKey, collection_id AS collectionId, ignored
+           FROM organizer_rules`
+      )
+      .all() as Array<{ ruleKey: string; collectionId: number | null; ignored: number }>
+  ).map((row) => ({ ...row, ignored: row.ignored === 1 }))
+}
+
+/**
+ * Met à jour uniquement les règles présentes dans le plan validé. Les anciennes restent
+ * disponibles si une petite catégorie ne réapparaît pas lors d'une analyse ultérieure.
+ */
+export function rememberOrganizerRules(
+  assigned: Array<{ ruleKey: string; collectionId: number }>,
+  ignoredRuleKeys: string[]
+): void {
+  const db = getDb()
+  const assignedKeys = new Set(assigned.map((entry) => entry.ruleKey))
+  const upsert = db.prepare(
+    `INSERT INTO organizer_rules (rule_key, collection_id, ignored, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(rule_key) DO UPDATE SET
+       collection_id = excluded.collection_id,
+       ignored = excluded.ignored,
+       updated_at = excluded.updated_at`
+  )
+  const now = Date.now()
+  for (const entry of assigned) upsert.run(entry.ruleKey, entry.collectionId, 0, now)
+  for (const ruleKey of ignoredRuleKeys) {
+    if (!assignedKeys.has(ruleKey)) upsert.run(ruleKey, null, 1, now)
+  }
 }
 
 /** Renseigne les dimensions et la vignette une fois le média traité par le cache. */

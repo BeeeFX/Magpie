@@ -82,6 +82,7 @@ const PREVIEW_DEFAULTS: Settings = {
   aiModel: 'gpt-4.1-mini',
   aiEndpoint: '',
   autoTagEnabled: false,
+  autoOrganizeEnabled: false,
   // L'aperçu sert à juger l'application, pas à rejouer l'accueil à chaque rechargement.
   onboardingDone: true
 }
@@ -124,12 +125,14 @@ const previewApi: MagpieApi = {
     suggestions: [
       {
         id: 'music',
+        ruleKeys: ['guitar', 'dj', 'music-production'],
         name: 'Music',
         description: 'Guitar, DJ sets and music production.',
         postIds: ['demo-music-1', 'demo-music-2', 'demo-music-3']
       },
       {
         id: 'visual',
+        ruleKeys: ['animation', 'art'],
         name: 'Visual inspiration',
         description: 'Motion, photography and art direction.',
         postIds: ['demo-visual-1', 'demo-visual-2']
@@ -248,6 +251,7 @@ const previewEvents: MagpieEvents = {
   onUpdateState: () => () => {},
   onLibraryMoveProgress: () => () => {},
   onWindowInteraction: () => () => {},
+  onWindowFullscreen: () => () => {},
   onThemeChanged: (cb) => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const resolve = (): void => {

@@ -152,6 +152,7 @@ interface State {
   aiModel: string
   aiEndpoint: string
   autoTagEnabled: boolean
+  autoOrganizeEnabled: boolean
   aiProgress: AiTagProgress | null
   onboardingDone: boolean
   /** Vrai tant que les réglages n'ont pas été lus : évite d'afficher la présentation
@@ -194,6 +195,7 @@ interface State {
   setTrayEnabled: (enabled: boolean) => Promise<void>
   setSyncOnLaunch: (enabled: boolean) => Promise<void>
   setSyncSchedule: (schedule: SyncSchedule) => Promise<void>
+  setAutoOrganizeEnabled: (enabled: boolean) => Promise<void>
   setAiSettings: (patch: Partial<Pick<State, 'aiProvider' | 'aiModel' | 'aiEndpoint' | 'autoTagEnabled'>>) => Promise<void>
   setAiProgress: (progress: AiTagProgress | null) => void
   finishOnboarding: () => Promise<void>
@@ -266,6 +268,7 @@ export const useStore = create<State>()(
       aiModel: 'gpt-4.1-mini',
       aiEndpoint: '',
       autoTagEnabled: false,
+      autoOrganizeEnabled: false,
       aiProgress: null,
       // Vrai par défaut, corrigé dès la lecture des réglages : mieux vaut afficher
       // brièvement l'application vide que de faire clignoter la présentation à chaque
@@ -377,7 +380,21 @@ export const useStore = create<State>()(
       },
 
       resetQuery: () => {
-        set({ query: DEFAULT_QUERY, scrollTop: 0 })
+        const query = get().query
+        // « Tous » est une catégorie de bibliothèque, pas un bouton de remise à zéro
+        // générale. Les filtres, la recherche et le tri doivent survivre à la navigation
+        // entre Tous, Favoris, Signets/Likes, collections et tags.
+        set({
+          query: {
+            ...query,
+            sources: [],
+            favoritesOnly: false,
+            tags: [],
+            collectionIds: []
+          },
+          scrollTop: 0,
+          detailIndex: null
+        })
         flushDeferredUiStorage()
         void get().refresh(true)
       },
@@ -466,6 +483,7 @@ export const useStore = create<State>()(
           aiModel: settings.aiModel,
           aiEndpoint: settings.aiEndpoint,
           autoTagEnabled: settings.autoTagEnabled,
+          autoOrganizeEnabled: settings.autoOrganizeEnabled,
           onboardingDone: settings.onboardingDone,
           settingsLoading: false
         })
@@ -550,6 +568,11 @@ export const useStore = create<State>()(
         await magpie.setSettings({ syncSchedule })
       },
 
+      setAutoOrganizeEnabled: async (autoOrganizeEnabled) => {
+        set({ autoOrganizeEnabled })
+        await magpie.setSettings({ autoOrganizeEnabled })
+      },
+
       setAiSettings: async (patch) => {
         set(patch)
         await magpie.setSettings(patch)
@@ -590,7 +613,7 @@ export const useStore = create<State>()(
       removeTag: async (postId, name) => {
         await magpie.removeTag(postId, name)
         const before = get().posts
-        const removeFromResults = get().query.tag?.toLocaleLowerCase() === name.toLocaleLowerCase()
+        const selectedTags = new Set(get().query.tags.map((tag) => tag.toLocaleLowerCase()))
         const posts = before
           .map((post) =>
             post.id === postId
@@ -599,10 +622,17 @@ export const useStore = create<State>()(
                   tags: post.tags.filter(
                     (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
                   )
-                }
+              }
               : post
           )
-          .filter((post) => !(removeFromResults && post.id === postId))
+          .filter(
+            (post) =>
+              !(
+                post.id === postId &&
+                selectedTags.size > 0 &&
+                !post.tags.some((tag) => selectedTags.has(tag.name.toLocaleLowerCase()))
+              )
+          )
         set({
           posts,
           layoutRevision:
@@ -721,10 +751,26 @@ export const useStore = create<State>()(
       // leur valeur par défaut sans effacer les préférences déjà enregistrées.
       merge: (persisted, current) => {
         const saved = persisted as Partial<State>
+        const savedQuery = saved.query as
+          | (Partial<PostQuery> & { tag?: string | null; collectionId?: number | null })
+          | undefined
         return {
           ...current,
           ...saved,
-          query: { ...DEFAULT_QUERY, ...(saved.query ?? {}) }
+          query: {
+            ...DEFAULT_QUERY,
+            ...(savedQuery ?? {}),
+            tags: Array.isArray(savedQuery?.tags)
+              ? savedQuery.tags
+              : savedQuery?.tag
+                ? [savedQuery.tag]
+                : [],
+            collectionIds: Array.isArray(savedQuery?.collectionIds)
+              ? savedQuery.collectionIds
+              : Number.isInteger(savedQuery?.collectionId)
+                ? [Number(savedQuery?.collectionId)]
+                : []
+          }
         }
       }
     }

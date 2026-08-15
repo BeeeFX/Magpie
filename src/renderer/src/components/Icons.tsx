@@ -206,6 +206,14 @@ export function IconExpand({ size = 16 }: IconProps): React.JSX.Element {
   )
 }
 
+export function IconContract({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)}>
+      <path d="M8.4 8.4h-5v-5M11.6 11.6h5v5M3.4 3.4l5.8 5.8M16.6 16.6l-5.8-5.8" />
+    </svg>
+  )
+}
+
 export function IconExternal({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...base(size)}>

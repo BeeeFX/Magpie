@@ -34,10 +34,14 @@ export function Grid(): React.JSX.Element {
   const query = useStore((s) => s.query)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState({ width: 0, height: 0 })
+  const [layoutWidth, setLayoutWidth] = useState(0)
+  const [layoutDensity, setLayoutDensity] = useState(density)
   const [scroll, setScroll] = useState(0)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [resultsKey, setResultsKey] = useState(0)
-  const [resizing, setResizing] = useState(false)
+  const [windowResizing, setWindowResizing] = useState(false)
+  const [densityChanging, setDensityChanging] = useState(false)
+  const resizing = windowResizing || densityChanging
   const restored = useRef(false)
   const resizeFrame = useRef(0)
   const resizeEnd = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -50,7 +54,7 @@ export function Grid(): React.JSX.Element {
     const el = scrollerRef.current
     if (!el) return
 
-    const measure = (): void => {
+    const measure = (commitLayout = false): void => {
       // `clientWidth` inclut le padding : la largeur utile est celle de la zone de
       // contenu, sinon les colonnes déborderaient de la largeur disponible.
       const style = getComputedStyle(el)
@@ -59,30 +63,35 @@ export function Grid(): React.JSX.Element {
       setViewport((current) =>
         current.width === next.width && current.height === next.height ? current : next
       )
+      if (commitLayout) setLayoutWidth((current) => (current === next.width ? current : next.width))
     }
 
     const scheduleMeasure = (): void => {
       if (!resizeFrame.current) {
         resizeFrame.current = requestAnimationFrame(() => {
           resizeFrame.current = 0
-          measure()
+          measure(false)
         })
       }
-      setResizing(true)
+      setWindowResizing(true)
       if (resizeEnd.current !== null) clearTimeout(resizeEnd.current)
       resizeEnd.current = setTimeout(() => {
         resizeEnd.current = null
-        setResizing(false)
-      }, 120)
+        // Recompose le mur une seule fois, avec la largeur finale. React regroupe ces
+        // deux changements : les transitions sont donc actives au moment où les cartes
+        // reçoivent leur nouvelle position, au lieu de poursuivre la fenêtre à chaque pixel.
+        measure(true)
+        setWindowResizing(false)
+      }, 100)
     }
 
-    measure()
+    measure(true)
 
     // Trois filets, parce qu'une seule mesure ne suffit pas : la première passe de mise
     // en page peut annoncer une largeur nulle, et le `ResizeObserver` ne délivre rien
     // tant que la fenêtre n'est pas composited. Sans cela, la grille peut rester vide
     // jusqu'au premier redimensionnement.
-    const deferred = [setTimeout(measure, 0), setTimeout(measure, 150)]
+    const deferred = [setTimeout(() => measure(true), 0), setTimeout(() => measure(true), 150)]
     const observer = new ResizeObserver(scheduleMeasure)
     observer.observe(el)
     window.addEventListener('resize', scheduleMeasure)
@@ -95,6 +104,19 @@ export function Grid(): React.JSX.Element {
       window.removeEventListener('resize', scheduleMeasure)
     }
   }, [])
+
+  /* Le curseur de densité peut émettre des dizaines de valeurs par seconde. On laisse
+     son libellé suivre immédiatement le doigt, puis on effectue une seule recomposition
+     animée lorsque le geste marque une courte pause. */
+  useEffect(() => {
+    if (density === layoutDensity) return
+    setDensityChanging(true)
+    const timer = setTimeout(() => {
+      setLayoutDensity(density)
+      setDensityChanging(false)
+    }, 80)
+    return () => clearTimeout(timer)
+  }, [density, layoutDensity])
 
   /* Le scroll arrive à ~120 Hz : on ne remet à jour l'état qu'une fois par frame. */
   const frame = useRef(0)
@@ -138,12 +160,12 @@ export function Grid(): React.JSX.Element {
   const layout = useMemo(
     () =>
       computeLayout(posts, {
-        containerWidth: viewport.width,
-        targetColumnWidth: density,
+        containerWidth: layoutWidth,
+        targetColumnWidth: layoutDensity,
         gap: GAP,
         mode
       }),
-    [layoutRevision, viewport.width, density, mode]
+    [layoutRevision, layoutWidth, layoutDensity, mode]
   )
 
   /* Restauration de la position, une seule fois, quand la mise en page est prête. */

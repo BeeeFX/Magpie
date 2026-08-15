@@ -21,12 +21,15 @@ interface EditableSuggestion extends AiCollectionSuggestion {
 export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null {
   const t = useT()
   const refresh = useStore((state) => state.refresh)
+  const loadSettings = useStore((state) => state.loadSettings)
+  const autoOrganizeEnabled = useStore((state) => state.autoOrganizeEnabled)
   const [organizerProgress, setOrganizerProgress] = useState<OrganizerProgress | null>(null)
   const [phase, setPhase] = useState<'intro' | 'loading' | 'review' | 'applying' | 'done'>('intro')
   const [plan, setPlan] = useState<AiCollectionPlan | null>(null)
   const [suggestions, setSuggestions] = useState<EditableSuggestion[]>([])
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<AiCollectionApplyResult | null>(null)
+  const [rememberChoices, setRememberChoices] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -36,6 +39,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     setSuggestions([])
     setError(null)
     setResult(null)
+    setRememberChoices(autoOrganizeEnabled)
     requestAnimationFrame(() => panelRef.current?.focus())
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
@@ -83,7 +87,11 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
         .filter((item) => item.id !== sourceId)
         .map((item) =>
           item.id === targetId
-            ? { ...item, postIds: [...new Set([...item.postIds, ...source.postIds])] }
+            ? {
+                ...item,
+                postIds: [...new Set([...item.postIds, ...source.postIds])],
+                ruleKeys: [...new Set([...item.ruleKeys, ...source.ruleKeys])]
+              }
             : item
         )
     })
@@ -96,10 +104,20 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
       const applied = await magpie.applyAiCollections(
         selected.map((suggestion) => ({
           name: suggestion.name.trim(),
-          postIds: suggestion.postIds
-        }))
+          postIds: suggestion.postIds,
+          ruleKeys: suggestion.ruleKeys
+        })),
+        {
+          remember: rememberChoices,
+          ignoredRuleKeys: rememberChoices
+            ? suggestions
+                .filter((suggestion) => !suggestion.included)
+                .flatMap((suggestion) => suggestion.ruleKeys)
+            : []
+        }
       )
       setResult(applied)
+      await loadSettings()
       await refresh()
       setPhase('done')
     } catch (reason) {
@@ -182,6 +200,22 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                 <div><strong>{plan?.unassignedVideos ?? 0}</strong><span>{t('organizer.unassigned')}</span></div>
               </div>
               <p className="organizer-review-hint">{t('organizer.reviewHint')}</p>
+              <div className="organizer-memory">
+                <div>
+                  <strong>{t('organizer.rememberTitle')}</strong>
+                  <span>{t('organizer.rememberHint')}</span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={rememberChoices}
+                  className={`switch ${rememberChoices ? 'is-on' : ''}`}
+                  disabled={phase === 'applying'}
+                  onClick={() => setRememberChoices((value) => !value)}
+                >
+                  <span className="switch__knob" />
+                </button>
+              </div>
               <div className="organizer-list">
                 {suggestions.map((suggestion) => (
                   <article className={`organizer-category ${suggestion.included ? '' : 'is-excluded'}`} key={suggestion.id}>
@@ -247,6 +281,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                 collections: result?.collections ?? 0,
                 posts: result?.added ?? 0
               })}</p>
+              {rememberChoices ? <p>{t('organizer.rememberDone')}</p> : null}
               <button type="button" className="btn btn--primary" onClick={onClose}>{t('organizer.close')}</button>
             </div>
           ) : null}

@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import { libraryDbPath } from './library-path'
-import { MIGRATION_9_SQL } from '../src/main/db/schema'
+import { MIGRATION_9_SQL, MIGRATION_10_SQL } from '../src/main/db/schema'
 
 const dbPath = libraryDbPath()
 
@@ -204,6 +204,36 @@ check(
     'PRIMARY KEY (collection_id, post_id)'
   )
 )
+
+const hasOrganizerRules = Boolean(
+  db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'organizer_rules'").get()
+)
+if (hasOrganizerRules) {
+  check(
+    'les préférences de classement local sont structurellement valides',
+    one<{ n: number }>(`SELECT COUNT(*) n FROM organizer_rules
+      WHERE (ignored = 1 AND collection_id IS NOT NULL)
+         OR (ignored = 0 AND collection_id IS NULL)`).n === 0
+  )
+} else {
+  const migration = new Database(':memory:')
+  migration.exec('CREATE TABLE collections (id INTEGER PRIMARY KEY)')
+  migration.exec(MIGRATION_10_SQL)
+  migration.exec(`
+    INSERT INTO collections VALUES (1);
+    INSERT INTO organizer_rules VALUES ('3d', 1, 0, 1);
+    INSERT INTO organizer_rules VALUES ('term:blender', 1, 0, 1);
+  `)
+  check(
+    'la migration v10 prépare la mémoire de classement local',
+    (migration.prepare('SELECT COUNT(*) n FROM organizer_rules').get() as { n: number }).n === 2
+  )
+  check(
+    'plusieurs catégories fusionnées peuvent viser la même collection',
+    (migration.prepare('SELECT COUNT(DISTINCT collection_id) n FROM organizer_rules').get() as { n: number }).n === 1
+  )
+  migration.close()
+}
 
 console.log('\nétiquettes de couleur')
 const postCols = (db.prepare('PRAGMA table_info(posts)').all() as { name: string }[]).map((c) => c.name)

@@ -171,7 +171,12 @@ export function Toolbar(): React.JSX.Element {
               <button
                 type="button"
                 className="menu-item"
-                onClick={() => setQuery({ untaggedOnly: !query.untaggedOnly })}
+                onClick={() =>
+                  setQuery({
+                    untaggedOnly: !query.untaggedOnly,
+                    tags: []
+                  })
+                }
               >
                 <span className="menu-item__mark">
                   {query.untaggedOnly ? <IconCheck size={14} /> : null}

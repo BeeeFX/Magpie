@@ -29,7 +29,7 @@ import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
 import { repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
-import { localOrganizer } from './tagging/organize'
+import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
 import type { SyncPhase } from '@shared/types'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
@@ -75,6 +75,8 @@ let quitting = false
 const previousSyncPhase: Partial<Record<string, SyncPhase>> = {}
 const previousSyncAdded: Partial<Record<string, number>> = {}
 const syncStartedAt: Partial<Record<string, number>> = {}
+let organizerAfterSyncPending = false
+let organizerAfterSyncTimer: NodeJS.Timeout | null = null
 
 if (isPrimaryInstance) {
   app.on('second-instance', () => {
@@ -157,6 +159,12 @@ function createWindow(): void {
   })
   mainWindow.on('move', markWindowInteraction)
   mainWindow.on('resize', markWindowInteraction)
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow?.webContents.send('window:fullscreen', true)
+  })
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow?.webContents.send('window:fullscreen', false)
+  })
 
   // Un lien cliqué dans le renderer part dans le navigateur, jamais dans une fenêtre
   // Electron sans garde-fou.
@@ -516,7 +524,10 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
       if (phase === 'running' && previousSyncPhase[platform] !== 'running') {
         syncStartedAt[platform] = Date.now()
       }
-      if (added > (previousSyncAdded[platform] ?? 0)) void drainMediaQueue()
+      if (added > (previousSyncAdded[platform] ?? 0)) {
+        organizerAfterSyncPending = true
+        void drainMediaQueue()
+      }
       if (
         phase === 'done' &&
         previousSyncPhase[platform] !== 'done' &&
@@ -528,6 +539,30 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
       }
       previousSyncPhase[platform] = phase
       previousSyncAdded[platform] = added
+    }
+
+    // Une source peut finir quelques millisecondes avant que la suivante commence. Le
+    // petit délai évite de lancer l'organisateur entre Signets et Likes ; il ne part
+    // qu'une fois l'ensemble de la synchronisation réellement au repos.
+    if (organizerAfterSyncTimer) clearTimeout(organizerAfterSyncTimer)
+    organizerAfterSyncTimer = null
+    if (!state.running && organizerAfterSyncPending) {
+      if (!readSettings().autoOrganizeEnabled) {
+        organizerAfterSyncPending = false
+      } else {
+        organizerAfterSyncTimer = setTimeout(() => {
+          organizerAfterSyncTimer = null
+          if (syncEngine.isRunning()) return
+          organizerAfterSyncPending = false
+          void applyRememberedOrganizerRules()
+            .then((result) => {
+              if (result.added > 0) mainWindow?.webContents.send('library:updated')
+            })
+            .catch((error: unknown) => {
+              console.error('[magpie] Organisation automatique impossible', error)
+            })
+        }, 750)
+      }
     }
   })
 
@@ -569,6 +604,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   quitting = true
   if (scheduleTimer) clearInterval(scheduleTimer)
+  if (organizerAfterSyncTimer) clearTimeout(organizerAfterSyncTimer)
   if (windowInteractionTimer) clearTimeout(windowInteractionTimer)
   stopUpdater()
   closeDb()

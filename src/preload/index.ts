@@ -4,6 +4,7 @@ import type {
   AddToCollectionResult,
   AiCollectionApplyResult,
   AiCollectionChoice,
+  AiCollectionMemoryOptions,
   AiCollectionPlan,
   AiProvider,
   AiTagProgress,
@@ -47,8 +48,11 @@ const api: MagpieApi = {
     ipcRenderer.invoke('ai:start', postIds),
   proposeAiCollections: (): Promise<AiCollectionPlan> =>
     ipcRenderer.invoke('ai:proposeCollections'),
-  applyAiCollections: (choices: AiCollectionChoice[]): Promise<AiCollectionApplyResult> =>
-    ipcRenderer.invoke('ai:applyCollections', choices),
+  applyAiCollections: (
+    choices: AiCollectionChoice[],
+    memory: AiCollectionMemoryOptions
+  ): Promise<AiCollectionApplyResult> =>
+    ipcRenderer.invoke('ai:applyCollections', choices, memory),
   copyToClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
   sendToNitrate: (url: string): Promise<void> => ipcRenderer.invoke('nitrate:send', url),
@@ -158,6 +162,11 @@ const events: MagpieEvents = {
     const listener = (_e: unknown, active: boolean): void => cb(active)
     ipcRenderer.on('window:interaction', listener)
     return () => ipcRenderer.removeListener('window:interaction', listener)
+  },
+  onWindowFullscreen: (cb) => {
+    const listener = (_e: unknown, fullscreen: boolean): void => cb(fullscreen)
+    ipcRenderer.on('window:fullscreen', listener)
+    return () => ipcRenderer.removeListener('window:fullscreen', listener)
   }
 }
 

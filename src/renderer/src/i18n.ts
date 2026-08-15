@@ -24,6 +24,8 @@ const fr = {
   'sidebar.images': 'Images',
   'sidebar.collections': 'Collections',
   'sidebar.tags': 'Tags',
+  'sidebar.allCollections': 'Sélectionner ou désélectionner toutes les collections',
+  'sidebar.allTags': 'Sélectionner ou désélectionner tous les tags',
   'sidebar.noneYet': 'Aucune pour l’instant',
   'sidebar.noTagsYet': 'Aucun pour l’instant',
   'sidebar.showAllTags': 'Voir les {count} tags',
@@ -199,6 +201,8 @@ const fr = {
     'Regroupe vos vidéos sans compte, sans clé API et sans envoyer leur contenu sur Internet.',
   'settings.localOrganizerNote':
     'Le premier passage peut prendre du temps. Les analyses suivantes ne traitent que les nouvelles vignettes.',
+  'settings.autoOrganize': 'Organiser après chaque synchronisation',
+  'settings.autoOrganizeHint': 'Utilise les choix mémorisés lors de votre dernier plan validé.',
   'organizer.title': 'Organiser localement',
   'organizer.subtitle': 'Privé, modifiable et sans LLM.',
   'organizer.introTitle': 'Transformez vos vidéos en collections utiles',
@@ -218,6 +222,11 @@ const fr = {
   'organizer.unassigned': 'sans catégorie',
   'organizer.reviewHint':
     'Décochez ce que vous ne voulez pas, renommez librement et utilisez “Fusionner avec…” pour regrouper deux propositions.',
+  'organizer.rememberTitle': 'Mémoriser mes choix',
+  'organizer.rememberHint':
+    'Après chaque synchronisation, les nouveaux posts suivront automatiquement ces renommages, fusions et exclusions.',
+  'organizer.rememberDone':
+    'Ces choix seront réappliqués automatiquement après les prochaines synchronisations.',
   'organizer.include': 'Incluse',
   'organizer.exclude': 'Exclue',
   'organizer.categoryName': 'Nom de la catégorie',
@@ -378,6 +387,8 @@ const en: Record<TranslationKey, string> = {
   'sidebar.images': 'Images',
   'sidebar.collections': 'Collections',
   'sidebar.tags': 'Tags',
+  'sidebar.allCollections': 'Select or clear every collection',
+  'sidebar.allTags': 'Select or clear every tag',
   'sidebar.noneYet': 'None yet',
   'sidebar.noTagsYet': 'None yet',
   'sidebar.showAllTags': 'Show all {count} tags',
@@ -552,6 +563,8 @@ const en: Record<TranslationKey, string> = {
     'Groups your videos without an account, API key, or sending their content over the Internet.',
   'settings.localOrganizerNote':
     'The first pass may take a while. Later analyses only process new thumbnails.',
+  'settings.autoOrganize': 'Organise after every sync',
+  'settings.autoOrganizeHint': 'Uses the choices remembered from your last approved plan.',
   'organizer.title': 'Organise locally',
   'organizer.subtitle': 'Private, editable, and LLM-free.',
   'organizer.introTitle': 'Turn your videos into useful collections',
@@ -571,6 +584,11 @@ const en: Record<TranslationKey, string> = {
   'organizer.unassigned': 'uncategorised',
   'organizer.reviewHint':
     'Untick anything you do not want, rename freely, and use “Merge into…” to combine two suggestions.',
+  'organizer.rememberTitle': 'Remember my choices',
+  'organizer.rememberHint':
+    'After each sync, new posts will automatically follow these renames, merges, and exclusions.',
+  'organizer.rememberDone':
+    'These choices will be applied automatically after future synchronisations.',
   'organizer.include': 'Included',
   'organizer.exclude': 'Excluded',
   'organizer.categoryName': 'Category name',

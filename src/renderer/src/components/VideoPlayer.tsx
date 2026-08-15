@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useT } from '../store'
-import { IconCheck, IconExpand, IconPlay, IconSettings, IconVolume } from './Icons'
+import { IconCheck, IconContract, IconExpand, IconPlay, IconSettings, IconVolume } from './Icons'
 import type { VideoQuality } from '@shared/types'
 import { magpie } from '../bridge'
 
@@ -319,12 +319,12 @@ export function VideoPlayer({
 
         <button
           type="button"
-          className={`player__btn ${fullscreen ? 'is-active' : ''}`}
+          className="player__btn"
           onClick={() => void onToggleFullscreen().catch(() => {})}
           aria-label={t('detail.fullscreen')}
           aria-pressed={fullscreen}
         >
-          <IconExpand size={15} />
+          {fullscreen ? <IconContract size={15} /> : <IconExpand size={15} />}
         </button>
       </div>
     </div>

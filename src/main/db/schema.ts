@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
@@ -30,6 +30,18 @@ INSERT OR IGNORE INTO post_sources (post_id, source, source_rank, source_at, dis
   SELECT id, 'saved', saved_rank, saved_at, discovered_at FROM posts;
 INSERT OR IGNORE INTO account_sync_sources (platform, source, last_sync_at, last_sync_status, cursor)
   SELECT platform, 'saved', last_sync_at, last_sync_status, cursor FROM accounts;
+`
+
+export const MIGRATION_10_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS organizer_rules (
+  rule_key      TEXT PRIMARY KEY,
+  collection_id INTEGER REFERENCES collections(id) ON DELETE CASCADE,
+  ignored       INTEGER NOT NULL DEFAULT 0 CHECK(ignored IN (0, 1)),
+  updated_at    INTEGER NOT NULL,
+  CHECK((ignored = 1 AND collection_id IS NULL) OR (ignored = 0 AND collection_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_organizer_rules_collection
+  ON organizer_rules(collection_id) WHERE collection_id IS NOT NULL;
 `
 
 export const SCHEMA_SQL = /* sql */ `
@@ -184,6 +196,19 @@ CREATE TABLE IF NOT EXISTS local_video_features (
   visual      BLOB,
   updated_at  INTEGER NOT NULL
 );
+
+-- Préférences apprises lors du premier tri local. Plusieurs clés peuvent pointer vers
+-- la même collection : c'est ainsi qu'une fusion « 3D + Blender » reste valable pour les
+-- prochains posts, même si la collection est ensuite renommée.
+CREATE TABLE IF NOT EXISTS organizer_rules (
+  rule_key       TEXT PRIMARY KEY,
+  collection_id  INTEGER REFERENCES collections(id) ON DELETE CASCADE,
+  ignored        INTEGER NOT NULL DEFAULT 0 CHECK(ignored IN (0, 1)),
+  updated_at     INTEGER NOT NULL,
+  CHECK((ignored = 1 AND collection_id IS NULL) OR (ignored = 0 AND collection_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_organizer_rules_collection
+  ON organizer_rules(collection_id) WHERE collection_id IS NOT NULL;
 
 -- Table externe : le contenu vit dans la table posts, l'index FTS ne stocke que ce qu'il
 -- faut pour chercher. Les triggers ci-dessous la maintiennent synchronisée.

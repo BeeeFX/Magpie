@@ -6,6 +6,7 @@ import type {
   AccountInfo,
   AiCollectionApplyResult,
   AiCollectionChoice,
+  AiCollectionMemoryOptions,
   LabelColor,
   LibraryInfo,
   LibraryMoveProgress,
@@ -31,6 +32,7 @@ import {
   listPosts,
   readAccount,
   playbackMediaSource,
+  rememberOrganizerRules,
   removeFromCollection,
   removeTag,
   setCollectionColor,
@@ -66,6 +68,7 @@ function platformValues(value: unknown): Platform[] | undefined {
 
 function postQueryValue(value: unknown): PostQuery {
   const raw = value && typeof value === 'object' ? (value as Partial<PostQuery>) : DEFAULT_QUERY
+  const legacy = raw as Partial<PostQuery> & { tag?: unknown; collectionId?: unknown }
   const enabledSources = readSettings().contentSources
   const requestedSources = Array.isArray(raw.sources)
     ? raw.sources.slice(0, 2).filter((source) => CONTENT_SOURCES.includes(source as never))
@@ -81,8 +84,26 @@ function postQueryValue(value: unknown): PostQuery {
       : [],
     favoritesOnly: raw.favoritesOnly === true,
     untaggedOnly: raw.untaggedOnly === true,
-    tag: typeof raw.tag === 'string' ? raw.tag.slice(0, 80) : null,
-    collectionId: Number.isInteger(raw.collectionId) ? Number(raw.collectionId) : null,
+    tags: [
+      ...new Set(
+        (Array.isArray(raw.tags) ? raw.tags : typeof legacy.tag === 'string' ? [legacy.tag] : [])
+          .slice(0, 500)
+          .filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+          .map((tag) => tag.slice(0, 80))
+      )
+    ],
+    collectionIds: [
+      ...new Set(
+        (Array.isArray(raw.collectionIds)
+          ? raw.collectionIds
+          : Number.isInteger(legacy.collectionId)
+            ? [Number(legacy.collectionId)]
+            : [])
+          .slice(0, 2000)
+          .filter((id): id is number => Number.isInteger(id) && Number(id) > 0)
+          .map(Number)
+      )
+    ],
     label: LABELS.includes(raw.label as never) ? raw.label! : null,
     search: typeof raw.search === 'string' ? raw.search.slice(0, 500) : '',
     sort: ['saved', 'published', 'author', 'platform', 'random'].includes(raw.sort ?? '')
@@ -176,9 +197,20 @@ export function registerIpc({
   ipcMain.handle('ai:proposeCollections', () => proposeVideoCollections())
   ipcMain.handle(
     'ai:applyCollections',
-    (_event, choices: AiCollectionChoice[]): AiCollectionApplyResult => {
+    (
+      _event,
+      choices: AiCollectionChoice[],
+      memory?: AiCollectionMemoryOptions
+    ): AiCollectionApplyResult => {
       if (!Array.isArray(choices) || choices.length > 50) throw new Error('Plan de collections invalide')
-      const merged = new Map<string, { name: string; postIds: Set<string> }>()
+      const remember = memory?.remember === true
+      const ignoredRuleKeys = Array.isArray(memory?.ignoredRuleKeys)
+        ? [...new Set(memory.ignoredRuleKeys)].filter(
+            (key) => typeof key === 'string' && key.length > 0 && key.length <= 120
+          )
+        : []
+      if (ignoredRuleKeys.length > 100) throw new Error('Préférences d’organisation invalides')
+      const merged = new Map<string, { name: string; postIds: Set<string>; ruleKeys: Set<string> }>()
       for (const choice of choices) {
         if (!choice || typeof choice.name !== 'string' || !Array.isArray(choice.postIds)) {
           throw new Error('Catégorie invalide')
@@ -186,18 +218,32 @@ export function registerIpc({
         const name = choice.name.trim().slice(0, 80)
         if (!name || choice.postIds.length > 5000) throw new Error('Catégorie invalide')
         const key = name.toLocaleLowerCase()
-        const group = merged.get(key) ?? { name, postIds: new Set<string>() }
+        const group = merged.get(key) ?? {
+          name,
+          postIds: new Set<string>(),
+          ruleKeys: new Set<string>()
+        }
         for (const id of choice.postIds) {
           if (typeof id !== 'string' || id.length > 300) throw new Error('Post invalide')
           group.postIds.add(id)
         }
+        if (!Array.isArray(choice.ruleKeys) || choice.ruleKeys.length > 50) {
+          throw new Error('Règle de catégorie invalide')
+        }
+        for (const ruleKey of choice.ruleKeys) {
+          if (typeof ruleKey !== 'string' || !ruleKey || ruleKey.length > 120) {
+            throw new Error('Règle de catégorie invalide')
+          }
+          group.ruleKeys.add(ruleKey)
+        }
         merged.set(key, group)
       }
 
-      return getDb().transaction(() => {
+      const result = getDb().transaction(() => {
         const existing = new Map(
           listCollections().map((collection) => [collection.name.toLocaleLowerCase(), collection])
         )
+        const learned: Array<{ ruleKey: string; collectionId: number }> = []
         let added = 0
         let alreadyThere = 0
         for (const [key, group] of merged) {
@@ -206,9 +252,15 @@ export function registerIpc({
           const result = addToCollection(collection.id, [...group.postIds])
           added += result.added
           alreadyThere += result.alreadyThere.length
+          for (const ruleKey of group.ruleKeys) {
+            learned.push({ ruleKey, collectionId: collection.id })
+          }
         }
+        if (remember) rememberOrganizerRules(learned, ignoredRuleKeys)
         return { collections: merged.size, added, alreadyThere }
       })()
+      writeSettings({ autoOrganizeEnabled: remember })
+      return result
     }
   )
 

@@ -55,6 +55,10 @@ assert(names.has('Skateboarding'), 'le skateboard est reconnu')
 assert(names.has('DJ & mixing'), 'les contenus DJ sont reconnus')
 assert(names.has('3D & Blender'), 'les contenus 3D sont reconnus')
 assert(
+  plan.suggestions.find((suggestion) => suggestion.name === '3D & Blender')?.ruleKeys.includes('3d'),
+  'chaque catégorie conserve une règle stable pour les prochaines synchronisations'
+)
+assert(
   plan.suggestions.find((suggestion) => suggestion.name === 'Guitar')?.postIds.includes('g4'),
   'une vidéo sans légende hérite du thème fiable de son créateur'
 )
