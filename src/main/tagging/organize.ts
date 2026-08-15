@@ -1,6 +1,7 @@
 import type {
   AiCollectionApplyResult,
   AiCollectionPlan,
+  AiCollectionRoute,
   AiCollectionSuggestion,
   Language,
   OrganizerProgress
@@ -15,6 +16,7 @@ import {
   videoOrganizationItems,
   addToCollection,
   type LocalVideoFeature,
+  type OrganizerRuleRow,
   type VideoOrganizationItem
 } from '../db/queries'
 import { mediaDir } from '../db'
@@ -378,7 +380,10 @@ function createChoices(items: PreparedItem[], lang: Language): Map<string, Categ
   return definitions
 }
 
-function assignCategories(items: PreparedItem[], definitions: Map<string, CategoryDefinition>): Map<string, PreparedItem[]> {
+function assignCategories(
+  items: PreparedItem[],
+  definitions: Map<string, CategoryDefinition>
+): { groups: Map<string, PreparedItem[]>; routes: AiCollectionRoute[] } {
   const minimum = items.length < 100 ? 2 : 3
   const firstCounts = new Map<string, number>()
   for (const item of items) {
@@ -446,7 +451,19 @@ function assignCategories(items: PreparedItem[], definitions: Map<string, Catego
   for (const [id, members] of [...groups]) {
     if (members.length < minimum || !definitions.has(id)) groups.delete(id)
   }
-  return groups
+
+  const available = new Set(groups.keys())
+  const routes: AiCollectionRoute[] = []
+  for (const item of items) {
+    const primary = assigned.get(item)
+    if (!primary || !available.has(primary)) continue
+    const rankedRuleKeys = [
+      primary,
+      ...item.choices.map((choice) => choice.id).filter((id) => available.has(id))
+    ].filter((id, index, all) => all.indexOf(id) === index)
+    routes.push({ postId: item.item.id, rankedRuleKeys })
+  }
+  return { groups, routes }
 }
 
 function categoryDescription(
@@ -489,7 +506,7 @@ export function buildLocalCollectionPlan(
     choices: []
   }))
   const definitions = createChoices(prepared, lang)
-  const groups = assignCategories(prepared, definitions)
+  const { groups, routes } = assignCategories(prepared, definitions)
   const suggestions: AiCollectionSuggestion[] = [...groups]
     .sort((left, right) => right[1].length - left[1].length)
     .map(([id, members], index) => {
@@ -505,6 +522,7 @@ export function buildLocalCollectionPlan(
   const assigned = new Set(suggestions.flatMap((suggestion) => suggestion.postIds))
   return {
     suggestions,
+    routes,
     analysedVideos: items.length,
     unassignedVideos: Math.max(0, items.length - assigned.size)
   }
@@ -512,7 +530,9 @@ export function buildLocalCollectionPlan(
 
 async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
   const items = videoOrganizationItems()
-  if (items.length === 0) return { suggestions: [], analysedVideos: 0, unassignedVideos: 0 }
+  if (items.length === 0) {
+    return { suggestions: [], routes: [], analysedVideos: 0, unassignedVideos: 0 }
+  }
 
   setProgress({ stage: 'preparing', done: 0, total: items.length, running: true })
   const visuals = await loadVisuals(items)
@@ -534,28 +554,42 @@ export function proposeVideoCollections(): Promise<AiCollectionPlan> {
 
 let automaticApply: Promise<AiCollectionApplyResult> | null = null
 
+export function rememberedOrganizerDestinations(
+  routes: AiCollectionRoute[],
+  rules: OrganizerRuleRow[]
+): Map<number, string[]> {
+  const remembered = new Map(rules.map((rule) => [rule.ruleKey, rule]))
+  const postsByCollection = new Map<number, string[]>()
+  for (const route of routes) {
+    const destination = route.rankedRuleKeys
+      .map((ruleKey) => remembered.get(ruleKey))
+      .find((rule) => rule && !rule.ignored && rule.collectionId !== null)
+    if (!destination?.collectionId) continue
+    const posts = postsByCollection.get(destination.collectionId) ?? []
+    posts.push(route.postId)
+    postsByCollection.set(destination.collectionId, posts)
+  }
+  return postsByCollection
+}
+
 /** Applique les destinations apprises sans recréer ni renommer les collections. */
 export function applyRememberedOrganizerRules(): Promise<AiCollectionApplyResult> {
   if (automaticApply) return automaticApply
   automaticApply = (async () => {
-    const remembered = new Map(organizerRules().map((rule) => [rule.ruleKey, rule]))
-    if (remembered.size === 0) return { collections: 0, added: 0, alreadyThere: 0 }
+    const remembered = organizerRules()
+    if (remembered.length === 0) return { collections: 0, added: 0, alreadyThere: 0 }
 
     const plan = await proposeVideoCollections()
-    const touchedCollections = new Set<number>()
+    const postsByCollection = rememberedOrganizerDestinations(plan.routes, remembered)
+
     let added = 0
     let alreadyThere = 0
-    for (const suggestion of plan.suggestions) {
-      const destination = suggestion.ruleKeys
-        .map((ruleKey) => remembered.get(ruleKey))
-        .find((rule) => rule && !rule.ignored && rule.collectionId !== null)
-      if (!destination?.collectionId) continue
-      const result = addToCollection(destination.collectionId, suggestion.postIds)
-      touchedCollections.add(destination.collectionId)
+    for (const [collectionId, postIds] of postsByCollection) {
+      const result = addToCollection(collectionId, postIds)
       added += result.added
       alreadyThere += result.alreadyThere.length
     }
-    return { collections: touchedCollections.size, added, alreadyThere }
+    return { collections: postsByCollection.size, added, alreadyThere }
   })().finally(() => {
     automaticApply = null
   })

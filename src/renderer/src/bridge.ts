@@ -123,25 +123,37 @@ const previewApi: MagpieApi = {
     const videos = (await previewPosts())
       .filter((post) => post.media.some((media) => media.kind === 'video'))
       .slice(0, 18)
+    const suggestions = [
+      {
+        id: 'music',
+        ruleKeys: ['guitar', 'dj', 'music-production'],
+        name: 'Music',
+        description: 'Guitar, DJ sets and music production.',
+        postIds: videos.slice(0, 6).map((post) => post.id)
+      },
+      {
+        id: 'visual',
+        ruleKeys: ['animation', 'art'],
+        name: 'Visual inspiration',
+        description: 'Motion, photography and art direction.',
+        postIds: videos.slice(6, 12).map((post) => post.id)
+      }
+    ].filter((suggestion) => suggestion.postIds.length > 0)
     return {
       analysedVideos: videos.length,
       unassignedVideos: Math.max(0, videos.length - 12),
-      suggestions: [
-        {
-          id: 'music',
-          ruleKeys: ['guitar', 'dj', 'music-production'],
-          name: 'Music',
-          description: 'Guitar, DJ sets and music production.',
-          postIds: videos.slice(0, 6).map((post) => post.id)
-        },
-        {
-          id: 'visual',
-          ruleKeys: ['animation', 'art'],
-          name: 'Visual inspiration',
-          description: 'Motion, photography and art direction.',
-          postIds: videos.slice(6, 12).map((post) => post.id)
-        }
-      ].filter((suggestion) => suggestion.postIds.length > 0)
+      suggestions,
+      routes: suggestions.flatMap((suggestion) =>
+        suggestion.postIds.map((postId, postIndex) => ({
+          postId,
+          rankedRuleKeys:
+            suggestion.id === 'music'
+              ? postIndex < 4
+                ? ['guitar', 'animation']
+                : ['guitar']
+              : ['animation', 'guitar']
+        }))
+      )
     }
   },
   applyAiCollections: async (choices) => ({

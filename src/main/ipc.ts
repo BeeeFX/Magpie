@@ -216,7 +216,7 @@ export function registerIpc({
           throw new Error('Catégorie invalide')
         }
         const name = choice.name.trim().slice(0, 80)
-        if (!name || choice.postIds.length > 5000) throw new Error('Catégorie invalide')
+        if (!name || choice.postIds.length > 50_000) throw new Error('Catégorie invalide')
         const key = name.toLocaleLowerCase()
         const group = merged.get(key) ?? {
           name,

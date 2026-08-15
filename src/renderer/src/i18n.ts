@@ -221,10 +221,10 @@ const fr = {
   'organizer.categories': 'catégories proposées',
   'organizer.unassigned': 'sans catégorie',
   'organizer.reviewHint':
-    'Décochez ce que vous ne voulez pas, renommez librement et utilisez “Fusionner avec…” pour regrouper deux propositions.',
+    'Décochez une catégorie pour redistribuer ses vidéos vers les catégories conservées. Sans alternative fiable, elles resteront simplement sans collection.',
   'organizer.rememberTitle': 'Mémoriser mes choix',
   'organizer.rememberHint':
-    'Après chaque synchronisation, les nouveaux posts suivront automatiquement ces renommages, fusions et exclusions.',
+    'Après chaque synchronisation, les nouveaux posts suivront automatiquement ces renommages, fusions, exclusions et redistributions.',
   'organizer.rememberDone':
     'Ces choix seront réappliqués automatiquement après les prochaines synchronisations.',
   'organizer.include': 'Incluse',
@@ -238,11 +238,13 @@ const fr = {
   'organizer.previewError': 'Impossible de charger cet aperçu.',
   'organizer.previewMore': '+ {count} autres vidéos dans cette catégorie',
   'organizer.openOriginal': 'Ouvrir le post original',
+  'organizer.redistribution': '{redistributed} redistribuées · {unassigned} resteront sans collection',
   'organizer.merge': 'Fusionner avec…',
   'organizer.empty': 'Aucune catégorie exploitable n’a été proposée.',
   'organizer.doneTitle': 'Vos collections sont prêtes',
   'organizer.doneText': '{collections} collections créées ou complétées avec {posts} vidéos.',
   'organizer.close': 'Voir ma bibliothèque',
+  'organizer.selectionOne': '{categories} catégorie · {videos} vidéos sélectionnées',
   'organizer.selection': '{categories} catégories · {videos} vidéos sélectionnées',
   'organizer.cancel': 'Annuler',
   'organizer.create': 'Créer les collections',
@@ -590,10 +592,10 @@ const en: Record<TranslationKey, string> = {
   'organizer.categories': 'suggested categories',
   'organizer.unassigned': 'uncategorised',
   'organizer.reviewHint':
-    'Untick anything you do not want, rename freely, and use “Merge into…” to combine two suggestions.',
+    'Untick a category to redistribute its videos into the categories you keep. Without a reliable alternative, they will simply remain outside collections.',
   'organizer.rememberTitle': 'Remember my choices',
   'organizer.rememberHint':
-    'After each sync, new posts will automatically follow these renames, merges, and exclusions.',
+    'After each sync, new posts will automatically follow these renames, merges, exclusions, and redistributions.',
   'organizer.rememberDone':
     'These choices will be applied automatically after future synchronisations.',
   'organizer.include': 'Included',
@@ -607,11 +609,13 @@ const en: Record<TranslationKey, string> = {
   'organizer.previewError': 'This preview could not be loaded.',
   'organizer.previewMore': '+ {count} more videos in this category',
   'organizer.openOriginal': 'Open the original post',
+  'organizer.redistribution': '{redistributed} redistributed · {unassigned} will remain outside collections',
   'organizer.merge': 'Merge into…',
   'organizer.empty': 'No usable category was suggested.',
   'organizer.doneTitle': 'Your collections are ready',
   'organizer.doneText': '{collections} collections created or completed with {posts} videos.',
   'organizer.close': 'View my library',
+  'organizer.selectionOne': '{categories} category · {videos} videos selected',
   'organizer.selection': '{categories} categories · {videos} videos selected',
   'organizer.cancel': 'Cancel',
   'organizer.create': 'Create collections',

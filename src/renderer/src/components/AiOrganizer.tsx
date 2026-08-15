@@ -6,6 +6,7 @@ import type {
   OrganizerProgress,
   Post
 } from '@shared/types'
+import { redistributeOrganizerRoutes } from '@shared/organizer'
 import { magpie, magpieEvents } from '../bridge'
 import { displayName } from '../format'
 import { useStore, useT } from '../store'
@@ -67,14 +68,29 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     return magpieEvents.onOrganizerProgress(setOrganizerProgress)
   }, [open])
 
+  const redistributed = useMemo(
+    () => redistributeOrganizerRoutes(suggestions, plan?.routes ?? []),
+    [plan?.routes, suggestions]
+  )
   const selected = useMemo(
-    () => suggestions.filter((suggestion) => suggestion.included && suggestion.name.trim()),
-    [suggestions]
+    () =>
+      suggestions
+        .filter((suggestion) => suggestion.included && suggestion.name.trim())
+        .map((suggestion) => ({
+          ...suggestion,
+          postIds: redistributed.get(suggestion.id) ?? []
+        })),
+    [redistributed, suggestions]
   )
   const selectedVideos = useMemo(
     () => new Set(selected.flatMap((suggestion) => suggestion.postIds)).size,
     [selected]
   )
+  const assignedPostIds = useMemo(
+    () => new Set(selected.flatMap((suggestion) => suggestion.postIds)),
+    [selected]
+  )
+  const unassignedVideos = Math.max(0, (plan?.analysedVideos ?? 0) - selectedVideos)
 
   if (!open) return null
 
@@ -112,6 +128,17 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
             : item
         )
     })
+  }
+
+  const setIncluded = (suggestionId: string, included: boolean): void => {
+    previewRequestRef.current += 1
+    setPreviewId(null)
+    setPreviewPosts([])
+    setPreviewLoading(false)
+    setPreviewError(false)
+    setSuggestions((current) =>
+      current.map((item) => (item.id === suggestionId ? { ...item, included } : item))
+    )
   }
 
   const togglePreview = async (suggestion: EditableSuggestion): Promise<void> => {
@@ -239,7 +266,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
               <div className="organizer-summary">
                 <div><strong>{plan?.analysedVideos ?? 0}</strong><span>{t('organizer.videos')}</span></div>
                 <div><strong>{suggestions.length}</strong><span>{t('organizer.categories')}</span></div>
-                <div><strong>{plan?.unassignedVideos ?? 0}</strong><span>{t('organizer.unassigned')}</span></div>
+                <div><strong>{unassignedVideos}</strong><span>{t('organizer.unassigned')}</span></div>
               </div>
               <p className="organizer-review-hint">{t('organizer.reviewHint')}</p>
               <div className="organizer-memory">
@@ -259,20 +286,23 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                 </button>
               </div>
               <div className="organizer-list">
-                {suggestions.map((suggestion) => (
+                {suggestions.map((suggestion) => {
+                  const effectivePostIds = suggestion.included
+                    ? redistributed.get(suggestion.id) ?? []
+                    : suggestion.postIds
+                  const previewSuggestion = { ...suggestion, postIds: effectivePostIds }
+                  const redistributedCount = suggestion.postIds.filter((postId) =>
+                    assignedPostIds.has(postId)
+                  ).length
+                  const leftUnassigned = suggestion.postIds.length - redistributedCount
+                  return (
                   <article className={`organizer-category ${suggestion.included ? '' : 'is-excluded'}`} key={suggestion.id}>
                     <label className="organizer-category__toggle">
                       <input
                         type="checkbox"
                         checked={suggestion.included}
                         disabled={phase === 'applying'}
-                        onChange={(event) =>
-                          setSuggestions((current) =>
-                            current.map((item) =>
-                              item.id === suggestion.id ? { ...item, included: event.target.checked } : item
-                            )
-                          )
-                        }
+                        onChange={(event) => setIncluded(suggestion.id, event.target.checked)}
                       />
                       <span>{t(suggestion.included ? 'organizer.include' : 'organizer.exclude')}</span>
                     </label>
@@ -291,6 +321,14 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                         }
                       />
                       <p>{suggestion.description}</p>
+                      {!suggestion.included ? (
+                        <p className="organizer-category__redistribution">
+                          {t('organizer.redistribution', {
+                            redistributed: redistributedCount,
+                            unassigned: leftUnassigned
+                          })}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="organizer-category__side">
                       <button
@@ -299,10 +337,10 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                         disabled={phase === 'applying'}
                         aria-expanded={previewId === suggestion.id}
                         aria-controls={`organizer-preview-${suggestion.id}`}
-                        onClick={() => void togglePreview(suggestion)}
+                        onClick={() => void togglePreview(previewSuggestion)}
                       >
                         <span className="organizer-category__count">
-                          <strong>{suggestion.postIds.length}</strong>
+                          <strong>{effectivePostIds.length}</strong>
                           <span>{t('organizer.items')}</span>
                         </span>
                         <span className="organizer-category__preview-label">
@@ -367,10 +405,10 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                                 )
                               })}
                             </div>
-                            {suggestion.postIds.length > previewPosts.length ? (
+                            {effectivePostIds.length > previewPosts.length ? (
                               <span className="organizer-category__preview-more">
                                 {t('organizer.previewMore', {
-                                  count: suggestion.postIds.length - previewPosts.length
+                                  count: effectivePostIds.length - previewPosts.length
                                 })}
                               </span>
                             ) : null}
@@ -379,7 +417,8 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                       </div>
                     ) : null}
                   </article>
-                ))}
+                  )
+                })}
               </div>
               {suggestions.length === 0 ? <p className="organizer-empty">{t('organizer.empty')}</p> : null}
               {error ? <p className="organizer-error">{error}</p> : null}
@@ -402,7 +441,10 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
 
         {phase === 'review' || phase === 'applying' ? (
           <footer className="modal__foot organizer-foot">
-            <span>{t('organizer.selection', { categories: selected.length, videos: selectedVideos })}</span>
+            <span>{t(selected.length === 1 ? 'organizer.selectionOne' : 'organizer.selection', {
+              categories: selected.length,
+              videos: selectedVideos
+            })}</span>
             <div>
               <button type="button" className="btn" disabled={phase === 'applying'} onClick={onClose}>{t('organizer.cancel')}</button>
               <button

@@ -403,8 +403,16 @@ export interface AiCollectionSuggestion {
   postIds: string[]
 }
 
+export interface AiCollectionRoute {
+  postId: string
+  /** Catégories compatibles, de la plus pertinente à la moins pertinente. */
+  rankedRuleKeys: string[]
+}
+
 export interface AiCollectionPlan {
   suggestions: AiCollectionSuggestion[]
+  /** Alternatives conservées afin de redistribuer une catégorie exclue sans nouvelle analyse. */
+  routes: AiCollectionRoute[]
   analysedVideos: number
   unassignedVideos: number
 }
