@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ACCENTS, LANGUAGES } from '@shared/types'
 import type { LibraryInfo, PreloadState, VideoQuality } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
@@ -74,6 +74,27 @@ export function Welcome(): React.JSX.Element {
   const [folderError, setFolderError] = useState<string | null>(null)
 
   const [preload, setPreload] = useState<PreloadState | null>(null)
+  /** Décoché par défaut : préparer tout le mur peut occuper de longues minutes et beaucoup
+   *  de bande passante. C'est un choix, pas une valeur qu'on impose à quelqu'un qui
+   *  découvre l'application. */
+  const [prepareAfterSync, setPrepareAfterSync] = useState(false)
+  const sync = useStore((s) => s.sync)
+  const syncStarted = useRef(false)
+  const preparedOnce = useRef(false)
+
+  if (sync.running) syncStarted.current = true
+
+  /* La première synchronisation retient la présentation : c'est le seul moment où
+     l'utilisateur voit ce que fait l'application, et le quitter à mi-course laisse une
+     bibliothèque à moitié remplie sans qu'il comprenne pourquoi. */
+  const firstSyncRunning = sync.running
+  const firstSyncDone = syncStarted.current && !sync.running
+
+  useEffect(() => {
+    if (!firstSyncDone || !prepareAfterSync || preparedOnce.current) return
+    preparedOnce.current = true
+    void magpie.startThumbnailPreload().then(setPreload).catch(() => {})
+  }, [firstSyncDone, prepareAfterSync])
 
   useEffect(() => {
     void magpie.getLibraryInfo().then(setLibraryInfo).catch(() => {})
@@ -324,6 +345,71 @@ export function Welcome(): React.JSX.Element {
               <h2>{t('welcome.connectTitle')}</h2>
               <p className="welcome__lead welcome__lead--tight">{t('welcome.connectText')}</p>
               <Accounts emphasise />
+
+              {connectedCount > 0 ? (
+                <div className="welcome__first-sync">
+                  <div className="welcome__first-sync-state" aria-live="polite">
+                    {firstSyncRunning ? <span className="spinner" /> : null}
+                    <span>
+                      {firstSyncRunning
+                        ? t('welcome.syncRunning', { added: sync.added })
+                        : firstSyncDone
+                          ? t('welcome.syncDone', { added: sync.added })
+                          : t('welcome.syncIdle')}
+                    </span>
+                  </div>
+
+                  <label className="welcome__first-sync-choice">
+                    <input
+                      type="checkbox"
+                      checked={prepareAfterSync}
+                      onChange={(event) => setPrepareAfterSync(event.target.checked)}
+                    />
+                    <span>
+                      <strong>{t('welcome.prepareAfterSync')}</strong>
+                      <em>{t('welcome.prepareAfterSyncHint')}</em>
+                    </span>
+                  </label>
+
+                  {preload?.running ? (
+                    <>
+                      <div className="welcome__first-sync-state">
+                        <span>
+                          {t('settings.preloadRunning', {
+                            done: Math.min(preload.done, preload.total),
+                            total: preload.total
+                          })}
+                          {preload.etaMs
+                            ? ` · ${t('settings.preloadEta', { eta: formatDuration(preload.etaMs) })}`
+                            : ''}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => void magpie.cancelThumbnailPreload().then(setPreload)}
+                        >
+                          {t('settings.preloadCancel')}
+                        </button>
+                      </div>
+                      <div className="preload__bar">
+                        <span
+                          style={{
+                            width: `${preload.total > 0 ? Math.min(100, (preload.done / preload.total) * 100) : 0}%`
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : firstSyncDone && !prepareAfterSync && (preload?.pending ?? 0) > 0 ? (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => void magpie.startThumbnailPreload().then(setPreload)}
+                    >
+                      {t('settings.preloadStart')}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -353,13 +439,22 @@ export function Welcome(): React.JSX.Element {
 
           {isLast ? (
             /* Une fois un compte connecté, terminer devient l'action principale ; tant
-               qu'il n'y en a pas, c'est « Connecter » qui doit ressortir, pas la sortie. */
+               qu'il n'y en a pas, c'est « Connecter » qui doit ressortir, pas la sortie.
+               La première synchronisation, elle, retient la sortie jusqu'au bout : partir
+               au milieu laisserait une bibliothèque à moitié remplie sans explication.
+               Préparer les vignettes, en revanche, reste facultatif — on peut quitter
+               pendant, ou sans l'avoir lancé. */
             <button
               type="button"
               className={`btn ${connectedCount > 0 ? 'btn--primary' : ''}`}
+              disabled={firstSyncRunning}
               onClick={() => void finishOnboarding()}
             >
-              {connectedCount > 0 ? t('welcome.finish') : t('welcome.later')}
+              {firstSyncRunning
+                ? t('welcome.finishWaiting')
+                : connectedCount > 0
+                  ? t('welcome.finish')
+                  : t('welcome.later')}
             </button>
           ) : (
             <button
@@ -373,7 +468,9 @@ export function Welcome(): React.JSX.Element {
         </footer>
       </div>
 
-      {!isLast ? (
+      {/* Revenir en arrière pendant la synchronisation ne doit pas rouvrir une porte de
+          sortie que la dernière étape vient de fermer. */}
+      {!isLast && !firstSyncRunning ? (
         <button type="button" className="welcome__skip" onClick={() => void finishOnboarding()}>
           {t('welcome.skip')}
         </button>
