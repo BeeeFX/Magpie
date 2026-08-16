@@ -352,6 +352,12 @@ export interface MagpieApi {
   ): Promise<string>
   /** Priorise les vignettes visibles dans le cache intelligent. */
   requestThumbnails(postIds: string[]): Promise<void>
+  diagnoseMedia(
+    postId: string,
+    mediaIndex: number,
+    kind: 'image' | 'video',
+    quality: PlaybackQuality
+  ): Promise<MediaDiagnostic>
   getPreloadState(): Promise<PreloadState>
   startThumbnailPreload(): Promise<PreloadState>
   cancelThumbnailPreload(): Promise<PreloadState>
@@ -454,6 +460,27 @@ export interface PreloadState {
   /** Temps restant estimé, ou `null` tant que la cadence n'est pas assez établie pour
    *  qu'une annonce ait un sens. */
   etaMs?: number | null
+}
+
+/**
+ * Résultat d'un test de diffusion, rejoué exactement comme le fait le protocole interne.
+ * Sert à distinguer un lien expiré d'un problème de transport, que l'interface présente
+ * autrement de la même façon : une vidéo qui ne démarre pas.
+ */
+export interface MediaDiagnostic {
+  ok: boolean
+  host: string | null
+  status: number | null
+  statusText: string | null
+  contentType: string | null
+  contentLength: string | null
+  acceptRanges: string | null
+  contentEncoding: string | null
+  contentRange: string | null
+  /** Octets réellement reçus sur la première tranche : distingue un flux vide d'un refus. */
+  firstChunkBytes: number | null
+  elapsedMs: number
+  error: string | null
 }
 
 /** Une purge peut être partielle : un fichier encore ouvert résiste à sa suppression. */

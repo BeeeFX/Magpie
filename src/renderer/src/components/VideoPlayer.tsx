@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useT } from '../store'
 import { IconCheck, IconContract, IconExpand, IconPlay, IconSettings, IconVolume } from './Icons'
-import type { VideoQuality } from '@shared/types'
+import type { MediaDiagnostic, VideoQuality } from '@shared/types'
 import { resolvePreferredQuality } from '@shared/quality'
 import { magpie } from '../bridge'
 
@@ -62,6 +62,9 @@ export function VideoPlayer({
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
   const [sourceError, setSourceError] = useState(false)
   const [mediaLoading, setMediaLoading] = useState(true)
+  const [stalled, setStalled] = useState(false)
+  const [diagnostic, setDiagnostic] = useState<MediaDiagnostic | null>(null)
+  const [diagnosing, setDiagnosing] = useState(false)
   const qualitySignature = qualities.join('|')
 
   useEffect(() => {
@@ -76,6 +79,8 @@ export function VideoPlayer({
     setScrubValue(null)
     setSourceError(false)
     setMediaLoading(true)
+    setStalled(false)
+    setDiagnostic(null)
     setQualityBusy(true)
     void magpie
       .getMediaPlaybackUrl(postId, mediaIndex, 'video', preferred)
@@ -95,6 +100,23 @@ export function VideoPlayer({
       cancelled = true
     }
   }, [mediaIndex, playbackQuality, postId, qualitySignature, src])
+
+  /* Un lecteur qui tourne indéfiniment n'apprend rien à personne. Passé ce délai, on
+     l'admet et on propose de comprendre pourquoi plutôt que de faire patienter. */
+  useEffect(() => {
+    if (!mediaLoading || sourceError) return
+    const timer = setTimeout(() => setStalled(true), 12000)
+    return () => clearTimeout(timer)
+  }, [mediaLoading, sourceError, activeSrc])
+
+  const diagnose = async (): Promise<void> => {
+    setDiagnosing(true)
+    try {
+      setDiagnostic(await magpie.diagnoseMedia(postId, mediaIndex, 'video', quality))
+    } finally {
+      setDiagnosing(false)
+    }
+  }
 
   useEffect(() => {
     if (!qualityMenuOpen) return
@@ -225,13 +247,33 @@ export function VideoPlayer({
         }}
       />
 
-      {mediaLoading && !sourceError ? (
+      {mediaLoading && !sourceError && !stalled ? (
         <div className="player__loading" aria-live="polite">
           <span className="spinner" />
           <span>{t('player.loading')}</span>
         </div>
       ) : null}
-      {sourceError ? <div className="player__error">{t('player.streamError')}</div> : null}
+
+      {sourceError || stalled ? (
+        <div className="player__error" role="alert">
+          <span>{t(stalled && !sourceError ? 'player.stalled' : 'player.streamError')}</span>
+          {diagnostic ? (
+            <code className="player__diagnostic">
+              {diagnostic.error
+                ? diagnostic.error
+                : `${diagnostic.host ?? '?'} · HTTP ${diagnostic.status ?? '?'} ${diagnostic.statusText ?? ''} · ` +
+                  `${diagnostic.contentType ?? 'type ?'} · ${diagnostic.firstChunkBytes ?? 0} o reçus · ` +
+                  `ranges ${diagnostic.acceptRanges ?? 'non annoncés'}${
+                    diagnostic.contentEncoding ? ` · encodage ${diagnostic.contentEncoding}` : ''
+                  } · ${diagnostic.elapsedMs} ms`}
+            </code>
+          ) : (
+            <button type="button" className="btn" disabled={diagnosing} onClick={() => void diagnose()}>
+              {t(diagnosing ? 'player.diagnosing' : 'player.diagnose')}
+            </button>
+          )}
+        </div>
+      ) : null}
 
       <div className="player__bar">
         <button type="button" className="player__btn" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>

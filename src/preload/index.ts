@@ -16,6 +16,7 @@ import type {
   LibraryStats,
   MagpieApi,
   MagpieEvents,
+  MediaDiagnostic,
   OrganizerApplicationSummary,
   OrganizerProgress,
   OrganizerUndoResult,
@@ -85,6 +86,13 @@ const api: MagpieApi = {
   ): Promise<string> => ipcRenderer.invoke('media:playbackUrl', postId, mediaIndex, kind, quality),
   requestThumbnails: (postIds: string[]): Promise<void> =>
     ipcRenderer.invoke('media:requestThumbnails', postIds),
+  diagnoseMedia: (
+    postId: string,
+    mediaIndex: number,
+    kind: 'image' | 'video',
+    quality: PlaybackQuality
+  ): Promise<MediaDiagnostic> =>
+    ipcRenderer.invoke('media:diagnose', postId, mediaIndex, kind, quality),
   getPreloadState: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadState'),
   startThumbnailPreload: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadStart'),
   cancelThumbnailPreload: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadCancel'),

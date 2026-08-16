@@ -11,6 +11,7 @@ import type {
   LabelColor,
   LibraryInfo,
   LibraryMoveProgress,
+  MediaDiagnostic,
   Platform,
   PostQuery,
   PlaybackQuality,
@@ -53,6 +54,7 @@ import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
 import { getCacheUsage, resetCacheUsage, VIDEO_NAME_PATTERN } from './media/cache'
 import { createRemoteMediaUrl } from './media/remote'
+import { sessionFor, userAgent } from './adapters/session'
 import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
@@ -565,6 +567,114 @@ export function registerIpc({
       }
 
       return createRemoteMediaUrl({ postId, mediaIndex: idx, kind, quality })
+    }
+  )
+
+  /**
+   * Rejoue exactement ce que fait le protocole `magpie://remote`, mais en rapportant ce
+   * qu'il obtient. Une vidéo qui ne démarre pas peut cacher un lien expiré, un refus du
+   * CDN ou un transport qui ne délivre rien : de l'extérieur les trois se ressemblent, et
+   * seule la réponse réelle permet de trancher.
+   */
+  ipcMain.handle(
+    'media:diagnose',
+    async (
+      _event,
+      postId: string,
+      idx: number,
+      kind: 'image' | 'video',
+      quality: PlaybackQuality
+    ): Promise<MediaDiagnostic> => {
+      const started = Date.now()
+      const empty = {
+        host: null,
+        status: null,
+        statusText: null,
+        contentType: null,
+        contentLength: null,
+        acceptRanges: null,
+        contentEncoding: null,
+        contentRange: null,
+        firstChunkBytes: null
+      }
+      if (typeof postId !== 'string' || postId.length > 300 || !Number.isInteger(idx) || idx < 0) {
+        return { ok: false, ...empty, elapsedMs: 0, error: 'Média invalide' }
+      }
+
+      const media = playbackMediaSource(postId, idx, kind, quality)
+      if (!media?.source || !/^https?:\/\//i.test(media.source)) {
+        return {
+          ok: false,
+          ...empty,
+          elapsedMs: Date.now() - started,
+          error: 'Aucune source en ligne enregistrée pour ce média.'
+        }
+      }
+
+      const host = (() => {
+        try {
+          return new URL(media.source).host
+        } catch {
+          return null
+        }
+      })()
+      const origin =
+        media.platform === 'instagram'
+          ? 'https://www.instagram.com/'
+          : media.platform === 'x'
+            ? 'https://x.com/'
+            : 'https://www.reddit.com/'
+
+      try {
+        const remote = await sessionFor(media.platform).fetch(media.source, {
+          method: 'GET',
+          headers: new Headers({
+            Accept: kind === 'video' ? 'video/*,application/octet-stream,*/*;q=0.8' : 'image/*,*/*;q=0.8',
+            Referer: origin,
+            'User-Agent': userAgent(),
+            // Les premiers octets suffisent : on mesure le transport, on ne télécharge pas.
+            Range: 'bytes=0-65535'
+          }),
+          credentials: 'include',
+          redirect: 'follow'
+        })
+
+        let firstChunkBytes: number | null = null
+        try {
+          const reader = remote.body?.getReader()
+          if (reader) {
+            const { value } = await reader.read()
+            firstChunkBytes = value?.byteLength ?? 0
+            await reader.cancel()
+          }
+        } catch (error) {
+          firstChunkBytes = null
+          console.warn('[magpie] Diagnostic média : flux illisible', error)
+        }
+
+        return {
+          ok: remote.status >= 200 && remote.status < 300 && (firstChunkBytes ?? 0) > 0,
+          host,
+          status: remote.status,
+          statusText: remote.statusText,
+          contentType: remote.headers.get('content-type'),
+          contentLength: remote.headers.get('content-length'),
+          acceptRanges: remote.headers.get('accept-ranges'),
+          contentEncoding: remote.headers.get('content-encoding'),
+          contentRange: remote.headers.get('content-range'),
+          firstChunkBytes,
+          elapsedMs: Date.now() - started,
+          error: null
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          ...empty,
+          host,
+          elapsedMs: Date.now() - started,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      }
     }
   )
 

@@ -4069,6 +4069,22 @@ html.window-is-moving .app *::after {
   text-align: center;
   transform: translate(-50%, -50%);
   backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Le relevé technique se lit et se recopie : c'est ce qu'on colle dans un rapport. */
+.player__diagnostic {
+  max-width: 100%;
+  color: rgb(255 255 255 / 0.62);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .player__loading,
