@@ -1,7 +1,7 @@
 import { net } from 'electron'
 import { createWriteStream } from 'node:fs'
 import { rename, rm } from 'node:fs/promises'
-import { Transform, type Readable, type TransformCallback } from 'node:stream'
+import { Readable, Transform, type TransformCallback } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { Platform } from '@shared/types'
 import { cookieHeader, sessionFor, userAgent } from './session'
@@ -283,6 +283,68 @@ export async function downloadMediaToFile(
     })
 
     req.on('error', (error) => fail(error))
+    req.end()
+  })
+}
+
+export interface MediaStream {
+  status: number
+  statusText: string
+  headers: Record<string, string | string[]>
+  body: ReadableStream<Uint8Array> | null
+}
+
+/**
+ * Diffuse un média par la session de sa plateforme, en flux.
+ *
+ * Passe volontairement par `net.request` et non par `session.fetch` : la seconde renvoyait
+ * bien une réponse valide — 206 et `video/mp4` pour X — dont le corps ne délivrait jamais
+ * un octet, laissant le lecteur tourner indéfiniment. Le téléchargement des vignettes, lui,
+ * a toujours fonctionné par ce chemin ; c'était la seule différence entre les deux.
+ */
+export function streamMedia(
+  platform: Platform,
+  url: string,
+  options: { method?: 'GET' | 'HEAD'; range?: string | null; accept?: string; timeoutMs?: number } = {}
+): Promise<MediaStream> {
+  const origin =
+    platform === 'instagram'
+      ? 'https://www.instagram.com/'
+      : platform === 'x'
+        ? 'https://x.com/'
+        : 'https://www.reddit.com/'
+
+  const method = options.method ?? 'GET'
+  const req = net.request({ method, url, session: sessionFor(platform), useSessionCookies: true })
+  req.setHeader('User-Agent', userAgent())
+  req.setHeader('Accept', options.accept ?? 'video/*,application/octet-stream,*/*;q=0.8')
+  req.setHeader('Referer', origin)
+  if (options.range) req.setHeader('Range', options.range)
+
+  return new Promise<MediaStream>((resolve, reject) => {
+    // Le délai ne couvre que l'établissement de la réponse : une fois les en-têtes reçus,
+    // un long clip doit pouvoir s'écouler sans qu'on lui coupe la parole.
+    const timeout = setTimeout(() => {
+      req.abort()
+      reject(new Error(`Délai dépassé sur ${url}`))
+    }, options.timeoutMs ?? 30000)
+
+    req.on('response', (response) => {
+      clearTimeout(timeout)
+      resolve({
+        status: response.statusCode,
+        statusText: response.statusMessage ?? '',
+        headers: response.headers,
+        body:
+          method === 'HEAD'
+            ? null
+            : (Readable.toWeb(response as unknown as Readable) as ReadableStream<Uint8Array>)
+      })
+    })
+    req.on('error', (error) => {
+      clearTimeout(timeout)
+      reject(error)
+    })
     req.end()
   })
 }

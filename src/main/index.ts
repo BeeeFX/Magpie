@@ -36,7 +36,7 @@ import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
 import { parseRemoteMediaUrl } from './media/remote'
-import { sessionFor, userAgent } from './adapters/session'
+import { streamMedia } from './adapters/http'
 
 const isDev = !app.isPackaged
 const APP_ID = 'tv.electrictheatre.magpie'
@@ -280,41 +280,33 @@ function registerMediaProtocol(): void {
         return new Response('Media unavailable', { status: 404 })
       }
 
-      const origin =
-        media.platform === 'instagram'
-          ? 'https://www.instagram.com/'
-          : media.platform === 'x'
-            ? 'https://x.com/'
-            : 'https://www.reddit.com/'
-      const headers = new Headers({
-        Accept:
-          kind === 'video'
-            ? 'video/*,application/octet-stream,*/*;q=0.8'
-            : 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        Referer: origin,
-        'User-Agent': userAgent(),
-        'Cache-Control': 'no-store'
-      })
-      const range = request.headers.get('range')
-      if (range) headers.set('Range', range)
-
       try {
-        const remote = await sessionFor(media.platform).fetch(media.source, {
+        const remote = await streamMedia(media.platform, media.source, {
           method: request.method === 'HEAD' ? 'HEAD' : 'GET',
-          headers,
-          credentials: 'include',
-          redirect: 'follow'
+          range: request.headers.get('range'),
+          accept:
+            kind === 'video'
+              ? 'video/*,application/octet-stream,*/*;q=0.8'
+              : 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
         })
-        const responseHeaders = new Headers(remote.headers)
+
+        const responseHeaders = new Headers()
+        for (const [name, value] of Object.entries(remote.headers)) {
+          const lower = name.toLowerCase()
+          // Les cookies de la plateforme n'ont rien à faire dans le renderer, et le corps
+          // arrive déjà décodé : réannoncer son encodage ferait décompresser deux fois.
+          if (lower.startsWith('set-cookie') || lower === 'content-encoding') continue
+          responseHeaders.set(name, Array.isArray(value) ? value.join(', ') : value)
+        }
         responseHeaders.set('Cache-Control', 'no-store')
-        responseHeaders.delete('set-cookie')
-        responseHeaders.delete('set-cookie2')
-        return new Response(request.method === 'HEAD' ? null : remote.body, {
+
+        return new Response(remote.body, {
           status: remote.status,
           statusText: remote.statusText,
           headers: responseHeaders
         })
-      } catch {
+      } catch (error) {
+        console.warn('[magpie] Diffusion distante impossible', error)
         return new Response('Remote media unavailable', { status: 502 })
       }
     }
