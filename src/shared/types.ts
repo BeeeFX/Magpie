@@ -341,7 +341,7 @@ export interface MagpieApi {
   checkForUpdates(): Promise<UpdateState>
   installUpdate(): Promise<void>
   setWindowFullscreen(enabled: boolean): Promise<boolean>
-  clearMediaCache(): Promise<void>
+  clearMediaCache(): Promise<ClearCacheResult>
   openDataFolder(): Promise<void>
   chooseLibraryFolder(): Promise<{ moved: boolean; path: string }>
   getMediaPlaybackUrl(
@@ -438,6 +438,12 @@ export interface AiCollectionApplyResult {
   collections: number
   added: number
   alreadyThere: number
+}
+
+/** Une purge peut être partielle : un fichier encore ouvert résiste à sa suppression. */
+export interface ClearCacheResult {
+  removed: number
+  failed: number
 }
 
 /** Dernier classement appliqué, tel qu'on peut le proposer à l'annulation. */

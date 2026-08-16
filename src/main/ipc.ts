@@ -5,6 +5,7 @@ import { join, relative, resolve, sep } from 'node:path'
 import type {
   AccountInfo,
   AiCollectionApplyResult,
+  ClearCacheResult,
   AiCollectionChoice,
   AiCollectionMemoryOptions,
   LabelColor,
@@ -36,6 +37,7 @@ import {
   recordOrganizerApplication,
   rememberOrganizerRules,
   removeFromCollection,
+  resetCachedMediaPaths,
   revertOrganizerApplication,
   removeTag,
   setCollectionColor,
@@ -373,7 +375,7 @@ export function registerIpc({
     return enabled === true
   })
 
-  ipcMain.handle('library:clearCache', async () => {
+  ipcMain.handle('library:clearCache', async (): Promise<ClearCacheResult> => {
     // Les métadonnées, tags et collections survivent toujours à une purge de médias :
     // on efface les fichiers et on remet les références à zéro, le cache se reconstruira
     // au prochain démarrage.
@@ -381,18 +383,33 @@ export function registerIpc({
     try {
       const dir = mediaDir()
       const entries = await readdir(dir)
+      const survivors: string[] = []
       let cursor = 0
+      let removed = 0
       const worker = async (): Promise<void> => {
         while (cursor < entries.length) {
           const entry = entries[cursor++]
-          await rm(join(dir, entry), { force: true })
+          try {
+            // `force` n'avale qu'un fichier déjà absent. Sous Windows, un clip encore ouvert
+            // — celui qu'on est en train de lire — refuse d'être supprimé, et laisser cette
+            // erreur remonter interrompait toute la purge avant même la remise à zéro.
+            await rm(join(dir, entry), { force: true, recursive: true })
+            removed++
+          } catch {
+            survivors.push(entry)
+          }
         }
       }
       await Promise.all(Array.from({ length: Math.min(16, entries.length) }, worker))
-      getDb().exec(
-        "UPDATE media SET thumb_path = NULL, thumb_attempts = 0, video_path = NULL, video_cache_state = 'pending', video_attempts = 0"
-      )
-      resetCacheUsage(0)
+
+      resetCachedMediaPaths(survivors)
+      // Un fichier verrouillé fausserait un compteur remis à zéro : on force un nouvel
+      // inventaire plutôt que d'affirmer que le dossier est vide.
+      resetCacheUsage(survivors.length > 0 ? null : 0)
+      if (survivors.length > 0) {
+        console.warn(`[magpie] Purge du cache : ${survivors.length} fichier(s) encore verrouillé(s).`)
+      }
+      return { removed, failed: survivors.length }
     } finally {
       resumeMedia()
     }

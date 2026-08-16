@@ -91,6 +91,7 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
 
   const [info, setInfo] = useState<LibraryInfo | null>(null)
   const [clearing, setClearing] = useState(false)
+  const [cacheError, setCacheError] = useState<string | null>(null)
   const [aiKey, setAiKey] = useState('')
   const [aiKeyStored, setAiKeyStored] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
@@ -180,10 +181,21 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
 
   const clearCache = async (): Promise<void> => {
     setClearing(true)
-    await magpie.clearMediaCache()
-    setInfo(await magpie.getLibraryInfo())
-    await refresh()
-    setClearing(false)
+    setCacheError(null)
+    try {
+      const result = await magpie.clearMediaCache()
+      // Un fichier encore ouvert — le clip qu'on vient de regarder — résiste à sa
+      // suppression. Le dire vaut mieux que d'afficher une purge complète qui ne l'est pas.
+      if (result.failed > 0) setCacheError(t('settings.cachePartial', { count: result.failed }))
+      setInfo(await magpie.getLibraryInfo())
+      await refresh()
+    } catch (reason) {
+      setCacheError(reason instanceof Error ? reason.message : t('settings.cacheError'))
+    } finally {
+      // Sans ce `finally`, la moindre erreur laissait le bouton désactivé sur « Purge… »
+      // définitivement, sans le moindre message.
+      setClearing(false)
+    }
   }
 
   const moveLibrary = async (): Promise<void> => {
@@ -626,12 +638,21 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
               <button
                 type="button"
                 className="btn"
-                onClick={() => void clearCache()}
+                /* Le geste le plus destructeur de cet écran partait au premier clic, alors
+                   que « Tout revérifier », qui ne supprime rien, demandait confirmation.
+                   L'avertissement dit ce qui va réellement se passer, pas seulement que
+                   c'est irréversible. */
+                onClick={() => {
+                  if (window.confirm(t('settings.clearCacheConfirm'))) void clearCache()
+                }}
                 disabled={clearing || choosingLibrary || (libraryMove !== null && libraryMove.phase !== 'error')}
               >
                 {clearing ? t('settings.clearing') : t('settings.clearCache')}
               </button>
             </div>
+            {cacheError ? (
+              <p className="setting__error" role="alert">{cacheError}</p>
+            ) : null}
             <p className="setting__note">{t('settings.cacheNote')}</p>
           </section>
 

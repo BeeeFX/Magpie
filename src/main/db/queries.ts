@@ -1516,6 +1516,33 @@ export function forgetThumbnailPaths(paths: string[]): void {
     .run(...clean)
 }
 
+/**
+ * Remet à zéro les références au cache média, en épargnant les fichiers réellement encore
+ * présents. Une purge peut être partielle — sous Windows, un clip en cours de lecture
+ * refuse d'être supprimé — et effacer sa référence en laisserait un orphelin sur le disque
+ * qu'on retéléchargerait pour rien.
+ */
+export function resetCachedMediaPaths(survivors: string[] = []): void {
+  const kept = [...new Set(survivors)].filter(Boolean)
+  const slots = kept.map(() => '?').join(',')
+  const db = getDb()
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE media SET thumb_path = NULL, thumb_attempts = 0
+        WHERE thumb_path IS NOT NULL${kept.length > 0 ? ` AND thumb_path NOT IN (${slots})` : ''}`
+    ).run(...kept)
+    db.prepare(
+      `UPDATE media SET video_path = NULL, video_cache_state = 'pending', video_attempts = 0
+        WHERE video_path IS NOT NULL${kept.length > 0 ? ` AND video_path NOT IN (${slots})` : ''}`
+    ).run(...kept)
+    // Les clips restés en « skipped » faute de place doivent repartir en file d'attente :
+    // la purge vient précisément de libérer de l'espace.
+    db.prepare(
+      "UPDATE media SET video_cache_state = 'pending' WHERE video_cache_state = 'skipped'"
+    ).run()
+  })()
+}
+
 export function markThumbnailFailure(postId: string, idx: number): void {
   getDb()
     .prepare(

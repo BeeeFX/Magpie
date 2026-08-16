@@ -1,5 +1,7 @@
+import type { VideoQuality } from '../src/shared/types'
 import { parseByteRange } from '../src/main/media/range'
 import { createRemoteMediaUrl, parseRemoteMediaUrl } from '../src/main/media/remote'
+import { resolvePreferredQuality } from '../src/shared/quality'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Échec : ${message}`)
@@ -32,6 +34,36 @@ assert(
 assert(
   parseRemoteMediaUrl('magpie://remote/media?post=x&index=-1&kind=video&quality=720p') === null,
   'une URL de streaming invalide est refusée'
+)
+
+/*
+ * Qualité de lecture préférée. Les plateformes ne servent que ce qu'elles ont : « source »
+ * n'est étiquetée qu'au-delà de 1080p, donc presque jamais. Exiger la correspondance exacte
+ * faisait silencieusement retomber le réglage sur « Auto ».
+ */
+console.log('\nQualité de lecture préférée')
+const near = (preference: Parameters<typeof resolvePreferredQuality>[0], available: VideoQuality[]) =>
+  resolvePreferredQuality(preference, available)
+
+assert(near('auto', ['480p', '720p']) === 'auto', '« Auto » reste « Auto »')
+assert(near('720p', ['480p', '720p']) === '720p', 'une définition disponible est respectée')
+assert(
+  near('source', ['480p', '720p']) === '720p',
+  '« Source » prend la meilleure définition réellement offerte'
+)
+assert(
+  near('1080p', ['480p', '720p']) === '720p',
+  'une définition absente redescend d’un cran plutôt que d’abandonner'
+)
+assert(
+  near('480p', ['720p', '1080p']) === '720p',
+  'sous le plafond demandé, la plus modeste disponible est servie'
+)
+assert(near('source', ['source']) === 'source', 'une vraie source est reconnue')
+assert(near('720p', []) === 'auto', 'sans aucune variante, on laisse le lecteur décider')
+assert(
+  near('source', ['1080p', '480p', '720p']) === '1080p',
+  'l’ordre de la liste reçue n’influence pas le choix'
 )
 
 console.log('\nTout est vert.')

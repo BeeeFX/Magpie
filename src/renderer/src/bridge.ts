@@ -214,7 +214,7 @@ const previewApi: MagpieApi = {
   }),
   installUpdate: async () => {},
   setWindowFullscreen: async () => false,
-  clearMediaCache: async () => {},
+  clearMediaCache: async () => ({ removed: 0, failed: 0 }),
   openDataFolder: async () => {},
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),
   getMediaPlaybackUrl: async () => '',

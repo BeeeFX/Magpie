@@ -283,9 +283,14 @@ const fr = {
   'settings.libraryMove.done': 'Terminé — redémarrage de Magpie…',
   'settings.clearCache': 'Vider le cache',
   'settings.clearing': 'Purge…',
+  'settings.cachePartial':
+    '{count} fichier(s) étaient encore ouverts et n’ont pas pu être supprimés. Refermez la vue détaillée puis réessayez.',
+  'settings.cacheError': 'Le cache n’a pas pu être vidé.',
+  'settings.clearCacheConfirm':
+    'Vider le cache supprime toutes les vignettes et tous les clips téléchargés.\n\nElles se régénèrent tant que le lien de la plateforme est encore valide. Pour les posts plus anciens, il faudra lancer « Tout revérifier » sur chaque compte pour les retrouver.\n\nVos posts, tags, favoris et collections ne sont pas touchés.',
   'settings.replayTour': 'Revoir la présentation',
   'settings.cacheNote':
-    'Vider le cache conserve les posts, tags et favoris. Les vignettes se régénèrent ; en mode hors-ligne, les clips se remplissent à nouveau progressivement.',
+    'Vider le cache conserve les posts, tags et favoris. Les vignettes se régénèrent tant que le lien de la plateforme est encore valide — sur une bibliothèque ancienne, une resynchronisation complète du compte peut être nécessaire pour les renouveler.',
   'settings.demo': 'Données de démonstration',
   'settings.demoHint':
     'Une bibliothèque fictive de 139 posts, pour essayer l’interface sans connecter de compte. Jamais chargée automatiquement.',
@@ -662,9 +667,14 @@ const en: Record<TranslationKey, string> = {
   'settings.libraryMove.done': 'Done — restarting Magpie…',
   'settings.clearCache': 'Clear cache',
   'settings.clearing': 'Clearing…',
+  'settings.cachePartial':
+    '{count} file(s) were still open and could not be deleted. Close the detail view and try again.',
+  'settings.cacheError': 'The cache could not be cleared.',
+  'settings.clearCacheConfirm':
+    'Clearing the cache deletes every thumbnail and downloaded clip.\n\nThey regenerate as long as the platform link is still valid. For older posts you will need to run “Check all history” on each account to get them back.\n\nYour posts, tags, favourites and collections are untouched.',
   'settings.replayTour': 'Replay the tour',
   'settings.cacheNote':
-    'Clearing the cache keeps posts, tags and favourites. Thumbnails regenerate; in offline mode, clips gradually fill again.',
+    'Clearing the cache keeps posts, tags and favourites. Thumbnails regenerate as long as the platform link is still valid — on an older library, a full account re-sync may be needed to renew them.',
   'settings.guide': 'Help and getting started',
   'settings.guideHint': 'Review Magpie\'s main features and account connection.',
   'settings.updates': 'Updates',

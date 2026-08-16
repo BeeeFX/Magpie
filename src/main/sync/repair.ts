@@ -1,4 +1,5 @@
-import { getDb } from '../db'
+import { readdirSync } from 'node:fs'
+import { getDb, mediaDir } from '../db'
 
 /**
  * Réparations de données déjà en base.
@@ -11,6 +12,65 @@ import { getDb } from '../db'
 
 const MAX_VIDEO_BITRATE = 2_500_000
 const MAX_VIDEO_WIDTH = 720
+
+/**
+ * Réconcilie la base avec ce qui reste réellement dans le dossier média.
+ *
+ * Une référence qui pointe vers un fichier disparu est le pire des deux mondes : la carte
+ * croit avoir sa vignette, donc elle n'affiche ni image ni indicateur d'attente — juste son
+ * aplat de couleur — et la file de préparation ne la reprendra jamais, puisqu'elle ne
+ * retient que les médias dont le chemin est vide. Un mur entier pouvait rester ainsi, sans
+ * qu'aucune synchronisation n'y change quoi que ce soit.
+ *
+ * Le cas venait d'une purge de cache interrompue : un seul fichier verrouillé par Windows
+ * suffisait à supprimer les autres sans jamais remettre les références à zéro.
+ */
+export function repairMissingCacheFiles(): { thumbs: number; videos: number } {
+  let present: Set<string>
+  try {
+    present = new Set(readdirSync(mediaDir()))
+  } catch {
+    // Bibliothèque sur un disque absent : on ne touche à rien plutôt que de tout effacer.
+    return { thumbs: 0, videos: 0 }
+  }
+
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `SELECT post_id, idx, thumb_path, video_path FROM media
+        WHERE thumb_path IS NOT NULL OR video_path IS NOT NULL`
+    )
+    .all() as {
+    post_id: string
+    idx: number
+    thumb_path: string | null
+    video_path: string | null
+  }[]
+
+  const clearThumb = db.prepare(
+    'UPDATE media SET thumb_path = NULL, thumb_attempts = 0 WHERE post_id = ? AND idx = ?'
+  )
+  const clearVideo = db.prepare(
+    `UPDATE media SET video_path = NULL, video_cache_state = 'pending', video_attempts = 0
+      WHERE post_id = ? AND idx = ?`
+  )
+
+  let thumbs = 0
+  let videos = 0
+  db.transaction(() => {
+    for (const row of rows) {
+      if (row.thumb_path && !present.has(row.thumb_path)) {
+        clearThumb.run(row.post_id, row.idx)
+        thumbs++
+      }
+      if (row.video_path && !present.has(row.video_path)) {
+        clearVideo.run(row.post_id, row.idx)
+        videos++
+      }
+    }
+  })()
+  return { thumbs, videos }
+}
 
 interface XVariant {
   bitrate?: number

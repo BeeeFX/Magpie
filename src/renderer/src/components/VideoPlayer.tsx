@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { useT } from '../store'
 import { IconCheck, IconContract, IconExpand, IconPlay, IconSettings, IconVolume } from './Icons'
 import type { VideoQuality } from '@shared/types'
+import { resolvePreferredQuality } from '@shared/quality'
 import { magpie } from '../bridge'
 
 interface Props {
@@ -65,9 +66,10 @@ export function VideoPlayer({
 
   useEffect(() => {
     let cancelled = false
-    const preferred = playbackQuality !== 'auto' && qualities.includes(playbackQuality)
-      ? playbackQuality
-      : 'auto'
+    // Le réglage est un plafond, pas une correspondance exacte : voir
+    // `resolvePreferredQuality`. « Source » retombait sinon toujours sur « Auto », puisque
+    // aucune variante ne porte cette étiquette en dessous de 1080p.
+    const preferred = resolvePreferredQuality(playbackQuality, qualities)
     setQuality(preferred)
     setTime(0)
     setDuration(0)

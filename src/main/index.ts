@@ -27,7 +27,7 @@ import { backfillRuleTags } from './tagging/rules'
 import { processPendingMedia, THUMB_NAME_PATTERN, touchCachedThumbnails, VIDEO_NAME_PATTERN } from './media/cache'
 import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
-import { repairOversizedVideos } from './sync/repair'
+import { repairMissingCacheFiles, repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
 import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
 import type { SyncPhase } from '@shared/types'
@@ -472,6 +472,15 @@ async function bootstrap(): Promise<void> {
 
   const repaired = repairMissingSyncDates()
   if (repaired > 0) console.log(`[magpie] Date de synchronisation réparée : ${repaired} compte(s).`)
+
+  // Doit précéder la file média : c'est ce qui remet en attente les vignettes dont le
+  // fichier a disparu, et qu'aucune synchronisation ne pourrait rattraper autrement.
+  const missing = repairMissingCacheFiles()
+  if (missing.thumbs > 0 || missing.videos > 0) {
+    console.log(
+      `[magpie] Cache réconcilié : ${missing.thumbs} vignette(s) et ${missing.videos} clip(s) à refaire.`
+    )
+  }
 
   const backfilled = backfillRuleTags()
   if (backfilled.posts > 0) {
