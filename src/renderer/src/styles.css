@@ -2149,28 +2149,39 @@ html.window-is-moving .app *::after {
   text-align: center;
 }
 
+/* Le dégradé glisse à l'intérieur de la tuile plutôt que de la traverser : une carte
+   montée à n'importe quel instant du cycle montre toujours quelque chose. La version
+   précédente translatait la bande de -100 % à +100 %, donc elle passait le plus clair de
+   son temps hors cadre — et le défilement, qui démonte et remonte les cartes, remettait
+   l'animation à zéro avant qu'on ait pu la voir. */
 @keyframes media-pending-shine {
-  to { transform: translateX(100%); }
+  from { background-position: 140% 0; }
+  to { background-position: -140% 0; }
 }
 
 /* Une carte en attente doit se voir respirer. Sans cela, un mur qui prépare ses vignettes
    est indistinguable d'un mur cassé : rien ne bouge, rien n'indique qu'un travail est en
    cours. Le balayage est déclaré ici plutôt que sur la pastille centrale pour rester lisible
    même sur une tuile de cent pixels, où le texte ne tient pas. */
+/* Une carte en attente doit se distinguer du fond au premier regard : c'est la seule chose
+   qui sépare « ça travaille » de « c'est cassé ». */
+.card__media.is-pending {
+  background: color-mix(in srgb, hsl(var(--tile-hue, 250) 45% 55%) 26%, var(--field));
+}
+
 .card__media.is-pending::after {
   content: '';
   position: absolute;
   inset: 0;
-  /* Assez marqué pour se voir sur une tuile sombre de cent pixels : à 7 % le balayage
-     existait mais restait invisible, ce qui revenait à ne rien afficher du tout. */
-  background: linear-gradient(
+  background-image: linear-gradient(
     100deg,
-    transparent 15%,
-    color-mix(in srgb, var(--text) 18%, transparent) 50%,
-    transparent 85%
+    transparent 0%,
+    color-mix(in srgb, var(--text) 20%, transparent) 50%,
+    transparent 100%
   );
-  transform: translateX(-100%);
-  animation: media-pending-shine 1.25s var(--ease) infinite;
+  background-size: 240% 100%;
+  background-repeat: no-repeat;
+  animation: media-pending-shine 1.5s linear infinite;
   pointer-events: none;
 }
 

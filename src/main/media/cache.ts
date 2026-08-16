@@ -345,7 +345,14 @@ export async function processPendingMedia({
   thumbnailsOnly = false,
   coverOnly = false
 }: ProcessMediaOptions = {}): Promise<CacheProgress & { hasMore: boolean }> {
-  const thumbnailBatch = 360
+  /**
+   * Un lot demandé par la grille reste court, parce que la file ne se réordonne qu'entre
+   * deux lots : avec trois cent soixante vignettes d'avance, elle continuait de préparer
+   * ce que l'utilisateur avait déjà dépassé pendant que son écran restait vide. Court, le
+   * lot rend la main assez souvent pour que la position courante reprenne la main.
+   * La passe de fond, elle, n'a personne à suivre et garde de gros lots.
+   */
+  const thumbnailBatch = requestedPostIds ? 48 : 360
   const videoBatch = 120
   const thumbRows = requestedPostIds
     ? pendingThumbnailsForPosts(requestedPostIds, thumbnailBatch)
@@ -355,7 +362,9 @@ export async function processPendingMedia({
     !thumbnailsOnly && readSettings().mediaStorageMode === 'offline'
       ? pendingVideos(videoBatch).map((v) => ({ type: 'video' as const, ...v }))
       : []
-  const hasMore = !requestedPostIds && (thumbs.length === thumbnailBatch || videos.length === videoBatch)
+  // Un lot plein signifie qu'il en reste, y compris pour une demande de la grille : c'est
+  // à l'appelant de relancer, en réordonnant d'abord sur la position courante.
+  const hasMore = thumbs.length === thumbnailBatch || videos.length === videoBatch
   // Trois affiches puis un clip : auparavant, les milliers de vignettes bloquaient toute
   // la file vidéo jusqu'à leur achèvement. L'entrelacement fait progresser les deux sans
   // laisser les gros fichiers ralentir l'apparition du mur.

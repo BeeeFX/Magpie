@@ -495,13 +495,20 @@ async function drainMediaQueue(): Promise<void> {
         // faisaient attendre dix secondes pour une soixantaine de cartes visibles. Les
         // demandes de la grille passent donc large ; la passe de fond reste discrète pour
         // ne pas leur voler la bande passante.
-        concurrency: sweeping ? 3 : 6,
+        concurrency: sweeping ? 3 : 8,
         shouldPause: () => mediaPaused,
         signal: mediaAbortController.signal,
         requestedPostIds: sweeping || settings.mediaStorageMode !== 'stream' ? undefined : requested,
         thumbnailsOnly: sweeping,
         coverOnly: sweeping
       })
+      // Le lot est volontairement court : ce qui n'a pas été traité revient dans la file,
+      // mais *derrière* les identifiants arrivés entre-temps. Un Set conserve son ordre
+      // d'insertion, si bien que la position courante repasse naturellement devant ce
+      // qu'on a déjà dépassé.
+      if (result.hasMore && !sweeping) {
+        for (const id of requested) requestedThumbnailPostIds.add(id)
+      }
       if (preloadRunning) {
         refreshPreloadProgress()
         // Une passe qui ne rend plus rien signifie qu'il ne reste que des médias déjà
