@@ -1,5 +1,15 @@
 import { app } from 'electron'
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import {
@@ -57,25 +67,177 @@ export function mediaDir(): string {
 
 export function getDb(): Database.Database {
   if (db) return db
+  db = openLibrary()
+  return db
+}
 
-  db = new Database(join(dataDir(), 'magpie.db'))
+/**
+ * Ouvre la bibliothèque, et la remet debout si elle ne s'ouvre pas.
+ *
+ * Un cas réel : le fichier principal s'est retrouvé remplacé par une base bien plus
+ * ancienne, restée à côté d'un journal appartenant à la vraie. SQLite refuse alors les
+ * deux ensemble, et l'application n'avait pour toute réponse qu'une boîte d'erreur et un
+ * arrêt — sans aucun moyen de s'en sortir depuis l'interface, alors qu'une sauvegarde
+ * intacte dormait dans le même dossier.
+ */
+function openLibrary(): Database.Database {
+  const path = join(dataDir(), 'magpie.db')
+  try {
+    return openAndMigrate(path)
+  } catch (error) {
+    console.error('[magpie] Bibliothèque illisible :', error)
+    quarantineLibrary(path)
+    const restored = restoreNewestBackup(path)
+    console.log(
+      restored
+        ? `[magpie] Bibliothèque restaurée depuis ${restored}.`
+        : '[magpie] Aucune sauvegarde exploitable : nouvelle bibliothèque vide.'
+    )
+    // Une sauvegarde d'avant-migration est légitimement d'un schéma antérieur : lui
+    // opposer le garde-fou de régression reviendrait à refuser le seul secours disponible.
+    return openAndMigrate(path, { acceptOlderSchema: true })
+  }
+}
 
+function openAndMigrate(
+  path: string,
+  options: { acceptOlderSchema?: boolean } = {}
+): Database.Database {
+  const conn = new Database(path)
+  try {
+    return prepareConnection(conn, options.acceptOlderSchema === true)
+  } catch (error) {
+    // Sous Windows, une connexion laissée ouverte garde la main sur les journaux : sans
+    // cette fermeture, la mise à l'écart échouait et le journal dépareillé restait aux
+    // côtés de la base restaurée, qui redevenait aussitôt illisible.
+    try {
+      conn.close()
+    } catch {
+      // Fermer une connexion déjà morte n'a rien à nous apprendre.
+    }
+    throw error
+  }
+}
+
+function prepareConnection(
+  conn: Database.Database,
+  acceptOlderSchema: boolean
+): Database.Database {
   // WAL : lectures concurrentes pendant que le sync écrit. `normal` est le bon compromis
   // durabilité/vitesse pour une base locale qu'on peut de toute façon reconstruire.
-  db.pragma('journal_mode = WAL')
-  db.pragma('synchronous = NORMAL')
-  db.pragma('foreign_keys = ON')
+  conn.pragma('journal_mode = WAL')
+  conn.pragma('synchronous = NORMAL')
+  conn.pragma('foreign_keys = ON')
 
-  const current = db.pragma('user_version', { simple: true }) as number
+  const current = conn.pragma('user_version', { simple: true }) as number
+
+  /*
+   * Un schéma qui recule n'est jamais légitime : une version donnée ne sait qu'avancer.
+   * Sans ce garde-fou, une base ancienne réapparue à la place de la vraie serait
+   * simplement migrée jusqu'au schéma courant — et l'application repartirait sur neuf
+   * cents posts au lieu de dix mille, en affichant tous les signes de la normalité.
+   * Mieux vaut refuser d'ouvrir : l'appelant met alors le fichier de côté et restaure.
+   */
+  const seen = readLibraryState()
+  if (!acceptOlderSchema && seen && current > 0 && current < seen.schemaVersion) {
+    throw new Error(
+      `Base en schéma v${current} alors que v${seen.schemaVersion} a déjà été ouvert ici ` +
+        `(${seen.posts} posts connus). Fichier probablement remplacé par une copie plus ancienne.`
+    )
+  }
+
   if (current > 0 && current < SCHEMA_VERSION) {
     const name = `magpie-before-v${SCHEMA_VERSION}-${Date.now()}.db`
-    db.exec(`VACUUM INTO '${join(dataDir(), name).replaceAll("'", "''")}'`)
+    conn.exec(`VACUUM INTO '${join(dataDir(), name).replaceAll("'", "''")}'`)
     console.log(`[magpie] Sauvegarde avant migration : ${name}.`)
     pruneMigrationBackups(name)
   }
 
-  migrate(db)
-  return db
+  migrate(conn)
+  rememberLibraryState(conn)
+  return conn
+}
+
+/** Empreinte gardée hors de la base : c'est justement elle qu'on soupçonne. */
+interface LibraryState {
+  schemaVersion: number
+  posts: number
+  at: number
+}
+
+function libraryStateFile(): string {
+  return join(dataDir(), 'library-state.json')
+}
+
+function readLibraryState(): LibraryState | null {
+  try {
+    const value = JSON.parse(readFileSync(libraryStateFile(), 'utf8')) as Partial<LibraryState>
+    return typeof value.schemaVersion === 'number' && typeof value.posts === 'number'
+      ? { schemaVersion: value.schemaVersion, posts: value.posts, at: Number(value.at) || 0 }
+      : null
+  } catch {
+    return null
+  }
+}
+
+function rememberLibraryState(conn: Database.Database): void {
+  try {
+    const posts = (conn.prepare('SELECT COUNT(*) AS n FROM posts').get() as { n: number }).n
+    const temporary = `${libraryStateFile()}.tmp`
+    writeFileSync(
+      temporary,
+      JSON.stringify({ schemaVersion: SCHEMA_VERSION, posts, at: Date.now() } satisfies LibraryState)
+    )
+    renameSync(temporary, libraryStateFile())
+  } catch (error) {
+    // L'empreinte est un garde-fou, pas une dépendance : son absence ne bloque rien.
+    console.warn('[magpie] Empreinte de bibliothèque non écrite', error)
+  }
+}
+
+/** Écarte la base illisible et ses journaux, sans jamais rien supprimer. */
+function quarantineLibrary(path: string): void {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  for (const suffix of ['', '-wal', '-shm']) {
+    const source = `${path}${suffix}`
+    if (!existsSync(source)) continue
+    const target = join(dataDir(), `magpie-illisible-${stamp}.db${suffix}`)
+    try {
+      renameSync(source, target)
+      console.log(`[magpie] Mis de côté : ${target}`)
+    } catch (error) {
+      console.warn(`[magpie] Impossible d'écarter ${source}`, error)
+    }
+  }
+}
+
+/** Remet en place la sauvegarde la plus récente qui passe un contrôle d'intégrité. */
+function restoreNewestBackup(path: string): string | null {
+  let candidates: string[]
+  try {
+    candidates = readdirSync(dataDir()).filter((name) => BACKUP_NAME_PATTERN.test(name))
+  } catch {
+    return null
+  }
+
+  const ordered = candidates
+    .map((name) => ({ name, at: statSync(join(dataDir(), name)).mtimeMs }))
+    .sort((a, b) => b.at - a.at)
+
+  for (const { name } of ordered) {
+    const source = join(dataDir(), name)
+    try {
+      const probe = new Database(source, { readonly: true })
+      const integrity = probe.pragma('integrity_check', { simple: true }) as string
+      probe.close()
+      if (integrity !== 'ok') continue
+      copyFileSync(source, path)
+      return name
+    } catch {
+      // Sauvegarde elle-même abîmée : on essaie la précédente.
+    }
+  }
+  return null
 }
 
 const BACKUP_NAME_PATTERN = /^magpie-before-v\d+-\d+\.db$/
