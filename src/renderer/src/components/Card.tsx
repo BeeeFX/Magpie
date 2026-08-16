@@ -161,7 +161,15 @@ function CardImpl({
   const mediaBlock = hasMedia ? (
     <div
       className={`card__media ${!previewReady && !previewFailed ? 'is-pending' : ''}`}
-      style={{ background: post.dominantColor ?? 'var(--field)' }}
+      /* Un post jamais préparé n'a pas encore de couleur dominante — il en aurait fallu une
+         vignette pour la calculer. Plutôt qu'un gris uniforme sur des rangées entières, on
+         teinte à partir du créateur, comme le fait déjà sa pastille d'avatar. */
+      style={
+        {
+          '--tile-hue': avatarHue(post),
+          ...(post.dominantColor ? { background: post.dominantColor } : {})
+        } as React.CSSProperties
+      }
     >
       {current?.thumbUrl ? (
         <img

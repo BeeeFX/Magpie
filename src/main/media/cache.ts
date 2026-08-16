@@ -321,21 +321,38 @@ export interface CacheProgress {
  * Traite tout ce qui n'a pas encore de vignette, avec une concurrence bornée : sharp est
  * gourmand et saturer les cœurs rendrait l'interface saccadée pendant le premier sync.
  */
-export async function processPendingMedia(
-  onProgress?: (progress: CacheProgress) => void,
-  concurrency = 2,
-  shouldPause?: () => boolean,
-  signal?: AbortSignal,
+export interface ProcessMediaOptions {
+  onProgress?: (progress: CacheProgress) => void
+  concurrency?: number
+  shouldPause?: () => boolean
+  signal?: AbortSignal
+  /** Restreint la passe aux posts demandés par la grille — le mode cache intelligent. */
   requestedPostIds?: string[]
-): Promise<CacheProgress & { hasMore: boolean }> {
+  /** Ignore la file vidéo même en mode hors-ligne : un préchargement de vignettes ne doit
+   *  jamais se mettre à télécharger des clips au passage. */
+  thumbnailsOnly?: boolean
+  /** Seulement le média de couverture. Le mur n'affiche que celui-là ; les vues suivantes
+   *  d'un carrousel restent paresseuses, ce qui divise le travail par deux. */
+  coverOnly?: boolean
+}
+
+export async function processPendingMedia({
+  onProgress,
+  concurrency = 2,
+  shouldPause,
+  signal,
+  requestedPostIds,
+  thumbnailsOnly = false,
+  coverOnly = false
+}: ProcessMediaOptions = {}): Promise<CacheProgress & { hasMore: boolean }> {
   const thumbnailBatch = 360
   const videoBatch = 120
   const thumbRows = requestedPostIds
     ? pendingThumbnailsForPosts(requestedPostIds, thumbnailBatch)
-    : pendingThumbnails(thumbnailBatch)
+    : pendingThumbnails(thumbnailBatch, coverOnly)
   const thumbs = thumbRows.map((t) => ({ type: 'thumb' as const, ...t }))
   const videos =
-    readSettings().mediaStorageMode === 'offline'
+    !thumbnailsOnly && readSettings().mediaStorageMode === 'offline'
       ? pendingVideos(videoBatch).map((v) => ({ type: 'video' as const, ...v }))
       : []
   const hasMore = !requestedPostIds && (thumbs.length === thumbnailBatch || videos.length === videoBatch)

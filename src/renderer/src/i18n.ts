@@ -286,6 +286,13 @@ const fr = {
   'settings.cachePartial':
     '{count} fichier(s) étaient encore ouverts et n’ont pas pu être supprimés. Refermez la vue détaillée puis réessayez.',
   'settings.cacheError': 'Le cache n’a pas pu être vidé.',
+  'settings.preloadTitle': 'Préparer toutes les vignettes',
+  'settings.preloadPending':
+    '{count} vignettes du mur restent à préparer, soit environ {size}. Elles se préparent sinon au fil de votre défilement.',
+  'settings.preloadRunning': 'Préparation : {done} / {total}',
+  'settings.preloadDone': 'Tout le mur est déjà préparé.',
+  'settings.preloadStart': 'Tout préparer',
+  'settings.preloadCancel': 'Arrêter',
   'settings.clearCacheConfirm':
     'Vider le cache supprime toutes les vignettes et tous les clips téléchargés.\n\nElles se régénèrent tant que le lien de la plateforme est encore valide. Pour les posts plus anciens, il faudra lancer « Tout revérifier » sur chaque compte pour les retrouver.\n\nVos posts, tags, favoris et collections ne sont pas touchés.',
   'settings.replayTour': 'Revoir la présentation',
@@ -670,6 +677,13 @@ const en: Record<TranslationKey, string> = {
   'settings.cachePartial':
     '{count} file(s) were still open and could not be deleted. Close the detail view and try again.',
   'settings.cacheError': 'The cache could not be cleared.',
+  'settings.preloadTitle': 'Prepare every thumbnail',
+  'settings.preloadPending':
+    '{count} wall thumbnails left to prepare, roughly {size}. Otherwise they are prepared as you scroll.',
+  'settings.preloadRunning': 'Preparing: {done} / {total}',
+  'settings.preloadDone': 'The whole wall is already prepared.',
+  'settings.preloadStart': 'Prepare all',
+  'settings.preloadCancel': 'Stop',
   'settings.clearCacheConfirm':
     'Clearing the cache deletes every thumbnail and downloaded clip.\n\nThey regenerate as long as the platform link is still valid. For older posts you will need to run “Check all history” on each account to get them back.\n\nYour posts, tags, favourites and collections are untouched.',
   'settings.replayTour': 'Replay the tour',

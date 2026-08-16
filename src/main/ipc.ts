@@ -14,6 +14,7 @@ import type {
   Platform,
   PostQuery,
   PlaybackQuality,
+  PreloadState,
   Settings
 } from '@shared/types'
 import { CONTENT_SOURCES, DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS } from '@shared/types'
@@ -140,6 +141,9 @@ export interface IpcHooks {
   /** Relance le traitement des médias en attente, sérialisé côté processus principal. */
   drainMedia: () => void
   requestThumbnails: (postIds: string[]) => void
+  startPreload: () => PreloadState
+  cancelPreload: () => PreloadState
+  preloadState: () => PreloadState
   /** Garantit qu'aucun fichier média n'est écrit pendant une migration de bibliothèque. */
   pauseMedia: () => Promise<void>
   resumeMedia: () => void
@@ -150,10 +154,17 @@ export function registerIpc({
   onThemeChange,
   drainMedia,
   requestThumbnails,
+  startPreload,
+  cancelPreload,
+  preloadState,
   pauseMedia,
   resumeMedia,
   onSettingsChange
 }: IpcHooks): void {
+  ipcMain.handle('media:preloadState', () => preloadState())
+  ipcMain.handle('media:preloadStart', () => startPreload())
+  ipcMain.handle('media:preloadCancel', () => cancelPreload())
+
   ipcMain.handle('posts:list', (_event, query: PostQuery) => listPosts(postQueryValue(query)))
   ipcMain.handle('posts:page', (_event, query: PostQuery, offset: number, limit: number) => {
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 500) {

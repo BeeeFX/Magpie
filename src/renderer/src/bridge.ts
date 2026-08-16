@@ -219,6 +219,9 @@ const previewApi: MagpieApi = {
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),
   getMediaPlaybackUrl: async () => '',
   requestThumbnails: async () => {},
+  getPreloadState: async () => ({ running: false, done: 0, total: 0, remaining: 0, pending: 1240 }),
+  startThumbnailPreload: async () => ({ running: true, done: 0, total: 1240, remaining: 1240 }),
+  cancelThumbnailPreload: async () => ({ running: false, done: 0, total: 0, remaining: 0 }),
 
   // Les mutations n'ont pas de base derrière elles en aperçu : elles renvoient l'état
   // courant sans rien modifier, plutôt que de simuler une persistance qui mentirait.
@@ -273,6 +276,7 @@ const previewEvents: MagpieEvents = {
   onSyncState: () => () => {},
   onAiTagProgress: () => () => {},
   onOrganizerProgress: () => () => {},
+  onPreloadProgress: () => () => {},
   onUpdateState: () => () => {},
   onLibraryMoveProgress: () => () => {},
   onWindowInteraction: () => () => {},

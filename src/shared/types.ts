@@ -352,6 +352,9 @@ export interface MagpieApi {
   ): Promise<string>
   /** Priorise les vignettes visibles dans le cache intelligent. */
   requestThumbnails(postIds: string[]): Promise<void>
+  getPreloadState(): Promise<PreloadState>
+  startThumbnailPreload(): Promise<PreloadState>
+  cancelThumbnailPreload(): Promise<PreloadState>
 
   setLabel(postId: string, label: LabelColor | null): Promise<void>
   setCollectionColor(collectionId: number, color: LabelColor | null): Promise<void>
@@ -440,6 +443,16 @@ export interface AiCollectionApplyResult {
   alreadyThere: number
 }
 
+/** Préparation en masse des vignettes du mur. `pending` n'est renseigné qu'à l'interrogation
+ *  de l'état, pour annoncer le travail restant avant de lancer quoi que ce soit. */
+export interface PreloadState {
+  running: boolean
+  done: number
+  total: number
+  remaining: number
+  pending?: number
+}
+
 /** Une purge peut être partielle : un fichier encore ouvert résiste à sa suppression. */
 export interface ClearCacheResult {
   removed: number
@@ -467,6 +480,7 @@ export interface MagpieEvents {
   onSyncState(cb: (state: SyncState) => void): () => void
   onAiTagProgress(cb: (progress: AiTagProgress) => void): () => void
   onOrganizerProgress(cb: (progress: OrganizerProgress) => void): () => void
+  onPreloadProgress(cb: (state: PreloadState) => void): () => void
   onUpdateState(cb: (state: UpdateState) => void): () => void
   onLibraryMoveProgress(cb: (progress: LibraryMoveProgress) => void): () => void
   onWindowInteraction(cb: (active: boolean) => void): () => void

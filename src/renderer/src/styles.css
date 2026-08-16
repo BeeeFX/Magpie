@@ -1442,6 +1442,28 @@ h1, h2, h3 {
   font-size: 12px;
 }
 
+.preload {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.preload__bar {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--field);
+}
+
+.preload__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.3s var(--ease);
+}
+
 .organizer-list {
   display: grid;
   gap: 8px;
@@ -2074,6 +2096,9 @@ html.window-is-moving .app *::after {
   border-radius: var(--radius-card);
   box-shadow: var(--card-ring);
   transition: box-shadow var(--base) var(--ease);
+  /* Teinte de repli, mélangée au fond du thème : elle reste discrète en clair comme en
+     sombre, et l'attribut inline la remplace dès que la couleur dominante est connue. */
+  background: color-mix(in srgb, hsl(var(--tile-hue, 250) 45% 50%) 13%, var(--field));
 }
 
 .card:hover .card__media {
@@ -2126,6 +2151,40 @@ html.window-is-moving .app *::after {
 
 @keyframes media-pending-shine {
   to { transform: translateX(100%); }
+}
+
+/* Une carte en attente doit se voir respirer. Sans cela, un mur qui prépare ses vignettes
+   est indistinguable d'un mur cassé : rien ne bouge, rien n'indique qu'un travail est en
+   cours. Le balayage est déclaré ici plutôt que sur la pastille centrale pour rester lisible
+   même sur une tuile de cent pixels, où le texte ne tient pas. */
+.card__media.is-pending::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--text) 7%, transparent) 50%,
+    transparent 80%
+  );
+  transform: translateX(-100%);
+  animation: media-pending-shine 1.4s var(--ease) infinite;
+  pointer-events: none;
+}
+
+/* Sur une tuile étroite, le libellé déborderait : seul le rond de progression reste. */
+.card__media-pending span:last-child {
+  max-width: 100%;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card__media.is-pending::after {
+    animation: none;
+  }
 }
 
 .card__media img {

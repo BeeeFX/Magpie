@@ -1455,22 +1455,41 @@ export interface PendingMedia {
  * faisait la première version, à l'époque où tout venait de la fixture — laissait tous les
  * vrais signets sans vignette, puisqu'ils n'ont qu'une URL.
  */
-export function pendingThumbnails(rawLimit = 400): PendingMedia[] {
+/** Condition partagée par la file et son décompte : elles doivent rester d'accord. */
+const PENDING_THUMBNAIL_WHERE = `m.thumb_path IS NULL
+  AND m.thumb_attempts < 3
+  AND (m.source_path IS NOT NULL OR m.remote_url LIKE 'http%')`
+
+export function pendingThumbnails(rawLimit = 400, coverOnly = false): PendingMedia[] {
   const limit = Math.min(1000, Math.max(1, Math.floor(rawLimit)))
   return getDb()
     .prepare(
       `SELECT m.post_id, m.idx, p.platform, m.source_path, m.remote_url, m.video_source,
               m.thumb_attempts, m.video_attempts
          FROM media m JOIN posts p ON p.id = m.post_id
-        WHERE m.thumb_path IS NULL
-          AND m.thumb_attempts < 3
-          AND (m.source_path IS NOT NULL OR m.remote_url LIKE 'http%')
+        WHERE ${PENDING_THUMBNAIL_WHERE}${coverOnly ? ' AND m.idx = 0' : ''}
         ORDER BY CASE WHEN m.idx = 0 THEN 0 ELSE 1 END,
                  CASE WHEN p.saved_rank IS NULL THEN 1 ELSE 0 END,
                  p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx
         LIMIT ?`
     )
     .all(limit) as PendingMedia[]
+}
+
+/**
+ * Ce qu'il reste à préparer. Sert à annoncer la taille avant de lancer un préchargement,
+ * puis à en suivre l'avancement : un décompte recalculé est la seule mesure qui reste juste
+ * quand un même média est réessayé plusieurs fois.
+ */
+export function countPendingThumbnails(coverOnly = false): number {
+  return (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) AS n FROM media m
+          WHERE ${PENDING_THUMBNAIL_WHERE}${coverOnly ? ' AND m.idx = 0' : ''}`
+      )
+      .get() as { n: number }
+  ).n
 }
 
 /** Vignettes demandées par la portion visible de la grille, dans l'ordre d'affichage. */

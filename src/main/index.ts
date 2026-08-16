@@ -18,6 +18,7 @@ import { Readable } from 'node:stream'
 import { closeDb, getDb, mediaDir } from './db'
 import { registerIpc } from './ipc'
 import {
+  countPendingThumbnails,
   countPosts,
   playbackMediaSource,
   recentAiCandidateIds,
@@ -30,7 +31,7 @@ import { syncEngine } from './sync/engine'
 import { repairMissingCacheFiles, repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
 import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
-import type { SyncPhase } from '@shared/types'
+import type { PreloadState, SyncPhase } from '@shared/types'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
@@ -393,6 +394,59 @@ function requestThumbnailDrain(postIds: string[]): void {
   void drainMediaQueue()
 }
 
+/**
+ * Préchargement complet des vignettes.
+ *
+ * Le cache intelligent ne prépare que ce qu'on a réellement fait défiler ; passer en mode
+ * hors-ligne préparerait tout, mais téléchargerait aussi tous les clips. Cette action comble
+ * l'écart : le mur en entier, vignettes seules, sans changer de mode de stockage.
+ *
+ * Elle emprunte la file existante plutôt que d'ouvrir la sienne — sinon deux passes se
+ * disputeraient les mêmes lignes et le même quota de disque.
+ */
+let preloadRunning = false
+let preloadTotal = 0
+let preloadRemaining = 0
+
+function preloadState(): PreloadState {
+  return {
+    running: preloadRunning,
+    done: Math.max(0, preloadTotal - preloadRemaining),
+    total: preloadTotal,
+    remaining: preloadRemaining
+  }
+}
+
+function publishPreload(): void {
+  mainWindow?.webContents.send('preload:progress', preloadState())
+}
+
+function startThumbnailPreload(): PreloadState {
+  if (preloadRunning) return preloadState()
+  preloadTotal = countPendingThumbnails(true)
+  preloadRemaining = preloadTotal
+  if (preloadTotal === 0) return preloadState()
+  preloadRunning = true
+  publishPreload()
+  void drainMediaQueue()
+  return preloadState()
+}
+
+function cancelThumbnailPreload(): PreloadState {
+  if (!preloadRunning) return preloadState()
+  preloadRunning = false
+  mediaAbortController?.abort()
+  publishPreload()
+  return preloadState()
+}
+
+/** Ce qu'il reste à faire, mesuré plutôt que déduit : un média réessayé fausserait un
+ *  compteur incrémental, et la barre reculerait ou se figerait. */
+function refreshPreloadProgress(): void {
+  preloadRemaining = countPendingThumbnails(true)
+  publishPreload()
+}
+
 async function pauseMediaQueue(): Promise<void> {
   mediaPaused = true
   mediaAbortController?.abort()
@@ -429,17 +483,32 @@ async function drainMediaQueue(): Promise<void> {
       const settings = readSettings()
       const requested = [...requestedThumbnailPostIds]
       requestedThumbnailPostIds.clear()
+      // Les cartes visibles passent devant : pendant un préchargement, on ne veut pas
+      // regarder un mur vide en attendant que la passe de fond arrive jusqu'à nous.
+      const sweeping = preloadRunning && requested.length === 0
       // Le mode léger ne parcourt jamais les milliers de médias en attente : seules
       // les cartes visibles (et leur petite marge de préchargement) alimentent la file.
-      if (settings.mediaStorageMode === 'stream' && requested.length === 0) break
-      const result = await processPendingMedia(
-        (progress) => mainWindow?.webContents.send('cache:progress', progress),
-        mainWindow?.isVisible() ? 2 : 3,
-        () => mediaPaused,
-        mediaAbortController.signal,
-        settings.mediaStorageMode === 'stream' ? requested : undefined
-      )
-      hasMore = result.hasMore || requestedThumbnailPostIds.size > 0
+      if (settings.mediaStorageMode === 'stream' && requested.length === 0 && !sweeping) break
+      const result = await processPendingMedia({
+        onProgress: (progress) => mainWindow?.webContents.send('cache:progress', progress),
+        // Le coût dominant est le réseau, pas le processeur : deux téléchargements de front
+        // faisaient attendre dix secondes pour une soixantaine de cartes visibles. Les
+        // demandes de la grille passent donc large ; la passe de fond reste discrète pour
+        // ne pas leur voler la bande passante.
+        concurrency: sweeping ? 3 : 6,
+        shouldPause: () => mediaPaused,
+        signal: mediaAbortController.signal,
+        requestedPostIds: sweeping || settings.mediaStorageMode !== 'stream' ? undefined : requested,
+        thumbnailsOnly: sweeping,
+        coverOnly: sweeping
+      })
+      if (preloadRunning) {
+        refreshPreloadProgress()
+        // Une passe qui ne rend plus rien signifie qu'il ne reste que des médias déjà
+        // abandonnés après trois tentatives : insister ne servirait à rien.
+        if (sweeping && result.total === 0) cancelThumbnailPreload()
+      }
+      hasMore = result.hasMore || requestedThumbnailPostIds.size > 0 || preloadRunning
       if (result.total > 0) mainWindow?.webContents.send('library:updated')
       // Rend régulièrement la main à Electron entre deux lots afin que déplacer ou
       // redimensionner la fenêtre reste instantané pendant un gros rattrapage.
@@ -503,6 +572,9 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
     onThemeChange: syncTheme,
     drainMedia: () => void drainMediaQueue(),
     requestThumbnails: requestThumbnailDrain,
+    startPreload: startThumbnailPreload,
+    cancelPreload: cancelThumbnailPreload,
+    preloadState: () => ({ ...preloadState(), pending: countPendingThumbnails(true) }),
     pauseMedia: pauseMediaQueue,
     resumeMedia: resumeMediaQueue,
     onSettingsChange: () => {

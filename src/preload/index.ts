@@ -22,6 +22,7 @@ import type {
   PlaybackQuality,
   Platform,
   Post,
+  PreloadState,
   PostPage,
   PostQuery,
   Settings,
@@ -84,6 +85,9 @@ const api: MagpieApi = {
   ): Promise<string> => ipcRenderer.invoke('media:playbackUrl', postId, mediaIndex, kind, quality),
   requestThumbnails: (postIds: string[]): Promise<void> =>
     ipcRenderer.invoke('media:requestThumbnails', postIds),
+  getPreloadState: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadState'),
+  startThumbnailPreload: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadStart'),
+  cancelThumbnailPreload: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadCancel'),
 
   setLabel: (postId: string, label: LabelColor | null): Promise<void> =>
     ipcRenderer.invoke('posts:setLabel', postId, label),
@@ -154,6 +158,11 @@ const events: MagpieEvents = {
     const listener = (_e: unknown, value: OrganizerProgress): void => cb(value)
     ipcRenderer.on('organizer:progress', listener)
     return () => ipcRenderer.removeListener('organizer:progress', listener)
+  },
+  onPreloadProgress: (cb) => {
+    const listener = (_e: unknown, state: PreloadState): void => cb(state)
+    ipcRenderer.on('preload:progress', listener)
+    return () => ipcRenderer.removeListener('preload:progress', listener)
   },
   onUpdateState: (cb) => {
     const listener = (_e: unknown, state: UpdateState): void => cb(state)
