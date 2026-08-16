@@ -625,6 +625,13 @@ export function registerIpc({
             ? 'https://x.com/'
             : 'https://www.reddit.com/'
 
+      // Le diagnostic emprunte le chemin qu'il teste : sans limite de temps, une requête
+      // qui pend le ferait pendre avec elle — et « toujours en cours » n'apprend rien.
+      // Un dépassement est ici un résultat à part entière, pas un échec du test.
+      const DIAGNOSTIC_TIMEOUT_MS = 8000
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), DIAGNOSTIC_TIMEOUT_MS)
+
       try {
         const remote = await sessionFor(media.platform).fetch(media.source, {
           method: 'GET',
@@ -636,7 +643,8 @@ export function registerIpc({
             Range: 'bytes=0-65535'
           }),
           credentials: 'include',
-          redirect: 'follow'
+          redirect: 'follow',
+          signal: controller.signal
         })
 
         let firstChunkBytes: number | null = null
@@ -651,6 +659,7 @@ export function registerIpc({
           firstChunkBytes = null
           console.warn('[magpie] Diagnostic média : flux illisible', error)
         }
+        clearTimeout(timeout)
 
         return {
           ok: remote.status >= 200 && remote.status < 300 && (firstChunkBytes ?? 0) > 0,
@@ -667,12 +676,19 @@ export function registerIpc({
           error: null
         }
       } catch (error) {
+        clearTimeout(timeout)
+        const elapsedMs = Date.now() - started
+        const aborted = controller.signal.aborted
         return {
           ok: false,
           ...empty,
           host,
-          elapsedMs: Date.now() - started,
-          error: error instanceof Error ? error.message : String(error)
+          elapsedMs,
+          error: aborted
+            ? `Aucune réponse après ${Math.round(DIAGNOSTIC_TIMEOUT_MS / 1000)} s : la requête n'aboutit pas (ni refus, ni données).`
+            : error instanceof Error
+              ? error.message
+              : String(error)
         }
       }
     }
