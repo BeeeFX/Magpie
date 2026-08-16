@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { GridMode, Post } from '@shared/types'
 import {
   avatarHue,
@@ -65,6 +65,8 @@ function CardImpl({
   const setMuted = useStore((s) => s.setMuted)
   const { post } = item
   const [loaded, setLoaded] = useState(false)
+  /** Fichier de vignette référencé mais illisible : mieux vaut le dire qu'un carré noir. */
+  const [broken, setBroken] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [index, setIndex] = useState(0)
   const [videoReady, setVideoReady] = useState(false)
@@ -119,8 +121,20 @@ function CardImpl({
   useEffect(() => {
     setStreamedVideoUrl(null)
     setLoaded(false)
+    setBroken(false)
     setVideoReady(false)
   }, [post.id, current?.idx])
+
+  /**
+   * L'image ne devient visible qu'avec `is-loaded`, posée par `onLoad`. Or une vignette
+   * déjà en cache peut finir de charger avant que React n'ait attaché son gestionnaire :
+   * l'événement est alors manqué, et la carte reste noire indéfiniment — jusqu'à un
+   * rechargement de la fenêtre, qui change le tempo. On interroge donc l'élément lui-même
+   * au montage plutôt que d'attendre un événement qui a pu passer.
+   */
+  const watchImage = useCallback((node: HTMLImageElement | null) => {
+    if (node?.complete && node.naturalWidth > 0) setLoaded(true)
+  }, [])
 
   useEffect(() => {
     if (
@@ -155,8 +169,12 @@ function CardImpl({
 
   const stop = (e: React.MouseEvent): void => e.stopPropagation()
 
-  const previewReady = Boolean(current?.thumbUrl || (videoUrl && videoReady))
-  const previewFailed = current?.thumbStatus === 'failed' && !previewReady
+  /* « Prête » veut dire visible à l'écran, pas seulement présente en base. Compter une
+     vignette comme prête dès que son chemin existait laissait la carte en noir pendant tout
+     le chargement du fichier, sans le moindre signe d'activité — l'état le plus fréquent, et
+     le seul qui n'avait aucun retour visuel. */
+  const previewReady = Boolean((current?.thumbUrl && loaded) || (videoUrl && videoReady))
+  const previewFailed = (current?.thumbStatus === 'failed' || broken) && !previewReady
 
   const mediaBlock = hasMedia ? (
     <div
@@ -175,14 +193,26 @@ function CardImpl({
     >
       {current?.thumbUrl ? (
         <img
+          ref={watchImage}
           src={current.thumbUrl}
           alt=""
-          loading="lazy"
+          /* Pas de `loading="lazy"` : la grille ne monte déjà que ce qui approche du
+             viewport. Le chargement paresseux n'évitait donc rien et ajoutait une seconde
+             barrière, soumise aux heuristiques de visibilité du navigateur — une carte
+             pouvait rester en attente alors que son fichier était là, sur le disque. */
           decoding="async"
           draggable={false}
           className={loaded ? 'is-loaded' : ''}
-          onLoad={() => setLoaded(true)}
-          onError={() => setLoaded(false)}
+          onLoad={() => {
+            setBroken(false)
+            setLoaded(true)
+          }}
+          onError={() => {
+            // Le fichier est référencé mais illisible — effacé sous nos pieds, par exemple.
+            // La carte l'annonce au lieu de rester indéfiniment noire.
+            setLoaded(false)
+            setBroken(true)
+          }}
         />
       ) : null}
 
