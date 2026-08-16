@@ -253,6 +253,30 @@ export function Grid(): React.JSX.Element {
     const timer = setTimeout(() => void magpie.requestThumbnails(prefetchIds), 80)
     return () => clearTimeout(timer)
   }, [prefetchIds])
+
+  /* Préparer la vignette ne suffit pas à ce qu'elle s'affiche instantanément : le fichier a
+     beau être sur le disque, son `<img>` n'est monté qu'à l'entrée dans la fenêtre de rendu,
+     et c'est seulement là que Chromium le lit et le décode. D'où le bref scintillement en
+     haut et en bas d'un mur pourtant entièrement préparé.
+
+     On demande donc le décodage en avance, sur la même bande que le préchargement et sans
+     monter le moindre nœud : à l'arrivée dans le viewport, l'image est déjà en mémoire et
+     `watchImage` la trouve complète dès le montage. */
+  const warmed = useRef(new Set<string>())
+  useEffect(() => {
+    const margin = Math.max(prefetchMargin, viewport.height * 1.5)
+    // Le cache image de Chromium est borné de son côté ; ce registre ne sert qu'à ne pas
+    // relancer cent fois la même requête.
+    if (warmed.current.size > 4000) warmed.current.clear()
+    for (const item of visibleItems(layout, scroll, viewport.height, margin)) {
+      const url = (itemsById.get(item.post.id) ?? item).post.media[0]?.thumbUrl
+      if (!url || warmed.current.has(url)) continue
+      warmed.current.add(url)
+      const image = new Image()
+      image.decoding = 'async'
+      image.src = url
+    }
+  }, [itemsById, layout, prefetchMargin, scroll, viewport.height])
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
   const onCopy = useCallback((post: Post) => {

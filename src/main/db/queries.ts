@@ -250,7 +250,16 @@ function attachMedia(posts: Post[]): void {
       hasSource: Boolean(
         row.thumb_path || row.video_path || row.source_path || row.remote_url || row.video_source || row.video_qualities
       ),
-      thumbStatus: row.thumb_path ? 'ready' : row.thumb_attempts >= 3 ? 'failed' : 'pending',
+      // Doit rester d'accord avec `PENDING_THUMBNAIL_WHERE`. Un média dont la seule source
+      // est un clip n'entre jamais dans la file — sharp ne décode pas un mp4 — et se
+      // déclarait pourtant « en préparation » : la carte tournait indéfiniment sur une
+      // attente qui n'arriverait jamais. Mieux vaut annoncer qu'il n'y aura pas d'aperçu,
+      // ce qui invite d'ailleurs à survoler pour lire.
+      thumbStatus: row.thumb_path
+        ? 'ready'
+        : !(row.source_path || /^https?:/i.test(row.remote_url ?? '')) || row.thumb_attempts >= 3
+          ? 'failed'
+          : 'pending',
       width: row.width,
       height: row.height
       ,videoQualities: row.video_qualities
