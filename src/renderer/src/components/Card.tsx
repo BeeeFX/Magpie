@@ -161,13 +161,15 @@ function CardImpl({
   const mediaBlock = hasMedia ? (
     <div
       className={`card__media ${!previewReady && !previewFailed ? 'is-pending' : ''}`}
-      /* Un post jamais préparé n'a pas encore de couleur dominante — il en aurait fallu une
-         vignette pour la calculer. Plutôt qu'un gris uniforme sur des rangées entières, on
-         teinte à partir du créateur, comme le fait déjà sa pastille d'avatar. */
+      /* La couleur dominante n'est posée qu'une fois la vignette prête : elle sert alors de
+         fond pendant le décodage de l'image. Tant que la vignette se prépare, elle serait
+         contre-productive — la plupart des visuels tirent vers le très sombre, et la carte
+         se confondait avec le fond pendant plusieurs secondes, indistinguable d'un plantage.
+         On garde donc la teinte du créateur, sur laquelle le balayage se lit. */
       style={
         {
           '--tile-hue': avatarHue(post),
-          ...(post.dominantColor ? { background: post.dominantColor } : {})
+          ...(post.dominantColor && previewReady ? { background: post.dominantColor } : {})
         } as React.CSSProperties
       }
     >

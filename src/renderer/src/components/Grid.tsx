@@ -9,6 +9,10 @@ import { Card } from './Card'
  *  plutôt que comme une case dans un tableau. */
 const GAP = 16
 
+/** Marge de préparation autour du viewport, pendant le défilement puis une fois posé. */
+const PREFETCH_MARGIN_MIN = 1200
+const PREFETCH_MARGIN_MAX = 40000
+
 export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
@@ -202,16 +206,53 @@ export function Grid(): React.JSX.Element {
     [itemsById, layout, scroll, viewport.height]
   )
 
-  /* Le cache intelligent suit le viewport. `visibleItems` inclut déjà une marge au-dessus
-     et au-dessous, ce qui donne aux miniatures le temps d'arriver avant le scroll. */
+  /* Le cache intelligent suit le viewport, mais bien plus largement que le rendu.
+     Monter une carte coûte du DOM, demander sa vignette ne coûte qu'un identifiant dans un
+     message : les deux n'ont aucune raison de partager la même marge. Avec les 400 px du
+     rendu — une rangée à peine — le moindre coup de molette dépassait la zone préparée.
+
+     La bande respire donc avec l'usage : étroite pendant qu'on défile, pour ne rien
+     préparer de ce qu'on survole, puis doublée à intervalle régulier dès qu'on s'arrête,
+     jusqu'à couvrir largement les alentours de l'endroit où l'on s'est posé. */
+  const [prefetchMargin, setPrefetchMargin] = useState(PREFETCH_MARGIN_MIN)
+
   useEffect(() => {
-    const ids = visible
-      .filter((item) => item.post.media.some((media) => media.thumbStatus === 'pending'))
-      .map((item) => item.post.id)
-    if (ids.length === 0) return
-    const timer = setTimeout(() => void magpie.requestThumbnails(ids), 80)
+    setPrefetchMargin(PREFETCH_MARGIN_MIN)
+  }, [scroll, layoutWidth, layoutDensity, mode])
+
+  useEffect(() => {
+    if (prefetchMargin >= PREFETCH_MARGIN_MAX) return
+    const timer = setTimeout(
+      () => setPrefetchMargin((margin) => Math.min(PREFETCH_MARGIN_MAX, margin * 2)),
+      700
+    )
     return () => clearTimeout(timer)
-  }, [visible])
+  }, [prefetchMargin])
+
+  const prefetchIds = useMemo(() => {
+    const margin = Math.max(prefetchMargin, viewport.height * 1.5)
+    const centre = scroll + viewport.height / 2
+    return visibleItems(layout, scroll, viewport.height, margin)
+      .filter((item) =>
+        (itemsById.get(item.post.id) ?? item).post.media.some(
+          (media) => media.thumbStatus === 'pending'
+        )
+      )
+      // Le plus proche d'abord : la file traite les identifiants dans l'ordre reçu, et
+      // c'est ce qu'on a sous les yeux qui doit se remplir en premier.
+      .sort(
+        (a, b) =>
+          Math.abs(a.y + a.height / 2 - centre) - Math.abs(b.y + b.height / 2 - centre)
+      )
+      .map((item) => item.post.id)
+      .slice(0, 1000)
+  }, [itemsById, layout, prefetchMargin, scroll, viewport.height])
+
+  useEffect(() => {
+    if (prefetchIds.length === 0) return
+    const timer = setTimeout(() => void magpie.requestThumbnails(prefetchIds), 80)
+    return () => clearTimeout(timer)
+  }, [prefetchIds])
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
   const onCopy = useCallback((post: Post) => {

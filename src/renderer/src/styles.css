@@ -2161,14 +2161,16 @@ html.window-is-moving .app *::after {
   content: '';
   position: absolute;
   inset: 0;
+  /* Assez marqué pour se voir sur une tuile sombre de cent pixels : à 7 % le balayage
+     existait mais restait invisible, ce qui revenait à ne rien afficher du tout. */
   background: linear-gradient(
     100deg,
-    transparent 20%,
-    color-mix(in srgb, var(--text) 7%, transparent) 50%,
-    transparent 80%
+    transparent 15%,
+    color-mix(in srgb, var(--text) 18%, transparent) 50%,
+    transparent 85%
   );
   transform: translateX(-100%);
-  animation: media-pending-shine 1.4s var(--ease) infinite;
+  animation: media-pending-shine 1.25s var(--ease) infinite;
   pointer-events: none;
 }
 
