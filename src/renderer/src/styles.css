@@ -2047,6 +2047,16 @@ html.window-is-moving .app *::after {
   min-height: 0;
 }
 
+/* En masonry, la hauteur de la carte vient de la mise en page, pas de l'image. Sans cette
+   règle, un bloc média sans `<img>` ne contenait que des calques en position absolue et
+   s'effondrait donc à zéro pixel : la teinte d'attente, le balayage et le libellé étaient
+   bien là, dans un élément invisible. C'est ce qui faisait qu'une tuile non chargée
+   n'apparaissait que comme un mince liseré. */
+.card--masonry .card__media {
+  flex: 1;
+  min-height: 0;
+}
+
 .card__chips {
   display: flex;
   align-items: center;
