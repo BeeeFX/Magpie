@@ -451,6 +451,9 @@ export interface PreloadState {
   total: number
   remaining: number
   pending?: number
+  /** Temps restant estimé, ou `null` tant que la cadence n'est pas assez établie pour
+   *  qu'une annonce ait un sens. */
+  etaMs?: number | null
 }
 
 /** Une purge peut être partielle : un fichier encore ouvert résiste à sa suppression. */

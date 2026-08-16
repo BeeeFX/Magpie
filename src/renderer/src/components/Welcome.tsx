@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ACCENTS, LANGUAGES } from '@shared/types'
-import type { LibraryInfo, VideoQuality } from '@shared/types'
-import { magpie } from '../bridge'
+import type { LibraryInfo, PreloadState, VideoQuality } from '@shared/types'
+import { magpie, magpieEvents } from '../bridge'
+import { formatBytes, formatDuration } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
 import { Accounts } from './Accounts'
@@ -72,8 +73,15 @@ export function Welcome(): React.JSX.Element {
   const [choosingFolder, setChoosingFolder] = useState(false)
   const [folderError, setFolderError] = useState<string | null>(null)
 
+  const [preload, setPreload] = useState<PreloadState | null>(null)
+
   useEffect(() => {
     void magpie.getLibraryInfo().then(setLibraryInfo).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    void magpie.getPreloadState().then(setPreload).catch(() => {})
+    return magpieEvents.onPreloadProgress(setPreload)
   }, [])
 
   const chooseFolder = async (): Promise<void> => {
@@ -237,6 +245,53 @@ export function Welcome(): React.JSX.Element {
                       </button>
                     ))}
                   </div>
+                </div>
+              ) : null}
+
+              {/* Masqué au tout premier lancement, où la bibliothèque est encore vide et où
+                  la proposition n'aurait aucun sens. Il apparaît en revanche quand on rejoue
+                  la présentation sur une bibliothèque déjà remplie — le moment exact où
+                  préparer le mur d'un coup devient utile. */}
+              {preload?.running || (preload?.pending ?? 0) > 0 ? (
+                <div className="welcome__storage-row">
+                  <div>
+                    <strong>{t('settings.preloadTitle')}</strong>
+                    <span>
+                      {preload?.running
+                        ? t('settings.preloadRunning', {
+                            done: Math.min(preload.done, preload.total),
+                            total: preload.total
+                          }) +
+                          (preload.etaMs
+                            ? ` · ${t('settings.preloadEta', { eta: formatDuration(preload.etaMs) })}`
+                            : '')
+                        : t('settings.preloadPending', {
+                            count: preload?.pending ?? 0,
+                            size: formatBytes((preload?.pending ?? 0) * 40 * 1024)
+                          })}
+                    </span>
+                    {preload?.running ? (
+                      <div className="preload__bar" aria-live="polite">
+                        <span
+                          style={{
+                            width: `${preload.total > 0 ? Math.min(100, (preload.done / preload.total) * 100) : 0}%`
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() =>
+                      void (preload?.running
+                        ? magpie.cancelThumbnailPreload()
+                        : magpie.startThumbnailPreload()
+                      ).then(setPreload)
+                    }
+                  >
+                    {t(preload?.running ? 'settings.preloadCancel' : 'settings.preloadStart')}
+                  </button>
                 </div>
               ) : null}
 

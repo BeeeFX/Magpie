@@ -290,6 +290,7 @@ const fr = {
   'settings.preloadPending':
     '{count} vignettes du mur restent à préparer, soit environ {size}. Elles se préparent sinon au fil de votre défilement.',
   'settings.preloadRunning': 'Préparation : {done} / {total}',
+  'settings.preloadEta': 'environ {eta} restantes',
   'settings.preloadDone': 'Tout le mur est déjà préparé.',
   'settings.preloadStart': 'Tout préparer',
   'settings.preloadCancel': 'Arrêter',
@@ -681,6 +682,7 @@ const en: Record<TranslationKey, string> = {
   'settings.preloadPending':
     '{count} wall thumbnails left to prepare, roughly {size}. Otherwise they are prepared as you scroll.',
   'settings.preloadRunning': 'Preparing: {done} / {total}',
+  'settings.preloadEta': 'about {eta} left',
   'settings.preloadDone': 'The whole wall is already prepared.',
   'settings.preloadStart': 'Prepare all',
   'settings.preloadCancel': 'Stop',

@@ -407,14 +407,19 @@ function requestThumbnailDrain(postIds: string[]): void {
 let preloadRunning = false
 let preloadTotal = 0
 let preloadRemaining = 0
+let preloadStartedAt = 0
 
 function preloadState(): PreloadState {
-  return {
-    running: preloadRunning,
-    done: Math.max(0, preloadTotal - preloadRemaining),
-    total: preloadTotal,
-    remaining: preloadRemaining
-  }
+  const done = Math.max(0, preloadTotal - preloadRemaining)
+  const elapsed = preloadStartedAt > 0 ? Date.now() - preloadStartedAt : 0
+  // Une estimation tirée des trois premières vignettes ne vaut rien : la cadence dépend
+  // du poids des images et de la latence du CDN, et se stabilise après quelques dizaines.
+  // Mieux vaut n'afficher aucune durée qu'une durée fantaisiste.
+  const etaMs =
+    preloadRunning && done >= 20 && elapsed > 3000
+      ? Math.round((elapsed / done) * preloadRemaining)
+      : null
+  return { running: preloadRunning, done, total: preloadTotal, remaining: preloadRemaining, etaMs }
 }
 
 function publishPreload(): void {
@@ -426,6 +431,7 @@ function startThumbnailPreload(): PreloadState {
   preloadTotal = countPendingThumbnails(true)
   preloadRemaining = preloadTotal
   if (preloadTotal === 0) return preloadState()
+  preloadStartedAt = Date.now()
   preloadRunning = true
   publishPreload()
   void drainMediaQueue()

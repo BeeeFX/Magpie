@@ -56,6 +56,28 @@ export function formatDateTime(ms: number): string {
   })
 }
 
+/**
+ * Durée restante, arrondie à la précision que l'estimation mérite. Annoncer « 7 min 12 s »
+ * sur une cadence qui varie avec la latence du CDN donnerait une fausse impression de
+ * mesure ; on reste donc grossier au-delà de la minute.
+ */
+export function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  if (seconds < 60) return `${Math.max(5, Math.ceil(seconds / 5) * 5)} s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest === 0 ? `${hours} h` : `${hours} h ${String(rest).padStart(2, '0')}`
+}
+
+/** Tailles de fichiers, en unités françaises comme le reste de l'interface. */
+export function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 Mo'
+  const mb = bytes / 1024 / 1024
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} Go` : `${mb.toFixed(1)} Mo`
+}
+
 export function displayName(post: Post): string {
   return post.authorName ?? post.authorHandle ?? 'Inconnu'
 }

@@ -13,6 +13,7 @@ import type {
 } from '@shared/types'
 import { ACCENTS, LANGUAGES } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
+import { formatBytes, formatDuration } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
@@ -35,12 +36,6 @@ const AI_DEFAULT_MODEL: Record<AiProvider, string> = {
 // Conservé derrière un drapeau pour une éventuelle reprise, mais absent du produit
 // tant que l'organisateur local couvre correctement le besoin.
 const LLM_SETTINGS_VISIBLE = false
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '0 Mo'
-  const mb = bytes / 1024 / 1024
-  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} Go` : `${mb.toFixed(1)} Mo`
-}
 
 interface Props {
   onOpenAiOrganizer(): void
@@ -673,7 +668,10 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
                     ? t('settings.preloadRunning', {
                         done: Math.min(preload.done, preload.total),
                         total: preload.total
-                      })
+                      }) +
+                      (preload.etaMs
+                        ? ` · ${t('settings.preloadEta', { eta: formatDuration(preload.etaMs) })}`
+                        : '')
                     : (preload?.pending ?? 0) > 0
                       ? t('settings.preloadPending', {
                           count: preload?.pending ?? 0,
