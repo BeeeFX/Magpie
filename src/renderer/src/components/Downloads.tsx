@@ -1,24 +1,31 @@
 import { useEffect, useState } from 'react'
-import type { BackgroundState, BackgroundTask } from '@shared/types'
+import type { BackgroundState, BackgroundTask, VideoQuality } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { formatBytes, formatDuration } from '../format'
 import { useStore, useT } from '../store'
-import { IconClose, IconDownload, IconPause, IconPlay } from './Icons'
+import { IconClose, IconDownload, IconImage, IconPause, IconPlay, IconVideo } from './Icons'
 import { Popover } from './Popover'
 
-/* Ordres de grandeur mesurés sur une bibliothèque réelle : une vignette WebP 480p pèse
-   une quarantaine de kilo-octets, un clip 480p environ trois méga-octets. L'estimation ne
-   sert qu'à faire sentir l'écart — annoncer « 5 Mo » ou « 14 Go » change la décision. */
+/* Ordres de grandeur mesurés sur une bibliothèque réelle. L'estimation ne sert qu'à faire
+   sentir l'écart entre les deux lignes — annoncer « 5 Mo » ou « 14 Go » change la décision,
+   et le poids d'une copie vidéo dépend évidemment de la qualité demandée. */
 const THUMBNAIL_BYTES = 40 * 1024
-const CLIP_BYTES = 3 * 1024 * 1024
+const CLIP_BYTES: Record<VideoQuality, number> = {
+  '480p': 3 * 1024 * 1024,
+  '720p': 7 * 1024 * 1024,
+  '1080p': 14 * 1024 * 1024,
+  source: 20 * 1024 * 1024
+}
 
 function PreloadButton({
+  icon,
   name,
   hint,
   count,
   bytes,
   onClick
 }: {
+  icon: React.JSX.Element
   name: string
   hint?: string
   count: number
@@ -28,6 +35,9 @@ function PreloadButton({
   const t = useT()
   return (
     <button type="button" className="btn downloads__action" disabled={count === 0} onClick={onClick}>
+      <span className="downloads__action-icon" aria-hidden="true">
+        {icon}
+      </span>
       <span className="downloads__action-top">
         <span>{name}</span>
         <em>
@@ -55,6 +65,9 @@ function PreloadButton({
 export function Downloads(): React.JSX.Element {
   const t = useT()
   const query = useStore((s) => s.query)
+  // La qualité mise en cache se lit dans le nom de l'action : sans elle, « vidéos » laisse
+  // croire qu'on va rapatrier la haute définition, ce que le réglage ne fait pas par défaut.
+  const cacheQuality = useStore((s) => s.videoCacheQuality)
   const [state, setState] = useState<BackgroundState | null>(null)
   const [counts, setCounts] = useState<{ thumbnails: number; clips: number } | null>(null)
   const [scoped, setScoped] = useState<{ thumbnails: number; clips: number } | null>(null)
@@ -167,6 +180,7 @@ export function Downloads(): React.JSX.Element {
               à quoi elle sert, et le poids estimé rend l'écart entre les deux évident. */}
           <div className="downloads__actions">
             <PreloadButton
+              icon={<IconImage size={14} />}
               name={t('downloads.thumbsName')}
               hint={t('downloads.thumbsHint')}
               count={counts?.thumbnails ?? 0}
@@ -177,10 +191,11 @@ export function Downloads(): React.JSX.Element {
               }}
             />
             <PreloadButton
-              name={t('downloads.clipsName')}
+              icon={<IconVideo size={14} />}
+              name={t('downloads.clipsName', { quality: t(`quality.${cacheQuality}`) })}
               hint={t('downloads.clipsHint')}
               count={counts?.clips ?? 0}
-              bytes={(counts?.clips ?? 0) * CLIP_BYTES}
+              bytes={(counts?.clips ?? 0) * CLIP_BYTES[cacheQuality]}
               onClick={() => {
                 start('clips', false)
                 close()
@@ -195,6 +210,7 @@ export function Downloads(): React.JSX.Element {
               <p className="downloads__hint">{t('downloads.scopeHint')}</p>
               <div className="downloads__actions">
                 <PreloadButton
+                  icon={<IconImage size={14} />}
                   name={t('downloads.thumbsName')}
                   count={scoped?.thumbnails ?? 0}
                   bytes={(scoped?.thumbnails ?? 0) * THUMBNAIL_BYTES}
@@ -204,9 +220,10 @@ export function Downloads(): React.JSX.Element {
                   }}
                 />
                 <PreloadButton
-                  name={t('downloads.clipsName')}
+                  icon={<IconVideo size={14} />}
+                  name={t('downloads.clipsName', { quality: t(`quality.${cacheQuality}`) })}
                   count={scoped?.clips ?? 0}
-                  bytes={(scoped?.clips ?? 0) * CLIP_BYTES}
+                  bytes={(scoped?.clips ?? 0) * CLIP_BYTES[cacheQuality]}
                   onClick={() => {
                     start('clips', true)
                     close()

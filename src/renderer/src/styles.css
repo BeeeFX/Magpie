@@ -1602,6 +1602,10 @@ h1, h2, h3 {
   gap: 10px;
   min-width: 260px;
   max-width: 320px;
+  /* Trois tâches, un avertissement de cache et une section filtrée tiennent difficilement
+     dans une petite fenêtre : le menu défile plutôt que de déborder sous l'écran. */
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
   padding: 4px 2px;
 }
 
@@ -1651,11 +1655,33 @@ h1, h2, h3 {
   width: 100%;
 }
 
-.downloads__action {
+/* Une colonne pour l'icône, une pour le texte : l'image et la pellicule disent d'un coup
+   d'œil laquelle des deux lignes concerne quoi, avant même qu'on lise. */
+.downloads__actions .downloads__action {
   display: grid;
-  gap: 3px;
-  padding: 8px 10px;
+  grid-template-columns: auto 1fr;
+  gap: 3px 9px;
+  /* `.btn` fixe une hauteur pour aligner les boutons d'une barre d'outils, et sa règle
+     vient plus bas dans la feuille : il faut donc un sélecteur plus précis pour qu'un
+     bouton à deux lignes suive son contenu. */
+  height: auto;
+  padding: 9px 11px;
   text-align: left;
+}
+
+.downloads__action-icon {
+  display: flex;
+  align-items: center;
+  height: 17px;
+  color: var(--faint);
+}
+
+.downloads__action:not(:disabled):hover .downloads__action-icon {
+  color: var(--accent);
+}
+
+.downloads__action-hint {
+  grid-column: 2;
 }
 
 .downloads__action-top {
