@@ -1,6 +1,7 @@
 import { Worker } from 'node:worker_threads'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { workerScriptPath } from '../src/main/tagging/projection'
 
@@ -43,6 +44,27 @@ async function main(): Promise<void> {
 
   const built = join(process.cwd(), 'out', 'main', 'projection.worker.js')
   assert(existsSync(built), 'le fil est présent dans la sortie de compilation')
+
+  /* Un fil d'exécution n'a accès ni à Electron ni au processus principal. Le vérifier à
+     l'exécution ne suffit pas : en développement `electron` se résout depuis node_modules et
+     tout passe, alors qu'en version installée le fil échoue sur « Cannot find module
+     'electron' ». On lit donc le bundle construit, seule preuve qui vaille. */
+  console.log('\nisolement du fil')
+  const seen = new Set<string>()
+  const queue = [built]
+  while (queue.length > 0) {
+    const file = queue.pop() as string
+    if (seen.has(file)) continue
+    seen.add(file)
+    const source = await readFile(file, 'utf8').catch(() => '')
+    assert(
+      !/require\(["']electron["']\)|from ["']electron["']/.test(source),
+      `${basename(file)} n'atteint jamais le module electron`
+    )
+    for (const match of source.matchAll(/require\(["'](\.[^"']+)["']\)/g)) {
+      queue.push(join(dirname(file), match[1]))
+    }
+  }
 
   console.log('\nexécution')
   const ids = Array.from({ length: POINTS }, (_, index) => `p${index}`)

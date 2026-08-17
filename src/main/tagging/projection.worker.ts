@@ -1,5 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads'
-import { projectSync, type ProjectedPoint } from './projection'
+// Surtout pas `./projection` : il importe Electron, indisponible dans un fil.
+import { projectSync, type ProjectedPoint } from './projection-core'
 
 /**
  * Projection dans un fil séparé.
