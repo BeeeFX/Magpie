@@ -18,6 +18,7 @@ import type {
   MagpieEvents,
   MediaDiagnostic,
   OrganizerApplicationSummary,
+  ExportSummary,
   LoadProfile,
   OrganizerMap,
   OrganizerProgress,
@@ -67,6 +68,9 @@ const api: MagpieApi = {
     ipcRenderer.invoke('tasks:setLoadProfile', profile),
   setTaskPaused: (id: string, paused: boolean): Promise<BackgroundState> =>
     ipcRenderer.invoke('tasks:setTaskPaused', id, paused),
+  exportLibrary: (): Promise<ExportSummary> => ipcRenderer.invoke('export:run'),
+  exportPrompt: (): Promise<string> => ipcRenderer.invoke('export:prompt'),
+  openExportFolder: (): Promise<void> => ipcRenderer.invoke('export:open'),
   transcriptState: (): Promise<{ pending: number; running: boolean }> =>
     ipcRenderer.invoke('transcribe:state'),
   startTranscription: (): Promise<BackgroundState> => ipcRenderer.invoke('transcribe:start'),

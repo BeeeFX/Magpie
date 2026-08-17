@@ -332,6 +332,9 @@ export interface MagpieApi {
   setBandwidthLimit(bytesPerSecond: number): Promise<BackgroundState>
   setLoadProfile(profile: LoadProfile): Promise<BackgroundState>
   setTaskPaused(id: string, paused: boolean): Promise<BackgroundState>
+  exportLibrary(): Promise<ExportSummary>
+  exportPrompt(): Promise<string>
+  openExportFolder(): Promise<void>
   transcriptState(): Promise<{ pending: number; running: boolean }>
   startTranscription(): Promise<BackgroundState>
   stopTranscription(): Promise<BackgroundState>
@@ -458,6 +461,18 @@ export interface OrganizerMapPoint {
   kind: PostKind
   /** Signets et likes se distinguent à l'œil sans jamais filtrer l'analyse. */
   sources: ContentSource[]
+}
+
+/** Ce qu'un export a produit. Sert à décrire le dossier avant de l'ouvrir. */
+export interface ExportSummary {
+  path: string
+  posts: number
+  collections: number
+  transcripts: number
+  /** Fiches réellement réécrites : un réexport n'en touche que ce qui a changé. */
+  written: number
+  bytes: number
+  at: number
 }
 
 export interface OrganizerMap {

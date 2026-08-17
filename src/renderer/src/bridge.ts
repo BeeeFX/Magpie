@@ -191,6 +191,17 @@ const previewApi: MagpieApi = {
     ...PREVIEW_TASKS,
     tasks: PREVIEW_TASKS.tasks.map((task) => (task.id === id ? { ...task, paused } : task))
   }),
+  exportLibrary: async () => ({
+    path: 'C:\Users\vous\AppData\Roaming\magpie\export',
+    posts: 9738,
+    collections: 12,
+    transcripts: 3105,
+    written: 9738,
+    bytes: 41 * 1024 * 1024,
+    at: Date.now()
+  }),
+  exportPrompt: async () => 'Aperçu : le prompt système est écrit par le processus principal.',
+  openExportFolder: async () => {},
   transcriptState: async () => ({ pending: 1287, running: false }),
   startTranscription: async () => PREVIEW_TASKS,
   stopTranscription: async () => PREVIEW_TASKS,

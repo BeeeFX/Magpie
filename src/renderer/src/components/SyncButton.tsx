@@ -10,6 +10,7 @@ import {
   IconImage,
   IconMic,
   IconPlus,
+  IconSend,
   IconSync,
   IconVideo
 } from './Icons'
@@ -28,6 +29,7 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
   const startSync = useStore((s) => s.startSync)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setOrganizerOpen = useStore((s) => s.setOrganizerOpen)
+  const setExportOpen = useStore((s) => s.setExportOpen)
   const cacheQuality = useStore((s) => s.videoCacheQuality)
   const [counts, setCounts] = useState<{ thumbnails: number; clips: number } | null>(null)
   const [transcripts, setTranscripts] = useState<{ pending: number; running: boolean } | null>(null)
@@ -122,6 +124,14 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
               ? t('downloads.allDone')
               : t('actions.transcribeHint', { count: transcripts?.pending ?? 0 })}
           </em>
+        </span>
+      </button>
+
+      <button type="button" role="menuitem" onClick={run(() => setExportOpen(true))}>
+        <IconSend size={15} />
+        <span>
+          <strong>{t('actions.export')}</strong>
+          <em>{t('actions.exportHint')}</em>
         </span>
       </button>
 

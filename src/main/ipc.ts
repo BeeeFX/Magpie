@@ -62,6 +62,7 @@ import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
 import { checkForUpdates, getUpdateState, installUpdate } from './updater'
+import { exportDir, exportLibrary, systemPrompt } from './export'
 import { buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
 import {
   countPendingTranscripts,
@@ -69,6 +70,13 @@ import {
   stopTranscribing,
   transcribeAll
 } from './tagging/transcribe'
+
+/** L'export suit la langue de l'interface : c'est elle qui décide du prompt écrit. */
+function exportLanguage(): 'fr' | 'en' {
+  const setting = readSettings().language
+  if (setting === 'fr' || setting === 'en') return setting
+  return app.getLocale().toLowerCase().startsWith('fr') ? 'fr' : 'en'
+}
 
 function platformValue(value: unknown): Platform {
   if (!PLATFORMS.includes(value as Platform)) throw new Error('Plateforme invalide')
@@ -348,6 +356,13 @@ export function registerIpc({
   ipcMain.handle('tasks:setTaskPaused', (_event, id: string, paused: boolean) => {
     backgroundTasks.setTaskPaused(id, paused)
     return backgroundTasks.current()
+  })
+
+  ipcMain.handle('export:run', () => exportLibrary(exportLanguage()))
+  ipcMain.handle('export:prompt', () => systemPrompt(exportLanguage()))
+  ipcMain.handle('export:open', async () => {
+    await mkdir(exportDir(), { recursive: true })
+    await shell.openPath(exportDir())
   })
 
   ipcMain.handle('transcribe:state', () => ({

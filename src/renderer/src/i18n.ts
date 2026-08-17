@@ -310,6 +310,26 @@ const fr = {
   'actions.more': 'Autres actions',
   'actions.organize': 'Organiser en collections',
   'actions.organizeHint': 'Regroupe la bibliothèque par thème, en local.',
+  'actions.export': 'Exporter pour mon assistant',
+  'actions.exportHint': 'Un dossier lisible par Claude, ChatGPT ou autre.',
+  'export.title': 'Exporter pour mon assistant',
+  'export.subtitle': 'Aucune clé, aucun compte, rien ne part sans vous.',
+  'export.lead':
+    'Magpie écrit un dossier que votre assistant peut lire lui-même : légendes, transcriptions, auteurs, tags et collections. Vous lui donnez le dossier, la conversation a lieu chez lui.',
+  'export.treePrompt': 'ce qu’il doit savoir pour chercher',
+  'export.treeIndex': 'une ligne par post, à parcourir en entier',
+  'export.treeCollections': 'une liste par collection',
+  'export.treeSheets': 'un fichier par post, ouvert au besoin',
+  'export.run': 'Exporter',
+  'export.running': 'Export en cours…',
+  'export.openFolder': 'Ouvrir le dossier',
+  'export.copyPrompt': 'Copier le prompt',
+  'export.copied': 'Copié',
+  'export.showPrompt': 'Voir et modifier le prompt système',
+  'export.promptHint':
+    'Ce texte est écrit dans PROMPT.md. Vous pouvez l’adapter avant de le copier — c’est vous qui conversez, pas Magpie.',
+  'export.done':
+    '{posts} posts exportés · {collections} collections · {transcripts} transcriptions · {size}',
   'actions.transcribe': 'Transcrire les vidéos',
   'actions.transcribeHint': '{count} vidéos sans transcription',
   'actions.transcribeAskReady':
@@ -773,6 +793,26 @@ const en: Record<TranslationKey, string> = {
   'actions.more': 'More actions',
   'actions.organize': 'Organise into collections',
   'actions.organizeHint': 'Groups the library by theme, locally.',
+  'actions.export': 'Export for my assistant',
+  'actions.exportHint': 'A folder Claude, ChatGPT or others can read.',
+  'export.title': 'Export for my assistant',
+  'export.subtitle': 'No key, no account, nothing leaves without you.',
+  'export.lead':
+    'Magpie writes a folder your assistant can read on its own: captions, transcripts, authors, tags and collections. You hand it the folder, the conversation happens there.',
+  'export.treePrompt': 'what it needs to know to search',
+  'export.treeIndex': 'one line per post, meant to be read in full',
+  'export.treeCollections': 'one list per collection',
+  'export.treeSheets': 'one file per post, opened when needed',
+  'export.run': 'Export',
+  'export.running': 'Exporting…',
+  'export.openFolder': 'Open folder',
+  'export.copyPrompt': 'Copy prompt',
+  'export.copied': 'Copied',
+  'export.showPrompt': 'View and edit the system prompt',
+  'export.promptHint':
+    'This text is written to PROMPT.md. Adapt it before copying — you are the one having the conversation, not Magpie.',
+  'export.done':
+    '{posts} posts exported · {collections} collections · {transcripts} transcripts · {size}',
   'actions.transcribe': 'Transcribe videos',
   'actions.transcribeHint': '{count} videos without a transcript',
   'actions.transcribeAskReady':

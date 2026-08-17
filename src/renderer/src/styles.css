@@ -1929,6 +1929,76 @@ h1, h2, h3 {
   background: var(--hairline);
 }
 
+/* --- Export pour assistant -------------------------------------------------- */
+
+.export-panel {
+  max-width: 620px;
+}
+
+.export-panel__body {
+  display: grid;
+  gap: 14px;
+}
+
+.export-panel__lead {
+  margin: 0;
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.export-panel__tree {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  background: var(--field);
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.7;
+  white-space: pre;
+}
+
+.export-panel__done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.export-panel__prompt summary {
+  color: var(--faint);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.export-panel__prompt textarea {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--field);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.export-panel__prompt p {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 /* --- Carte sémantique ------------------------------------------------------ */
 
 .organizer-views {

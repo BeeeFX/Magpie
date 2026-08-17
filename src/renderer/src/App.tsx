@@ -8,6 +8,7 @@ import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { Welcome } from './components/Welcome'
 import { AiOrganizer } from './components/AiOrganizer'
+import { ExportPanel } from './components/ExportPanel'
 import { useStore } from './store'
 
 export function App(): React.JSX.Element {
@@ -165,6 +166,7 @@ export function App(): React.JSX.Element {
       {detailIndex !== null ? <Detail /> : null}
       <Settings onOpenAiOrganizer={openAiOrganizer} />
       <AiOrganizer open={aiOrganizerOpen} onClose={closeAiOrganizer} />
+      <ExportPanel />
     </div>
   )
 }
