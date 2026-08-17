@@ -93,6 +93,16 @@ const IDLE_SYNC: SyncState = idleSyncState()
 
 const PREVIEW_TASKS = {
   paused: false,
+  bytesPerSecond: 2.4 * 1024 * 1024,
+  bandwidthLimit: 0,
+  loadProfile: 'balanced' as const,
+  // Une courbe déjà remplie : c'est la lisibilité du graphe qu'on veut juger, pas son
+  // remplissage progressif.
+  history: Array.from({ length: 90 }, (_, index) => ({
+    at: Date.now() - (90 - index) * 1000,
+    bytesPerSecond: (1.4 + Math.sin(index / 7) * 0.9 + (index % 11) / 22) * 1024 * 1024,
+    itemsPerSecond: Math.max(0, Math.round(6 + Math.sin(index / 5) * 4))
+  })),
   cacheFull: false,
   cacheBytes: 1.1 * 1024 ** 3,
   cacheLimitBytes: 5 * 1024 ** 3,
@@ -175,6 +185,12 @@ const previewApi: MagpieApi = {
      en la regardant est « est-ce lisible et fluide à neuf mille points », et vingt points n'y
      répondraient pas. Les îles sont posées à la main plutôt que projetées — l'aperçu vérifie
      le rendu et les gestes, la justesse des positions est l'affaire de la vraie analyse. */
+  setBandwidthLimit: async (bandwidthLimit) => ({ ...PREVIEW_TASKS, bandwidthLimit }),
+  setLoadProfile: async (loadProfile) => ({ ...PREVIEW_TASKS, loadProfile }),
+  setTaskPaused: async (id, paused) => ({
+    ...PREVIEW_TASKS,
+    tasks: PREVIEW_TASKS.tasks.map((task) => (task.id === id ? { ...task, paused } : task))
+  }),
   organizerMap: async (): Promise<OrganizerMap> => {
     const posts = await previewPosts().catch(() => [])
     const islands = [

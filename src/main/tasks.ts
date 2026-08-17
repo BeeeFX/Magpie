@@ -1,4 +1,10 @@
-import type { BackgroundState, BackgroundTask, BackgroundTaskKind } from '@shared/types'
+import type {
+  BackgroundState,
+  BackgroundTask,
+  BackgroundTaskKind,
+  LoadProfile,
+  ThroughputSample
+} from '@shared/types'
 import { getCacheUsage } from './media/cache'
 import { readSettings } from './settings'
 
@@ -19,6 +25,8 @@ interface Entry extends BackgroundTask {
   startedAt: number
   /** Avancement au démarrage : une reprise ne doit pas fausser la cadence mesurée. */
   startedDone: number
+  /** Avancement à la dernière seconde, pour la cadence instantanée. */
+  lastDone?: number
 }
 
 type Listener = (state: BackgroundState) => void
@@ -30,16 +38,77 @@ let cacheFull = false
 let cacheBytes = 0
 let cacheLimitBytes = 0
 
+/** Deux minutes de courbe, une mesure par seconde. Au-delà, on ne lit plus rien. */
+const HISTORY_LENGTH = 120
+const history: ThroughputSample[] = []
+let bytesThisSecond = 0
+let bytesPerSecond = 0
+let bandwidthLimit = 0
+let loadProfile: LoadProfile = 'balanced'
+let ticker: NodeJS.Timeout | null = null
+
+/**
+ * Combien de travailleurs simultanés pour chaque profil.
+ *
+ * C'est le seul levier honnête sur la charge : sans ordonnanceur, un plafond en pourcentage
+ * de processeur ne veut rien dire. « Léger » laisse la machine disponible, « rapide » prend
+ * ce qu'il peut.
+ */
+const WORKERS: Record<LoadProfile, number> = { light: 2, balanced: 6, fast: 12 }
+
+/**
+ * Seau à jetons pour le plafond de bande passante.
+ *
+ * Contrairement à la charge processeur, celui-ci est un vrai plafond : les lectures de flux
+ * demandent leurs octets ici et attendent s'ils ne sont pas disponibles.
+ */
+let tokens = 0
+let lastRefill = Date.now()
+
 function snapshot(): BackgroundState {
   return {
     paused,
     cacheFull,
     cacheBytes,
     cacheLimitBytes,
+    bytesPerSecond,
+    bandwidthLimit,
+    loadProfile,
+    history: [...history],
     tasks: [...entries.values()]
       .sort((a, b) => a.startedAt - b.startedAt)
-      .map(({ startedAt: _startedAt, startedDone: _startedDone, ...task }) => task)
+      .map(({ startedAt: _startedAt, startedDone: _startedDone, lastDone: _lastDone, ...task }) => task)
   }
+}
+
+/**
+ * Échantillonne une fois par seconde, et seulement quand il se passe quelque chose.
+ *
+ * Un minuteur qui tourne en permanence pour enregistrer des zéros réveillerait le processus
+ * sans rien apprendre à personne.
+ */
+function ensureTicker(): void {
+  if (ticker) return
+  ticker = setInterval(() => {
+    const items = [...entries.values()].reduce((sum, entry) => {
+      const advanced = Math.max(0, entry.done - (entry.lastDone ?? entry.done))
+      entry.lastDone = entry.done
+      return sum + advanced
+    }, 0)
+    bytesPerSecond = bytesThisSecond
+    bytesThisSecond = 0
+    history.push({ at: Date.now(), bytesPerSecond, itemsPerSecond: items })
+    if (history.length > HISTORY_LENGTH) history.shift()
+
+    if (entries.size === 0 && bytesPerSecond === 0) {
+      // Plus rien à mesurer : on s'arrête plutôt que de remplir la courbe de zéros.
+      clearInterval(ticker as NodeJS.Timeout)
+      ticker = null
+      history.length = 0
+    }
+    publish()
+  }, 1000)
+  ticker.unref?.()
 }
 
 function publish(): void {
@@ -93,7 +162,67 @@ export const backgroundTasks = {
     }
 
     entries.set(id, next)
+    ensureTicker()
     publish()
+  },
+
+  /**
+   * Déclare des octets transférés. Appelé par les lectures de flux, c'est ce qui alimente
+   * le débit affiché et la courbe.
+   */
+  countBytes(amount: number): void {
+    if (amount > 0) bytesThisSecond += amount
+  },
+
+  /**
+   * Réserve des octets avant de les lire. Résout aussitôt quand aucun plafond n'est fixé —
+   * le cas courant ne paie donc rien.
+   */
+  async claimBandwidth(amount: number): Promise<void> {
+    if (bandwidthLimit <= 0 || amount <= 0) return
+    for (;;) {
+      const now = Date.now()
+      tokens = Math.min(bandwidthLimit, tokens + ((now - lastRefill) / 1000) * bandwidthLimit)
+      lastRefill = now
+      if (tokens >= amount) {
+        tokens -= amount
+        return
+      }
+      const waitMs = Math.min(500, Math.ceil(((amount - tokens) / bandwidthLimit) * 1000))
+      await new Promise((resolve) => setTimeout(resolve, waitMs))
+    }
+  },
+
+  /** Nombre de travailleurs simultanés autorisés par le profil courant. */
+  workers(): number {
+    return WORKERS[loadProfile]
+  },
+
+  setBandwidthLimit(bytesPerSecondLimit: number): void {
+    const next = Math.max(0, Math.round(bytesPerSecondLimit))
+    if (bandwidthLimit === next) return
+    bandwidthLimit = next
+    tokens = 0
+    lastRefill = Date.now()
+    publish()
+  },
+
+  setLoadProfile(profile: LoadProfile): void {
+    if (loadProfile === profile) return
+    loadProfile = profile
+    publish()
+  },
+
+  /** Suspend ou reprend une seule tâche, sans toucher aux autres. */
+  setTaskPaused(id: string, next: boolean): void {
+    const entry = entries.get(id)
+    if (!entry || entry.paused === next) return
+    entry.paused = next
+    publish()
+  },
+
+  isTaskPaused(id: string): boolean {
+    return entries.get(id)?.paused ?? paused
   },
 
   /** Retire une tâche terminée ou abandonnée. */

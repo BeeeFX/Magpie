@@ -18,6 +18,7 @@ import type {
   MagpieEvents,
   MediaDiagnostic,
   OrganizerApplicationSummary,
+  LoadProfile,
   OrganizerMap,
   OrganizerProgress,
   OrganizerUndoResult,
@@ -60,6 +61,12 @@ const api: MagpieApi = {
     memory: AiCollectionMemoryOptions
   ): Promise<AiCollectionApplyResult> =>
     ipcRenderer.invoke('ai:applyCollections', choices, memory),
+  setBandwidthLimit: (bytesPerSecond: number): Promise<BackgroundState> =>
+    ipcRenderer.invoke('tasks:setBandwidth', bytesPerSecond),
+  setLoadProfile: (profile: LoadProfile): Promise<BackgroundState> =>
+    ipcRenderer.invoke('tasks:setLoadProfile', profile),
+  setTaskPaused: (id: string, paused: boolean): Promise<BackgroundState> =>
+    ipcRenderer.invoke('tasks:setTaskPaused', id, paused),
   organizerMap: (): Promise<OrganizerMap> => ipcRenderer.invoke('organizer:map'),
   lastOrganizerApplication: (): Promise<OrganizerApplicationSummary | null> =>
     ipcRenderer.invoke('organizer:lastApplication'),

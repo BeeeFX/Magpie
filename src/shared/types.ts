@@ -329,6 +329,9 @@ export interface MagpieApi {
     choices: AiCollectionChoice[],
     memory: AiCollectionMemoryOptions
   ): Promise<AiCollectionApplyResult>
+  setBandwidthLimit(bytesPerSecond: number): Promise<BackgroundState>
+  setLoadProfile(profile: LoadProfile): Promise<BackgroundState>
+  setTaskPaused(id: string, paused: boolean): Promise<BackgroundState>
   organizerMap(): Promise<OrganizerMap>
   lastOrganizerApplication(): Promise<OrganizerApplicationSummary | null>
   undoOrganizerApplication(): Promise<OrganizerUndoResult>
@@ -489,6 +492,8 @@ export interface AiCollectionApplyResult {
 export type BackgroundTaskKind = 'sync' | 'thumbnails' | 'clips' | 'organizer'
 
 export interface BackgroundTask {
+  /** Octets par seconde observés sur cette tâche, ou null si elle ne transfère rien. */
+  bytesPerSecond?: number | null
   id: string
   kind: BackgroundTaskKind
   /** Ce sur quoi porte la tâche : nom de plateforme, de collection, de tag… */
@@ -502,6 +507,22 @@ export interface BackgroundTask {
   message: string | null
 }
 
+/**
+ * Profils de charge, plutôt qu'un pourcentage.
+ *
+ * Un vrai plafond CPU en pourcentage n'est pas réalisable sans ordonnanceur : ce qu'on règle,
+ * c'est le nombre de travailleurs simultanés. Annoncer « 40 % » serait un mensonge d'interface.
+ */
+export const LOAD_PROFILES = ['light', 'balanced', 'fast'] as const
+export type LoadProfile = (typeof LOAD_PROFILES)[number]
+
+/** Un échantillon par seconde, pour tracer la courbe des dernières minutes. */
+export interface ThroughputSample {
+  at: number
+  bytesPerSecond: number
+  itemsPerSecond: number
+}
+
 export interface BackgroundState {
   tasks: BackgroundTask[]
   /** Vrai dès qu'un téléchargement est suspendu à la demande. */
@@ -511,6 +532,13 @@ export interface BackgroundState {
   cacheFull: boolean
   cacheBytes: number
   cacheLimitBytes: number
+  /** Débit cumulé, toutes tâches confondues. */
+  bytesPerSecond: number
+  /** Les dernières minutes, une mesure par seconde, pour la courbe. */
+  history: ThroughputSample[]
+  /** Plafond de bande passante en octets par seconde, ou 0 si aucun. */
+  bandwidthLimit: number
+  loadProfile: LoadProfile
 }
 
 /** Ce qu'un préchargement doit préparer, et sur quel périmètre. */

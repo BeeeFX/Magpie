@@ -1,3 +1,4 @@
+import { backgroundTasks } from '../tasks'
 import { net } from 'electron'
 import { createWriteStream } from 'node:fs'
 import { rename, rm } from 'node:fs/promises'
@@ -173,7 +174,12 @@ export async function fetchMedia(
         return
       }
       const chunks: Buffer[] = []
-      response.on('data', (chunk) => chunks.push(chunk))
+      response.on('data', (chunk: Buffer) => {
+        // Le seul endroit où Magpie sait combien d'octets arrivent réellement : c'est lui qui
+        // alimente le débit affiché et la courbe du panneau de téléchargements.
+        backgroundTasks.countBytes(chunk.length)
+        chunks.push(chunk)
+      })
       response.on('end', () => {
         clearTimeout(timeout)
         cleanup()

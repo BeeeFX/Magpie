@@ -615,7 +615,13 @@ async function drainMediaQueue(): Promise<void> {
         // faisaient attendre dix secondes pour une soixantaine de cartes visibles. Les
         // demandes de la grille passent donc large ; la passe de fond reste discrète pour
         // ne pas leur voler la bande passante.
-        concurrency: sweeping ? 3 : 8,
+        /* Le profil de charge décide combien de travailleurs tournent : c'est le seul
+           levier honnête, un plafond en pourcentage de processeur n'existe pas sans
+           ordonnanceur. Une passe de fond reste plus discrète que les cartes visibles,
+           qui doivent arriver vite. */
+        concurrency: sweeping
+          ? Math.max(1, Math.round(backgroundTasks.workers() / 2))
+          : backgroundTasks.workers(),
         shouldPause: () => mediaPaused || backgroundTasks.isPaused(),
         signal: mediaAbortController.signal,
         requestedPostIds:

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { BackgroundState, BackgroundTask } from '@shared/types'
+import type { BackgroundState, BackgroundTask, ThroughputSample } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { formatBytes, formatDuration } from '../format'
 import { useT } from '../store'
@@ -39,6 +39,8 @@ export function Downloads(): React.JSX.Element | null {
     { done: 0, total: 0 }
   )
   const percent = overall.total > 0 ? Math.round((overall.done / overall.total) * 100) : null
+  const recent = (state?.history ?? []).slice(-60)
+  const items = Math.round(recent.reduce((sum, sample) => sum + sample.itemsPerSecond, 0))
 
   /* Purement un indicateur d'état depuis que le menu d'actions porte les lancements : rien
      en cours et rien à signaler, il n'a aucune raison d'occuper la barre d'outils. */
@@ -87,31 +89,119 @@ export function Downloads(): React.JSX.Element | null {
             </p>
           ) : null}
 
+          {/* Débit et courbe : « ça avance » est une chose, « à quelle vitesse et depuis
+              quand » en est une autre — c'est elle qui permet de décider s'il faut brider. */}
+          {busy ? (
+            <div className="downloads__meter">
+              <Sparkline samples={state?.history ?? []} />
+              <span>
+                {formatBytes(state?.bytesPerSecond ?? 0)}/s
+                {items > 0 ? ` · ${t('downloads.perMinute', { count: items })}` : ''}
+              </span>
+            </div>
+          ) : null}
+
           {busy ? (
             <ul className="downloads__list">
               {tasks.map((task) => (
-                <TaskRow key={task.id} task={task} paused={paused} onStop={setState} />
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  paused={paused}
+                  onStop={setState}
+                  onToggle={() =>
+                    void magpie.setTaskPaused(task.id, !task.paused).then(setState)
+                  }
+                />
               ))}
             </ul>
           ) : (
             <p className="downloads__idle">{t('downloads.idle')}</p>
           )}
 
+          <div className="modal__sep" />
+          <div className="downloads__limits">
+            <label>
+              <span>{t('downloads.loadProfile')}</span>
+              <div className="segmented segmented--quiet">
+                {(['light', 'balanced', 'fast'] as const).map((profile) => (
+                  <button
+                    key={profile}
+                    type="button"
+                    className={state?.loadProfile === profile ? 'is-active' : ''}
+                    onClick={() => void magpie.setLoadProfile(profile).then(setState)}
+                  >
+                    {t(`downloads.load.${profile}` as Parameters<typeof t>[0])}
+                  </button>
+                ))}
+              </div>
+            </label>
+            <label>
+              <span>
+                {(state?.bandwidthLimit ?? 0) > 0
+                  ? t('downloads.bandwidthOn', {
+                      rate: `${formatBytes(state?.bandwidthLimit ?? 0)}/s`
+                    })
+                  : t('downloads.bandwidthOff')}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                step={1}
+                value={Math.round((state?.bandwidthLimit ?? 0) / (1024 * 1024))}
+                onChange={(event) =>
+                  void magpie
+                    .setBandwidthLimit(Number(event.target.value) * 1024 * 1024)
+                    .then(setState)
+                }
+              />
+            </label>
+          </div>
         </div>
       )}
     </Popover>
   )
 }
 
+/**
+ * Courbe du débit des dernières minutes.
+ *
+ * Un chiffre dit la vitesse à l'instant ; la courbe dit si elle tient, si elle s'effondre,
+ * ou si un plafond mord. C'est ce qui permet de décider de brider — ou de ne pas le faire.
+ */
+function Sparkline({ samples }: { samples: ThroughputSample[] }): React.JSX.Element | null {
+  if (samples.length < 2) return null
+  const peak = Math.max(...samples.map((sample) => sample.bytesPerSecond), 1)
+  const width = 100
+  const height = 26
+  const step = width / (samples.length - 1)
+  const line = samples
+    .map((sample, index) => {
+      const x = index * step
+      const y = height - (sample.bytesPerSecond / peak) * (height - 2) - 1
+      return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
+    })
+    .join(' ')
+  return (
+    <svg className="downloads__spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      <path d={`${line} L${width} ${height} L0 ${height} Z`} className="downloads__spark-fill" />
+      <path d={line} className="downloads__spark-line" />
+    </svg>
+  )
+}
+
 function TaskRow({
   task,
   paused,
-  onStop
+  onStop,
+  onToggle
 }: {
   task: BackgroundTask
   /** Pause générale : une tâche à l'arrêt ne doit pas continuer d'annoncer une échéance. */
   paused: boolean
   onStop: (state: BackgroundState) => void
+  onToggle: () => void
 }): React.JSX.Element {
   const t = useT()
   const halted = paused || task.paused
@@ -126,6 +216,15 @@ function TaskRow({
           {t(`downloads.kind.${task.kind}` as Parameters<typeof t>[0])}
           {task.scope ? <em>{task.scope}</em> : null}
         </span>
+        <button
+          type="button"
+          className="icon-btn-ghost"
+          title={t(task.paused ? 'downloads.resume' : 'downloads.pauseAll')}
+          aria-label={t(task.paused ? 'downloads.resume' : 'downloads.pauseAll')}
+          onClick={onToggle}
+        >
+          {task.paused ? <IconPlay size={12} /> : <IconPause size={12} />}
+        </button>
         {stoppable ? (
           <button
             type="button"

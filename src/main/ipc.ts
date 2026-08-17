@@ -11,6 +11,7 @@ import type {
   LabelColor,
   LibraryInfo,
   LibraryMoveProgress,
+  LoadProfile,
   MediaDiagnostic,
   BackgroundState,
   Platform,
@@ -329,6 +330,19 @@ export function registerIpc({
       return result
     }
   )
+
+  ipcMain.handle('tasks:setBandwidth', (_event, bytesPerSecond: number) => {
+    backgroundTasks.setBandwidthLimit(bytesPerSecond)
+    return backgroundTasks.current()
+  })
+  ipcMain.handle('tasks:setLoadProfile', (_event, profile: LoadProfile) => {
+    backgroundTasks.setLoadProfile(profile)
+    return backgroundTasks.current()
+  })
+  ipcMain.handle('tasks:setTaskPaused', (_event, id: string, paused: boolean) => {
+    backgroundTasks.setTaskPaused(id, paused)
+    return backgroundTasks.current()
+  })
 
   ipcMain.handle('organizer:map', () => buildOrganizerMap())
   ipcMain.handle('organizer:lastApplication', () => lastOrganizerApplication())
