@@ -296,27 +296,63 @@ export async function downloadMediaToFile(
  * donnée. On s'abonne donc directement aux événements, en respectant la contre-pression
  * pour qu'un clip volumineux ne s'entasse pas en mémoire.
  */
-function toWebStream(response: NodeJS.EventEmitter & { pause?: () => void; resume?: () => void }): ReadableStream<Uint8Array> {
+interface NetResponse extends NodeJS.EventEmitter {
+  pause?: () => void
+  resume?: () => void
+  destroy?: () => void
+}
+
+function toWebStream(response: NetResponse): ReadableStream<Uint8Array> {
+  /*
+   * Le consommateur peut lâcher le flux à tout moment — changement de vidéo, déplacement
+   * dans la timeline, fenêtre refermée — et la réponse, elle, continue d'émettre. Écrire
+   * dans un contrôleur déjà fermé lève une exception non rattrapée qui abat le processus
+   * principal : c'est le seul endroit du fichier où l'état doit être suivi à la main.
+   */
+  let done = false
+  const stop = (): void => {
+    if (done) return
+    done = true
+    if (response.destroy) response.destroy()
+    else response.resume?.()
+  }
+
   return new ReadableStream<Uint8Array>({
     start(controller) {
       response.on('data', (chunk: Buffer) => {
-        controller.enqueue(new Uint8Array(chunk))
+        if (done) return
+        try {
+          controller.enqueue(new Uint8Array(chunk))
+        } catch {
+          stop()
+          return
+        }
         if ((controller.desiredSize ?? 1) <= 0) response.pause?.()
       })
       response.on('end', () => {
+        if (done) return
+        done = true
         try {
           controller.close()
         } catch {
-          // Flux déjà refermé par l'appelant : rien à signaler.
+          // Déjà refermé par l'appelant : la fin de réponse n'apprend plus rien.
         }
       })
-      response.on('error', (error: Error) => controller.error(error))
+      response.on('error', (error: Error) => {
+        if (done) return
+        done = true
+        try {
+          controller.error(error)
+        } catch {
+          // Idem : l'appelant est parti avant l'erreur.
+        }
+      })
     },
     pull() {
-      response.resume?.()
+      if (!done) response.resume?.()
     },
     cancel() {
-      response.resume?.()
+      stop()
     }
   })
 }
