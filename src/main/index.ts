@@ -18,19 +18,27 @@ import { Readable } from 'node:stream'
 import { closeDb, getDb, mediaDir } from './db'
 import { registerIpc } from './ipc'
 import {
+  countPendingClips,
   countPendingThumbnails,
   countPosts,
   recentAiCandidateIds,
   repairMissingSyncDates
 } from './db/queries'
 import { backfillRuleTags } from './tagging/rules'
-import { processPendingMedia, THUMB_NAME_PATTERN, touchCachedThumbnails, VIDEO_NAME_PATTERN } from './media/cache'
+import {
+  processPendingMedia,
+  THUMB_NAME_PATTERN,
+  touchCachedThumbnails,
+  VIDEO_NAME_PATTERN
+} from './media/cache'
 import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
 import { repairMissingCacheFiles, repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
 import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
-import type { PreloadState, SyncPhase } from '@shared/types'
+import type { BackgroundState, PostQuery, PreloadRequest, SyncPhase } from '@shared/types'
+import { PUBLIC_PLATFORMS } from '@shared/types'
+import { backgroundTasks } from './tasks'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
@@ -195,6 +203,60 @@ function showMainWindow(): void {
   updateTray()
 }
 
+/** Icône de base, relue une seule fois : la barre système se redessine à chaque progrès,
+ *  et relire le fichier à chaque lot serait de la lecture disque pour rien. */
+let trayBase: { image: Electron.NativeImage; data: Buffer; width: number; height: number } | null =
+  null
+
+/**
+ * Pose un voyant dans le coin de l'icône. Un menu contextuel ne se voit que si on
+ * l'ouvre ; le point, lui, se remarque du coin de l'œil — c'est tout ce qu'on lui demande.
+ *
+ * La composition se fait à la main sur le bitmap : le processus principal n'a pas de
+ * canevas, et ajouter une dépendance graphique pour six pixels serait disproportionné.
+ */
+function trayImage(state: BackgroundState): Electron.NativeImage {
+  if (!trayBase) {
+    const image = nativeImage.createFromPath(appIconPath()).resize({ width: 18, height: 18 })
+    const { width, height } = image.getSize()
+    trayBase = { image, data: image.toBitmap(), width, height }
+  }
+  if (state.tasks.length === 0 && !state.cacheFull) return trayBase.image
+
+  const { width, height } = trayBase
+  const data = Buffer.from(trayBase.data)
+
+  // Ambre quand il faut décider quelque chose, gris à l'arrêt, bleu quand ça travaille.
+  const [b, g, r] = state.cacheFull
+    ? [48, 160, 224]
+    : state.paused
+      ? [150, 150, 150]
+      : [235, 140, 60]
+
+  const cx = width - 4.5
+  const cy = height - 4.5
+  const paint = (radius: number, cb: number, cg: number, cr: number): void => {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const dist = Math.hypot(x + 0.5 - cx, y + 0.5 - cy)
+        // Le dernier pixel se fond progressivement : sans cela le point paraît carré.
+        const cover = Math.max(0, Math.min(1, radius + 0.5 - dist))
+        if (cover <= 0) continue
+        const i = (y * width + x) * 4
+        data[i] = cb * cover + data[i] * (1 - cover)
+        data[i + 1] = cg * cover + data[i + 1] * (1 - cover)
+        data[i + 2] = cr * cover + data[i + 2] * (1 - cover)
+        data[i + 3] = 255 * cover + data[i + 3] * (1 - cover)
+      }
+    }
+  }
+  // Un liseré sombre détache le voyant aussi bien d'une barre claire que du dessin.
+  paint(4, 20, 20, 20)
+  paint(2.9, b, g, r)
+
+  return nativeImage.createFromBitmap(data, { width, height })
+}
+
 function updateTray(): void {
   // L'icône représente le processus en arrière-plan, pas l'état de la fenêtre.
   // Elle reste donc présente tant que Magpie tourne.
@@ -205,29 +267,69 @@ function updateTray(): void {
       height: 18
     })
     tray = new Tray(icon)
-    tray.setToolTip('Magpie')
     tray.on('click', showMainWindow)
   } else if (!shouldShow && tray) {
     tray.destroy()
     tray = null
   }
+  if (!tray) return
 
-  if (tray) {
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: 'Ouvrir Magpie', click: showMainWindow },
-        { label: 'Synchroniser maintenant', click: () => void syncEngine.syncAll() },
-        { type: 'separator' },
-        {
-          label: 'Quitter',
-          click: () => {
-            quitting = true
-            app.quit()
-          }
+  const state = backgroundTasks.current()
+  const busy = state.tasks.length > 0
+  tray.setImage(trayImage(state))
+
+  // L'infobulle dit ce qui se passe sans qu'on ait à ouvrir la fenêtre.
+  tray.setToolTip(
+    busy
+      ? `Magpie — ${state.paused ? 'en pause' : 'en cours'} : ${state.tasks
+          .map((task) => trayTaskLabel(task))
+          .join(', ')}`
+      : 'Magpie'
+  )
+
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Ouvrir Magpie', click: showMainWindow },
+      { type: 'separator' },
+      // Les lignes d'état sont désactivées : elles informent, elles ne s'actionnent pas.
+      ...(busy
+        ? state.tasks.map((task) => ({ label: `  ${trayTaskLabel(task)}`, enabled: false }))
+        : [{ label: '  Rien en cours', enabled: false }]),
+      ...(state.cacheFull
+        ? [{ label: '  ⚠ Espace de cache saturé', enabled: false }]
+        : []),
+      ...(busy
+        ? [
+            {
+              label: state.paused ? 'Reprendre les téléchargements' : 'Suspendre les téléchargements',
+              click: () => void setDownloadsPaused(!state.paused)
+            }
+          ]
+        : []),
+      { label: 'Synchroniser maintenant', click: () => void syncEngine.syncAll() },
+      { type: 'separator' },
+      {
+        label: 'Quitter',
+        click: () => {
+          quitting = true
+          app.quit()
         }
-      ])
-    )
-  }
+      }
+    ])
+  )
+}
+
+function trayTaskLabel(task: BackgroundState['tasks'][number]): string {
+  const name =
+    task.kind === 'sync'
+      ? `Synchronisation ${task.scope ?? ''}`.trim()
+      : task.kind === 'thumbnails'
+        ? 'Vignettes'
+        : task.kind === 'clips'
+          ? 'Clips'
+          : 'Organisation'
+  if (task.total > 0) return `${name} ${task.done}/${task.total}`
+  return task.done > 0 ? `${name} (${task.done})` : name
 }
 
 function refreshBackgroundFeatures(): void {
@@ -387,65 +489,7 @@ function requestThumbnailDrain(postIds: string[]): void {
   void drainMediaQueue()
 }
 
-/**
- * Préchargement complet des vignettes.
- *
- * Le cache intelligent ne prépare que ce qu'on a réellement fait défiler ; passer en mode
- * hors-ligne préparerait tout, mais téléchargerait aussi tous les clips. Cette action comble
- * l'écart : le mur en entier, vignettes seules, sans changer de mode de stockage.
- *
- * Elle emprunte la file existante plutôt que d'ouvrir la sienne — sinon deux passes se
- * disputeraient les mêmes lignes et le même quota de disque.
- */
-let preloadRunning = false
-let preloadTotal = 0
-let preloadRemaining = 0
-let preloadStartedAt = 0
-
-function preloadState(): PreloadState {
-  const done = Math.max(0, preloadTotal - preloadRemaining)
-  const elapsed = preloadStartedAt > 0 ? Date.now() - preloadStartedAt : 0
-  // Une estimation tirée des trois premières vignettes ne vaut rien : la cadence dépend
-  // du poids des images et de la latence du CDN, et se stabilise après quelques dizaines.
-  // Mieux vaut n'afficher aucune durée qu'une durée fantaisiste.
-  const etaMs =
-    preloadRunning && done >= 20 && elapsed > 3000
-      ? Math.round((elapsed / done) * preloadRemaining)
-      : null
-  return { running: preloadRunning, done, total: preloadTotal, remaining: preloadRemaining, etaMs }
-}
-
-function publishPreload(): void {
-  mainWindow?.webContents.send('preload:progress', preloadState())
-}
-
-function startThumbnailPreload(): PreloadState {
-  if (preloadRunning) return preloadState()
-  preloadTotal = countPendingThumbnails(true)
-  preloadRemaining = preloadTotal
-  if (preloadTotal === 0) return preloadState()
-  preloadStartedAt = Date.now()
-  preloadRunning = true
-  publishPreload()
-  void drainMediaQueue()
-  return preloadState()
-}
-
-function cancelThumbnailPreload(): PreloadState {
-  if (!preloadRunning) return preloadState()
-  preloadRunning = false
-  mediaAbortController?.abort()
-  publishPreload()
-  return preloadState()
-}
-
-/** Ce qu'il reste à faire, mesuré plutôt que déduit : un média réessayé fausserait un
- *  compteur incrémental, et la barre reculerait ou se figerait. */
-function refreshPreloadProgress(): void {
-  preloadRemaining = countPendingThumbnails(true)
-  publishPreload()
-}
-
+/** Garantit qu'aucun fichier média n'est écrit pendant une migration de bibliothèque. */
 async function pauseMediaQueue(): Promise<void> {
   mediaPaused = true
   mediaAbortController?.abort()
@@ -456,6 +500,75 @@ async function pauseMediaQueue(): Promise<void> {
 function resumeMediaQueue(): void {
   mediaPaused = false
   void drainMediaQueue()
+}
+
+/**
+ * Préchargements demandés : vignettes et clips, sur toute la bibliothèque ou sur le
+ * périmètre affiché.
+ *
+ * Le cache intelligent ne prépare que ce qu'on a fait défiler ; le mode hors-ligne prépare
+ * tout mais impose aussi les clips. Ces tâches comblent l'écart sans changer de mode, et
+ * empruntent la file existante — deux passes concurrentes se disputeraient les mêmes
+ * lignes et le même quota.
+ */
+interface PreloadJob {
+  kind: 'thumbnails' | 'clips'
+  query: PostQuery | null
+  scope: string | null
+  total: number
+}
+
+const preloads = new Map<string, PreloadJob>()
+
+function countRemaining(job: PreloadJob): number {
+  return job.kind === 'thumbnails'
+    ? countPendingThumbnails(true, job.query)
+    : countPendingClips(job.query)
+}
+
+function publishPreload(id: string, job: PreloadJob): void {
+  const remaining = countRemaining(job)
+  backgroundTasks.update(id, {
+    kind: job.kind,
+    scope: job.scope,
+    done: Math.max(0, job.total - remaining),
+    total: job.total
+  })
+}
+
+function startPreload(request: PreloadRequest): BackgroundState {
+  const kind = request.what
+  const id = `preload:${kind}`
+  if (preloads.has(id)) return backgroundTasks.current()
+
+  const query = request.query ?? null
+  const job: PreloadJob = { kind, query, scope: request.scopeLabel ?? null, total: 0 }
+  job.total = countRemaining(job)
+  if (job.total === 0) return backgroundTasks.current()
+
+  preloads.set(id, job)
+  backgroundTasks.update(id, { kind, scope: job.scope, done: 0, total: job.total })
+  void backgroundTasks.refreshCache(false)
+  void drainMediaQueue()
+  return backgroundTasks.current()
+}
+
+function stopPreload(kind: 'thumbnails' | 'clips'): BackgroundState {
+  const id = `preload:${kind}`
+  if (preloads.delete(id)) {
+    mediaAbortController?.abort()
+    backgroundTasks.clear(id)
+  }
+  return backgroundTasks.current()
+}
+
+/** Suspend ou reprend tout ce qui télécharge. Le sync poursuit sa page en cours : la
+ *  couper en deux laisserait un curseur incohérent, pour quelques secondes gagnées. */
+function setDownloadsPaused(next: boolean): BackgroundState {
+  backgroundTasks.setPaused(next)
+  if (next) mediaAbortController?.abort()
+  else void drainMediaQueue()
+  return backgroundTasks.current()
 }
 
 /**
@@ -482,12 +595,20 @@ async function drainMediaQueue(): Promise<void> {
       const settings = readSettings()
       const requested = [...requestedThumbnailPostIds]
       requestedThumbnailPostIds.clear()
-      // Les cartes visibles passent devant : pendant un préchargement, on ne veut pas
-      // regarder un mur vide en attendant que la passe de fond arrive jusqu'à nous.
-      const sweeping = preloadRunning && requested.length === 0
-      // Le mode léger ne parcourt jamais les milliers de médias en attente : seules
-      // les cartes visibles (et leur petite marge de préchargement) alimentent la file.
+
+      // Les cartes visibles passent toujours devant : pendant un préchargement, on ne veut
+      // pas regarder un mur vide en attendant que la passe de fond arrive jusqu'à nous.
+      const thumbnailJob = preloads.get('preload:thumbnails')
+      const clipJob = preloads.get('preload:clips')
+      // Les vignettes avant les clips : mille fois plus légères, et c'est ce qui se voit.
+      const sweeping = requested.length === 0 ? (thumbnailJob ?? clipJob) : undefined
+      const sweepingClips = sweeping !== undefined && sweeping === clipJob && !thumbnailJob
+
       if (settings.mediaStorageMode === 'stream' && requested.length === 0 && !sweeping) break
+      // En pause, la passe ne rapporterait rien : sortir évite une boucle à vide, et
+      // évite surtout de prendre cette absence de progrès pour un travail terminé.
+      if (backgroundTasks.isPaused()) break
+
       const result = await processPendingMedia({
         onProgress: (progress) => mainWindow?.webContents.send('cache:progress', progress),
         // Le coût dominant est le réseau, pas le processeur : deux téléchargements de front
@@ -495,12 +616,16 @@ async function drainMediaQueue(): Promise<void> {
         // demandes de la grille passent donc large ; la passe de fond reste discrète pour
         // ne pas leur voler la bande passante.
         concurrency: sweeping ? 3 : 8,
-        shouldPause: () => mediaPaused,
+        shouldPause: () => mediaPaused || backgroundTasks.isPaused(),
         signal: mediaAbortController.signal,
-        requestedPostIds: sweeping || settings.mediaStorageMode !== 'stream' ? undefined : requested,
-        thumbnailsOnly: sweeping,
-        coverOnly: sweeping
+        requestedPostIds:
+          sweeping || settings.mediaStorageMode !== 'stream' ? undefined : requested,
+        thumbnailsOnly: sweeping !== undefined && !sweepingClips,
+        coverOnly: sweeping !== undefined && !sweepingClips,
+        scope: sweeping && !sweepingClips ? sweeping.query : null,
+        clips: sweepingClips ? (sweeping.query ?? true) : null
       })
+
       // Le lot est volontairement court : ce qui n'a pas été traité revient dans la file,
       // mais *derrière* les identifiants arrivés entre-temps. Un Set conserve son ordre
       // d'insertion, si bien que la position courante repasse naturellement devant ce
@@ -508,13 +633,22 @@ async function drainMediaQueue(): Promise<void> {
       if (result.hasMore && !sweeping) {
         for (const id of requested) requestedThumbnailPostIds.add(id)
       }
-      if (preloadRunning) {
-        refreshPreloadProgress()
-        // Une passe qui ne rend plus rien signifie qu'il ne reste que des médias déjà
-        // abandonnés après trois tentatives : insister ne servirait à rien.
-        if (sweeping && result.total === 0) cancelThumbnailPreload()
+
+      if (result.quotaReached) {
+        // Continuer évincerait ce qu'on vient d'écrire pour écrire la suite : on s'arrête
+        // et on rend la décision à l'utilisateur.
+        await backgroundTasks.refreshCache(true)
+        backgroundTasks.setPaused(true)
       }
-      hasMore = result.hasMore || requestedThumbnailPostIds.size > 0 || preloadRunning
+
+      for (const [id, job] of preloads) publishPreload(id, job)
+      // Une passe de fond qui ne rend plus rien signifie qu'il ne reste que des médias
+      // abandonnés après trois tentatives : insister ne servirait à rien.
+      if (sweeping && result.total === 0 && !backgroundTasks.isPaused()) {
+        stopPreload(sweeping.kind)
+      }
+
+      hasMore = result.hasMore || requestedThumbnailPostIds.size > 0 || preloads.size > 0
       if (result.total > 0) mainWindow?.webContents.send('library:updated')
       // Rend régulièrement la main à Electron entre deux lots afin que déplacer ou
       // redimensionner la fenêtre reste instantané pendant un gros rattrapage.
@@ -578,9 +712,14 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
     onThemeChange: syncTheme,
     drainMedia: () => void drainMediaQueue(),
     requestThumbnails: requestThumbnailDrain,
-    startPreload: startThumbnailPreload,
-    cancelPreload: cancelThumbnailPreload,
-    preloadState: () => ({ ...preloadState(), pending: countPendingThumbnails(true) }),
+    startPreload,
+    stopPreload,
+    setDownloadsPaused,
+    backgroundState: () => backgroundTasks.current(),
+    pendingCounts: (query) => ({
+      thumbnails: countPendingThumbnails(true, query),
+      clips: countPendingClips(query)
+    }),
     pauseMedia: pauseMediaQueue,
     resumeMedia: resumeMediaQueue,
     onSettingsChange: () => {
@@ -603,7 +742,32 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
   // La progression du sync remonte en direct : la grille se remplit pendant le backfill
   // plutôt qu'à la fin. Le cache est sérialisé — chaque page ajoutée déclencherait sinon
   // une passe concurrente, et elles se disputeraient les mêmes fichiers.
+  // Un seul canal pour tout ce qui travaille en fond : l'indicateur, son survol et
+  // l'icône de la barre système lisent la même chose.
+  backgroundTasks.subscribe((state) => {
+    mainWindow?.webContents.send('tasks:state', state)
+    updateTray()
+  })
+
   syncEngine.subscribe((state) => {
+    // La synchronisation se déclare comme les autres : `page` fait office d'avancement,
+    // son ampleur n'étant pas connue d'avance.
+    for (const platform of PUBLIC_PLATFORMS) {
+      const progress = state.byPlatform[platform]
+      const id = `sync:${platform}`
+      if (progress.phase === 'running') {
+        backgroundTasks.update(id, {
+          kind: 'sync',
+          scope: platform === 'x' ? 'X' : 'Instagram',
+          done: progress.added,
+          total: 0,
+          message: progress.message
+        })
+      } else {
+        backgroundTasks.clear(id)
+      }
+    }
+
     mainWindow?.webContents.send('sync:state', state)
     for (const platform of ['instagram', 'x', 'reddit'] as const) {
       const phase = state.byPlatform[platform].phase
@@ -660,6 +824,15 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
 
   localOrganizer.subscribe((value) => {
     mainWindow?.webContents.send('organizer:progress', value)
+    if (value.running) {
+      backgroundTasks.update('organizer', {
+        kind: 'organizer',
+        done: value.done,
+        total: value.total
+      })
+    } else {
+      backgroundTasks.clear('organizer')
+    }
   })
 
   // Le thème « système » doit suivre les changements de l'OS en direct.

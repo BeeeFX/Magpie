@@ -81,8 +81,12 @@ check(
      )`
   ).n === 0
 )
-const videos = one<{ n: number }>(`SELECT COUNT(*) n FROM media WHERE video_path IS NOT NULL`).n
-check('des clips sont en cache', videos > 0, `${videos}`)
+/* Un clip en cache est devenu facultatif : le téléchargement se demande. Ce qui doit
+   rester vrai, c'est qu'on sache où retrouver la vidéo — le fichier local, lui, peut
+   légitimement manquer. */
+const videos = one<{ n: number }>(`SELECT COUNT(*) n FROM media WHERE video_source IS NOT NULL`).n
+const cachedClips = one<{ n: number }>(`SELECT COUNT(*) n FROM media WHERE video_path IS NOT NULL`).n
+check('les vidéos gardent leur source', videos > 0, `${videos} vidéos, ${cachedClips} en cache`)
 check(
   'chaque clip a son affiche',
   one<{ n: number }>(

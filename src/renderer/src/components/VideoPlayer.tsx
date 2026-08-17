@@ -258,14 +258,19 @@ export function VideoPlayer({
         <div className="player__error" role="alert">
           <span>{t(stalled && !sourceError ? 'player.stalled' : 'player.streamError')}</span>
           {diagnostic ? (
+            /* Le relevé technique est affiché même quand un message explique déjà l'échec :
+               c'est justement dans ces cas-là qu'il est le plus utile. */
             <code className="player__diagnostic">
-              {diagnostic.error
-                ? diagnostic.error
-                : `${diagnostic.host ?? '?'} · HTTP ${diagnostic.status ?? '?'} ${diagnostic.statusText ?? ''} · ` +
+              {diagnostic.status !== null
+                ? `${diagnostic.host ?? '?'} · HTTP ${diagnostic.status} ${diagnostic.statusText ?? ''} · ` +
                   `${diagnostic.contentType ?? 'type ?'} · ${diagnostic.firstChunkBytes ?? 0} o reçus · ` +
-                  `ranges ${diagnostic.acceptRanges ?? 'non annoncés'}${
-                    diagnostic.contentEncoding ? ` · encodage ${diagnostic.contentEncoding}` : ''
-                  } · ${diagnostic.elapsedMs} ms`}
+                  `ranges ${diagnostic.acceptRanges ?? 'non annoncés'}` +
+                  (diagnostic.contentRange ? ` · ${diagnostic.contentRange}` : '') +
+                  (diagnostic.contentLength ? ` · longueur ${diagnostic.contentLength}` : '') +
+                  (diagnostic.contentEncoding ? ` · encodage ${diagnostic.contentEncoding}` : '') +
+                  ` · ${diagnostic.elapsedMs} ms`
+                : `${diagnostic.host ?? '?'} · ${diagnostic.elapsedMs} ms`}
+              {diagnostic.error ? `\n${diagnostic.error}` : ''}
             </code>
           ) : (
             <button type="button" className="btn" disabled={diagnosing} onClick={() => void diagnose()}>

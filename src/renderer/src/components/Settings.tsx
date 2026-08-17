@@ -6,14 +6,13 @@ import type {
   LibraryMoveProgress,
   PlaybackQuality,
   SyncSchedule,
-  PreloadState,
   ThemeChoice,
   UpdateState,
   VideoQuality
 } from '@shared/types'
 import { ACCENTS, LANGUAGES } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
-import { formatBytes, formatDuration } from '../format'
+import { formatBytes } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
@@ -88,7 +87,7 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
   const [info, setInfo] = useState<LibraryInfo | null>(null)
   const [clearing, setClearing] = useState(false)
   const [cacheError, setCacheError] = useState<string | null>(null)
-  const [preload, setPreload] = useState<PreloadState | null>(null)
+  const [pending, setPending] = useState<{ thumbnails: number; clips: number } | null>(null)
   const [aiKey, setAiKey] = useState('')
   const [aiKeyStored, setAiKeyStored] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
@@ -132,8 +131,12 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
 
   useEffect(() => {
     if (!open) return
-    void magpie.getPreloadState().then(setPreload)
-    return magpieEvents.onPreloadProgress(setPreload)
+    void magpie.pendingCounts(null).then(setPending).catch(() => {})
+    // L'avancement se lit dans l'indicateur de la barre d'outils : le dupliquer ici
+    // donnerait deux endroits à tenir d'accord pour la même information.
+    return magpieEvents.onBackgroundState(() => {
+      void magpie.pendingCounts(null).then(setPending).catch(() => {})
+    })
   }, [open])
 
   useEffect(() => {
@@ -658,56 +661,38 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
             ) : null}
             <p className="setting__note">{t('settings.cacheNote')}</p>
 
-            {/* Le cache intelligent ne prépare que ce qu'on a parcouru. Ce bouton comble
-                l'écart sans faire basculer en hors-ligne, qui téléchargerait aussi les clips. */}
+            {/* Le cache intelligent ne prépare que ce qu'on a parcouru. Ces actions comblent
+                l'écart sans faire basculer en hors-ligne, qui téléchargerait aussi les clips.
+                Leur avancement s'affiche dans l'indicateur de la barre d'outils. */}
             <div className="setting setting--stack preload">
               <div className="setting__label">
                 <strong>{t('settings.preloadTitle')}</strong>
                 <p>
-                  {preload?.running
-                    ? t('settings.preloadRunning', {
-                        done: Math.min(preload.done, preload.total),
-                        total: preload.total
-                      }) +
-                      (preload.etaMs
-                        ? ` · ${t('settings.preloadEta', { eta: formatDuration(preload.etaMs) })}`
-                        : '')
-                    : (preload?.pending ?? 0) > 0
-                      ? t('settings.preloadPending', {
-                          count: preload?.pending ?? 0,
-                          size: formatBytes((preload?.pending ?? 0) * 40 * 1024)
-                        })
-                      : t('settings.preloadDone')}
+                  {(pending?.thumbnails ?? 0) > 0
+                    ? t('settings.preloadPending', {
+                        count: pending?.thumbnails ?? 0,
+                        size: formatBytes((pending?.thumbnails ?? 0) * 40 * 1024)
+                      })
+                    : t('settings.preloadDone')}
                 </p>
               </div>
-              {preload?.running ? (
-                <div className="preload__bar" aria-live="polite">
-                  <span
-                    style={{
-                      width: `${preload.total > 0 ? Math.min(100, (preload.done / preload.total) * 100) : 0}%`
-                    }}
-                  />
-                </div>
-              ) : null}
               <div className="setting__actions">
-                {preload?.running ? (
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => void magpie.cancelThumbnailPreload().then(setPreload)}
-                  >
-                    {t('settings.preloadCancel')}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={(preload?.pending ?? 0) === 0}
-                    onClick={() => void magpie.startThumbnailPreload().then(setPreload)}
-                  >
-                    {t('settings.preloadStart')}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={(pending?.thumbnails ?? 0) === 0}
+                  onClick={() => void magpie.startPreload({ what: 'thumbnails' })}
+                >
+                  {t('downloads.allThumbnails', { count: pending?.thumbnails ?? 0 })}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={(pending?.clips ?? 0) === 0}
+                  onClick={() => void magpie.startPreload({ what: 'clips' })}
+                >
+                  {t('downloads.allClips', { count: pending?.clips ?? 0 })}
+                </button>
               </div>
             </div>
           </section>

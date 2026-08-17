@@ -1527,6 +1527,220 @@ h1, h2, h3 {
   transition: width 0.3s var(--ease);
 }
 
+/* --- Travail de fond -------------------------------------------------------
+   Le déclencheur reste discret tant que rien ne se passe ; il ne s'anime que
+   pendant un téléchargement, parce qu'une flèche qui bouge en permanence finit
+   par ne plus rien signaler. */
+
+.downloads__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  position: relative;
+}
+
+.downloads__trigger.is-busy {
+  color: var(--accent);
+}
+
+.downloads__trigger.is-busy svg {
+  animation: download-nudge 1.8s var(--ease) infinite;
+}
+
+.downloads__trigger.is-paused {
+  color: var(--faint);
+}
+
+.downloads__trigger.is-paused svg,
+.downloads__trigger.is-warning svg {
+  animation: none;
+}
+
+.downloads__trigger.is-paused {
+  color: var(--faint);
+}
+
+.downloads__trigger.is-warning {
+  color: var(--warn, #e0a030);
+}
+
+@keyframes download-nudge {
+  0%,
+  70%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .downloads__trigger svg {
+    animation: none;
+  }
+}
+
+.downloads__percent {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.downloads__alert {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn, #e0a030);
+}
+
+.downloads {
+  display: grid;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 320px;
+  padding: 4px 2px;
+}
+
+.downloads__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.downloads__head .btn {
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 11px;
+}
+
+.downloads__head strong {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.downloads__hint,
+.downloads__idle {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.downloads__warning {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn, #e0a030) 14%, transparent);
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.downloads__actions {
+  display: grid;
+  gap: 6px;
+}
+
+.downloads__actions .btn {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.downloads__list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.downloads__task {
+  display: grid;
+  gap: 5px;
+}
+
+.downloads__task.is-paused {
+  opacity: 0.55;
+}
+
+.downloads__task-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.downloads__task-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.downloads__task-name em {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downloads__task-detail,
+.downloads__task-message {
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.downloads__bar {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--field);
+}
+
+.downloads__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.3s var(--ease);
+}
+
+/* Ampleur inconnue : on montre du mouvement plutôt qu'un pourcentage inventé. */
+.downloads__bar.is-indeterminate span {
+  width: 35%;
+  animation: downloads-sweep 1.3s var(--ease) infinite;
+}
+
+@keyframes downloads-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .downloads__bar.is-indeterminate span {
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
 .organizer-list {
   display: grid;
   gap: 8px;
@@ -4078,6 +4292,7 @@ html.window-is-moving .app *::after {
 /* Le relevé technique se lit et se recopie : c'est ce qu'on colle dans un rapport. */
 .player__diagnostic {
   max-width: 100%;
+  white-space: pre-wrap;
   color: rgb(255 255 255 / 0.62);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10.5px;

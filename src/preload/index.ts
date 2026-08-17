@@ -23,7 +23,8 @@ import type {
   PlaybackQuality,
   Platform,
   Post,
-  PreloadState,
+  BackgroundState,
+  PreloadRequest,
   PostPage,
   PostQuery,
   Settings,
@@ -93,9 +94,15 @@ const api: MagpieApi = {
     quality: PlaybackQuality
   ): Promise<MediaDiagnostic> =>
     ipcRenderer.invoke('media:diagnose', postId, mediaIndex, kind, quality),
-  getPreloadState: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadState'),
-  startThumbnailPreload: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadStart'),
-  cancelThumbnailPreload: (): Promise<PreloadState> => ipcRenderer.invoke('media:preloadCancel'),
+  getBackgroundState: (): Promise<BackgroundState> => ipcRenderer.invoke('tasks:state'),
+  startPreload: (request: PreloadRequest): Promise<BackgroundState> =>
+    ipcRenderer.invoke('tasks:preload', request),
+  stopPreload: (kind: 'thumbnails' | 'clips'): Promise<BackgroundState> =>
+    ipcRenderer.invoke('tasks:stop', kind),
+  setDownloadsPaused: (paused: boolean): Promise<BackgroundState> =>
+    ipcRenderer.invoke('tasks:pause', paused),
+  pendingCounts: (query: PostQuery | null): Promise<{ thumbnails: number; clips: number }> =>
+    ipcRenderer.invoke('tasks:pending', query),
 
   setLabel: (postId: string, label: LabelColor | null): Promise<void> =>
     ipcRenderer.invoke('posts:setLabel', postId, label),
@@ -167,10 +174,10 @@ const events: MagpieEvents = {
     ipcRenderer.on('organizer:progress', listener)
     return () => ipcRenderer.removeListener('organizer:progress', listener)
   },
-  onPreloadProgress: (cb) => {
-    const listener = (_e: unknown, state: PreloadState): void => cb(state)
-    ipcRenderer.on('preload:progress', listener)
-    return () => ipcRenderer.removeListener('preload:progress', listener)
+  onBackgroundState: (cb) => {
+    const listener = (_e: unknown, state: BackgroundState): void => cb(state)
+    ipcRenderer.on('tasks:state', listener)
+    return () => ipcRenderer.removeListener('tasks:state', listener)
   },
   onUpdateState: (cb) => {
     const listener = (_e: unknown, state: UpdateState): void => cb(state)

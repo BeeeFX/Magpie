@@ -89,6 +89,17 @@ const PREVIEW_DEFAULTS: Settings = {
 
 const IDLE_SYNC: SyncState = idleSyncState()
 
+const PREVIEW_TASKS = {
+  paused: false,
+  cacheFull: false,
+  cacheBytes: 1.1 * 1024 ** 3,
+  cacheLimitBytes: 5 * 1024 ** 3,
+  tasks: [
+    { id: 'preload:thumbnails', kind: 'thumbnails' as const, scope: null, done: 412, total: 1240, etaMs: 260_000, paused: false, message: null },
+    { id: 'preload:clips', kind: 'clips' as const, scope: 'blender', done: 12, total: 318, etaMs: 1_500_000, paused: false, message: null }
+  ]
+}
+
 function previewSettings(): Settings {
   try {
     const raw = localStorage.getItem(PREVIEW_SETTINGS_KEY)
@@ -233,9 +244,12 @@ const previewApi: MagpieApi = {
     elapsedMs: 0,
     error: 'Diagnostic indisponible en aperçu.'
   }),
-  getPreloadState: async () => ({ running: false, done: 0, total: 0, remaining: 0, pending: 1240 }),
-  startThumbnailPreload: async () => ({ running: true, done: 0, total: 1240, remaining: 1240 }),
-  cancelThumbnailPreload: async () => ({ running: false, done: 0, total: 0, remaining: 0 }),
+  // Deux tâches fictives : l'aperçu visuel doit montrer l'indicateur en action.
+  getBackgroundState: async () => PREVIEW_TASKS,
+  startPreload: async () => PREVIEW_TASKS,
+  stopPreload: async () => PREVIEW_TASKS,
+  setDownloadsPaused: async (paused) => ({ ...PREVIEW_TASKS, paused }),
+  pendingCounts: async () => ({ thumbnails: 1240, clips: 318 }),
 
   // Les mutations n'ont pas de base derrière elles en aperçu : elles renvoient l'état
   // courant sans rien modifier, plutôt que de simuler une persistance qui mentirait.
@@ -290,7 +304,7 @@ const previewEvents: MagpieEvents = {
   onSyncState: () => () => {},
   onAiTagProgress: () => () => {},
   onOrganizerProgress: () => () => {},
-  onPreloadProgress: () => () => {},
+  onBackgroundState: () => () => {},
   onUpdateState: () => () => {},
   onLibraryMoveProgress: () => () => {},
   onWindowInteraction: () => () => {},

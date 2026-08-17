@@ -358,9 +358,11 @@ export interface MagpieApi {
     kind: 'image' | 'video',
     quality: PlaybackQuality
   ): Promise<MediaDiagnostic>
-  getPreloadState(): Promise<PreloadState>
-  startThumbnailPreload(): Promise<PreloadState>
-  cancelThumbnailPreload(): Promise<PreloadState>
+  getBackgroundState(): Promise<BackgroundState>
+  startPreload(request: PreloadRequest): Promise<BackgroundState>
+  stopPreload(kind: 'thumbnails' | 'clips'): Promise<BackgroundState>
+  setDownloadsPaused(paused: boolean): Promise<BackgroundState>
+  pendingCounts(query: PostQuery | null): Promise<{ thumbnails: number; clips: number }>
 
   setLabel(postId: string, label: LabelColor | null): Promise<void>
   setCollectionColor(collectionId: number, color: LabelColor | null): Promise<void>
@@ -449,6 +451,48 @@ export interface AiCollectionApplyResult {
   alreadyThere: number
 }
 
+/**
+ * Travail de fond, tel qu'il se montre à l'utilisateur.
+ *
+ * Synchronisation, vignettes, clips et organisation avançaient chacun dans leur coin, avec
+ * leur propre événement et leur propre coin d'interface. Les réunir derrière un seul état
+ * permet de n'avoir qu'un indicateur à regarder — et de tout suspendre d'un geste.
+ */
+export type BackgroundTaskKind = 'sync' | 'thumbnails' | 'clips' | 'organizer'
+
+export interface BackgroundTask {
+  id: string
+  kind: BackgroundTaskKind
+  /** Ce sur quoi porte la tâche : nom de plateforme, de collection, de tag… */
+  scope: string | null
+  done: number
+  /** Zéro quand l'ampleur n'est pas connue d'avance : l'interface montre alors une
+   *  progression indéterminée plutôt qu'un pourcentage inventé. */
+  total: number
+  etaMs: number | null
+  paused: boolean
+  message: string | null
+}
+
+export interface BackgroundState {
+  tasks: BackgroundTask[]
+  /** Vrai dès qu'un téléchargement est suspendu à la demande. */
+  paused: boolean
+  /** Quota atteint : poursuivre ne ferait qu'évincer ce qu'on vient d'écrire, alors les
+   *  téléchargements s'arrêtent et l'interface propose de libérer ou d'agrandir. */
+  cacheFull: boolean
+  cacheBytes: number
+  cacheLimitBytes: number
+}
+
+/** Ce qu'un préchargement doit préparer, et sur quel périmètre. */
+export interface PreloadRequest {
+  what: 'thumbnails' | 'clips'
+  /** Sans requête, toute la bibliothèque. Avec, le périmètre affiché à l'écran. */
+  query?: PostQuery | null
+  scopeLabel?: string | null
+}
+
 /** Préparation en masse des vignettes du mur. `pending` n'est renseigné qu'à l'interrogation
  *  de l'état, pour annoncer le travail restant avant de lancer quoi que ce soit. */
 export interface PreloadState {
@@ -510,7 +554,7 @@ export interface MagpieEvents {
   onSyncState(cb: (state: SyncState) => void): () => void
   onAiTagProgress(cb: (progress: AiTagProgress) => void): () => void
   onOrganizerProgress(cb: (progress: OrganizerProgress) => void): () => void
-  onPreloadProgress(cb: (state: PreloadState) => void): () => void
+  onBackgroundState(cb: (state: BackgroundState) => void): () => void
   onUpdateState(cb: (state: UpdateState) => void): () => void
   onLibraryMoveProgress(cb: (progress: LibraryMoveProgress) => void): () => void
   onWindowInteraction(cb: (active: boolean) => void): () => void

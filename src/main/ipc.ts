@@ -12,10 +12,11 @@ import type {
   LibraryInfo,
   LibraryMoveProgress,
   MediaDiagnostic,
+  BackgroundState,
   Platform,
   PostQuery,
   PlaybackQuality,
-  PreloadState,
+  PreloadRequest,
   Settings
 } from '@shared/types'
 import { CONTENT_SOURCES, DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS } from '@shared/types'
@@ -50,6 +51,7 @@ import {
   writeAccount
 } from './db/queries'
 import { seedIfEmpty } from './fixtures/seed'
+import { backgroundTasks } from './tasks'
 import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
 import { getCacheUsage, resetCacheUsage, VIDEO_NAME_PATTERN } from './media/cache'
@@ -143,9 +145,11 @@ export interface IpcHooks {
   /** Relance le traitement des médias en attente, sérialisé côté processus principal. */
   drainMedia: () => void
   requestThumbnails: (postIds: string[]) => void
-  startPreload: () => PreloadState
-  cancelPreload: () => PreloadState
-  preloadState: () => PreloadState
+  startPreload: (request: PreloadRequest) => BackgroundState
+  stopPreload: (kind: 'thumbnails' | 'clips') => BackgroundState
+  setDownloadsPaused: (paused: boolean) => BackgroundState
+  backgroundState: () => BackgroundState
+  pendingCounts: (query: PostQuery | null) => { thumbnails: number; clips: number }
   /** Garantit qu'aucun fichier média n'est écrit pendant une migration de bibliothèque. */
   pauseMedia: () => Promise<void>
   resumeMedia: () => void
@@ -157,15 +161,34 @@ export function registerIpc({
   drainMedia,
   requestThumbnails,
   startPreload,
-  cancelPreload,
-  preloadState,
+  stopPreload,
+  setDownloadsPaused,
+  backgroundState,
+  pendingCounts,
   pauseMedia,
   resumeMedia,
   onSettingsChange
 }: IpcHooks): void {
-  ipcMain.handle('media:preloadState', () => preloadState())
-  ipcMain.handle('media:preloadStart', () => startPreload())
-  ipcMain.handle('media:preloadCancel', () => cancelPreload())
+  ipcMain.handle('tasks:state', () => backgroundState())
+  ipcMain.handle('tasks:pause', (_event, paused: boolean) => setDownloadsPaused(paused === true))
+  ipcMain.handle('tasks:stop', (_event, kind: 'thumbnails' | 'clips') => {
+    if (kind !== 'thumbnails' && kind !== 'clips') throw new Error('Tâche inconnue')
+    return stopPreload(kind)
+  })
+  ipcMain.handle('tasks:pending', (_event, query?: PostQuery | null) =>
+    pendingCounts(query ? postQueryValue(query) : null)
+  )
+  ipcMain.handle('tasks:preload', (_event, request: PreloadRequest) => {
+    if (request?.what !== 'thumbnails' && request?.what !== 'clips') {
+      throw new Error('Préchargement inconnu')
+    }
+    return startPreload({
+      what: request.what,
+      query: request.query ? postQueryValue(request.query) : null,
+      scopeLabel:
+        typeof request.scopeLabel === 'string' ? request.scopeLabel.slice(0, 80) : null
+    })
+  })
 
   ipcMain.handle('posts:list', (_event, query: PostQuery) => listPosts(postQueryValue(query)))
   ipcMain.handle('posts:page', (_event, query: PostQuery, offset: number, limit: number) => {
@@ -358,6 +381,8 @@ export function registerIpc({
     const next = writeSettings(patch)
     if (patch.cacheLimitGb !== undefined) {
       getDb().exec("UPDATE media SET video_cache_state = 'pending' WHERE video_cache_state = 'skipped'")
+      // Relever la limite doit lever l'avertissement de saturation ; l'abaisser peut le poser.
+      void backgroundTasks.refreshCache(true)
     }
     onThemeChange()
     onSettingsChange()
@@ -422,6 +447,7 @@ export function registerIpc({
       if (survivors.length > 0) {
         console.warn(`[magpie] Purge du cache : ${survivors.length} fichier(s) encore verrouillé(s).`)
       }
+      void backgroundTasks.refreshCache(true)
       return { removed, failed: survivors.length }
     } finally {
       resumeMedia()

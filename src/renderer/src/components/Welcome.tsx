@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ACCENTS, LANGUAGES } from '@shared/types'
-import type { LibraryInfo, PreloadState, VideoQuality } from '@shared/types'
+import type { BackgroundState, LibraryInfo, VideoQuality } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { formatBytes, formatDuration } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
@@ -73,7 +73,10 @@ export function Welcome(): React.JSX.Element {
   const [choosingFolder, setChoosingFolder] = useState(false)
   const [folderError, setFolderError] = useState<string | null>(null)
 
-  const [preload, setPreload] = useState<PreloadState | null>(null)
+  /* La présentation occupe tout l'écran : l'indicateur de la barre d'outils est hors de vue,
+     donc l'avancement se redit ici plutôt que d'envoyer chercher ailleurs. */
+  const [pending, setPending] = useState<{ thumbnails: number; clips: number } | null>(null)
+  const [background, setBackground] = useState<BackgroundState | null>(null)
   /** Décoché par défaut : préparer tout le mur peut occuper de longues minutes et beaucoup
    *  de bande passante. C'est un choix, pas une valeur qu'on impose à quelqu'un qui
    *  découvre l'application. */
@@ -93,7 +96,7 @@ export function Welcome(): React.JSX.Element {
   useEffect(() => {
     if (!firstSyncDone || !prepareAfterSync || preparedOnce.current) return
     preparedOnce.current = true
-    void magpie.startThumbnailPreload().then(setPreload).catch(() => {})
+    void magpie.startPreload({ what: 'thumbnails' }).catch(() => {})
   }, [firstSyncDone, prepareAfterSync])
 
   useEffect(() => {
@@ -101,8 +104,15 @@ export function Welcome(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    void magpie.getPreloadState().then(setPreload).catch(() => {})
-    return magpieEvents.onPreloadProgress(setPreload)
+    const refreshCounts = (): void => {
+      void magpie.pendingCounts(null).then(setPending).catch(() => {})
+    }
+    refreshCounts()
+    void magpie.getBackgroundState().then(setBackground).catch(() => {})
+    return magpieEvents.onBackgroundState((state) => {
+      setBackground(state)
+      refreshCounts()
+    })
   }, [])
 
   const chooseFolder = async (): Promise<void> => {
@@ -134,6 +144,11 @@ export function Welcome(): React.JSX.Element {
       { key: 'next', icon: <IconSend size={18} />, title: 'welcome.nextTitle', text: 'welcome.nextText' }
     ]
   ]
+
+  const preload = background?.tasks.find((task) => task.kind === 'thumbnails') ?? null
+  const preloadPercent =
+    preload && preload.total > 0 ? Math.min(100, (preload.done / preload.total) * 100) : 0
+  const pendingThumbs = pending?.thumbnails ?? 0
 
   const steps = ['hello', 'what', 'storage', 'how', 'connect']
   const isLast = index === steps.length - 1
@@ -273,12 +288,12 @@ export function Welcome(): React.JSX.Element {
                   la proposition n'aurait aucun sens. Il apparaît en revanche quand on rejoue
                   la présentation sur une bibliothèque déjà remplie — le moment exact où
                   préparer le mur d'un coup devient utile. */}
-              {preload?.running || (preload?.pending ?? 0) > 0 ? (
+              {preload || pendingThumbs > 0 ? (
                 <div className="welcome__storage-row">
                   <div>
                     <strong>{t('settings.preloadTitle')}</strong>
                     <span>
-                      {preload?.running
+                      {preload
                         ? t('settings.preloadRunning', {
                             done: Math.min(preload.done, preload.total),
                             total: preload.total
@@ -287,17 +302,13 @@ export function Welcome(): React.JSX.Element {
                             ? ` · ${t('settings.preloadEta', { eta: formatDuration(preload.etaMs) })}`
                             : '')
                         : t('settings.preloadPending', {
-                            count: preload?.pending ?? 0,
-                            size: formatBytes((preload?.pending ?? 0) * 40 * 1024)
+                            count: pendingThumbs,
+                            size: formatBytes(pendingThumbs * 40 * 1024)
                           })}
                     </span>
-                    {preload?.running ? (
+                    {preload ? (
                       <div className="preload__bar" aria-live="polite">
-                        <span
-                          style={{
-                            width: `${preload.total > 0 ? Math.min(100, (preload.done / preload.total) * 100) : 0}%`
-                          }}
-                        />
+                        <span style={{ width: `${preloadPercent}%` }} />
                       </div>
                     ) : null}
                   </div>
@@ -305,13 +316,13 @@ export function Welcome(): React.JSX.Element {
                     type="button"
                     className="btn"
                     onClick={() =>
-                      void (preload?.running
-                        ? magpie.cancelThumbnailPreload()
-                        : magpie.startThumbnailPreload()
-                      ).then(setPreload)
+                      void (preload
+                        ? magpie.stopPreload('thumbnails')
+                        : magpie.startPreload({ what: 'thumbnails' })
+                      ).then(setBackground)
                     }
                   >
-                    {t(preload?.running ? 'settings.preloadCancel' : 'settings.preloadStart')}
+                    {t(preload ? 'settings.preloadCancel' : 'settings.preloadStart')}
                   </button>
                 </div>
               ) : null}
@@ -371,7 +382,7 @@ export function Welcome(): React.JSX.Element {
                     </span>
                   </label>
 
-                  {preload?.running ? (
+                  {preload ? (
                     <>
                       <div className="welcome__first-sync-state">
                         <span>
@@ -386,24 +397,20 @@ export function Welcome(): React.JSX.Element {
                         <button
                           type="button"
                           className="btn"
-                          onClick={() => void magpie.cancelThumbnailPreload().then(setPreload)}
+                          onClick={() => void magpie.stopPreload('thumbnails').then(setBackground)}
                         >
                           {t('settings.preloadCancel')}
                         </button>
                       </div>
                       <div className="preload__bar">
-                        <span
-                          style={{
-                            width: `${preload.total > 0 ? Math.min(100, (preload.done / preload.total) * 100) : 0}%`
-                          }}
-                        />
+                        <span style={{ width: `${preloadPercent}%` }} />
                       </div>
                     </>
-                  ) : firstSyncDone && !prepareAfterSync && (preload?.pending ?? 0) > 0 ? (
+                  ) : firstSyncDone && !prepareAfterSync && pendingThumbs > 0 ? (
                     <button
                       type="button"
                       className="btn"
-                      onClick={() => void magpie.startThumbnailPreload().then(setPreload)}
+                      onClick={() => void magpie.startPreload({ what: 'thumbnails' }).then(setBackground)}
                     >
                       {t('settings.preloadStart')}
                     </button>

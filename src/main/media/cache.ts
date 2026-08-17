@@ -5,10 +5,11 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import sharp from 'sharp'
 import ffmpegPath from 'ffmpeg-static'
-import type { Platform } from '@shared/types'
+import type { Platform, PostQuery } from '@shared/types'
 import { downloadMediaToFile, fetchMedia, MediaLimitExceeded } from '../adapters/http'
 import { mediaDir } from '../db'
 import {
+  pendingClips,
   pendingThumbnails,
   pendingThumbnailsForPosts,
   pendingVideos,
@@ -317,6 +318,13 @@ export interface CacheProgress {
   postIds?: string[]
 }
 
+/** Remonté à l'appelant plutôt qu'avalé : un préchargement qui bute sur le quota doit
+ *  s'interrompre et le dire, pas s'acharner en évinçant ce qu'il vient d'écrire. */
+export interface CacheOutcome extends CacheProgress {
+  hasMore: boolean
+  quotaReached: boolean
+}
+
 /**
  * Traite tout ce qui n'a pas encore de vignette, avec une concurrence bornée : sharp est
  * gourmand et saturer les cœurs rendrait l'interface saccadée pendant le premier sync.
@@ -334,6 +342,11 @@ export interface ProcessMediaOptions {
   /** Seulement le média de couverture. Le mur n'affiche que celui-là ; les vues suivantes
    *  d'un carrousel restent paresseuses, ce qui divise le travail par deux. */
   coverOnly?: boolean
+  /** Restreint la passe au périmètre affiché : un tag, une collection, une recherche. */
+  scope?: PostQuery | null
+  /** Téléchargement délibéré de clips, indépendamment du mode de stockage : c'est une
+   *  action demandée, pas une politique. Restreint au périmètre s'il y en a un. */
+  clips?: PostQuery | true | null
 }
 
 export async function processPendingMedia({
@@ -343,8 +356,10 @@ export async function processPendingMedia({
   signal,
   requestedPostIds,
   thumbnailsOnly = false,
-  coverOnly = false
-}: ProcessMediaOptions = {}): Promise<CacheProgress & { hasMore: boolean }> {
+  coverOnly = false,
+  scope = null,
+  clips = null
+}: ProcessMediaOptions = {}): Promise<CacheOutcome> {
   /**
    * Un lot demandé par la grille reste court, parce que la file ne se réordonne qu'entre
    * deux lots : avec trois cent soixante vignettes d'avance, elle continuait de préparer
@@ -356,15 +371,21 @@ export async function processPendingMedia({
   const videoBatch = 120
   const thumbRows = requestedPostIds
     ? pendingThumbnailsForPosts(requestedPostIds, thumbnailBatch)
-    : pendingThumbnails(thumbnailBatch, coverOnly)
+    : pendingThumbnails(thumbnailBatch, coverOnly, scope)
   const thumbs = thumbRows.map((t) => ({ type: 'thumb' as const, ...t }))
-  const videos =
-    !thumbnailsOnly && readSettings().mediaStorageMode === 'offline'
-      ? pendingVideos(videoBatch).map((v) => ({ type: 'video' as const, ...v }))
+
+  // Un clip pèse mille fois une vignette : les lots restent courts pour que l'avancement
+  // se voie bouger et qu'une interruption ne perde pas grand-chose.
+  const clipRows = clips
+    ? pendingClips(24, clips === true ? null : clips)
+    : !thumbnailsOnly && readSettings().mediaStorageMode === 'offline'
+      ? pendingVideos(videoBatch)
       : []
+  const videos = clipRows.map((v) => ({ type: 'video' as const, ...v }))
   // Un lot plein signifie qu'il en reste, y compris pour une demande de la grille : c'est
   // à l'appelant de relancer, en réordonnant d'abord sur la position courante.
-  const hasMore = thumbs.length === thumbnailBatch || videos.length === videoBatch
+  const hasMore =
+    thumbs.length === thumbnailBatch || videos.length === (clips ? 24 : videoBatch)
   // Trois affiches puis un clip : auparavant, les milliers de vignettes bloquaient toute
   // la file vidéo jusqu'à leur achèvement. L'entrelacement fait progresser les deux sans
   // laisser les gros fichiers ralentir l'apparition du mur.
@@ -379,13 +400,14 @@ export async function processPendingMedia({
   }
   const total = pending.length
   let done = 0
+  let quotaReached = false
   const changedPostIds = new Set<string>()
 
-  if (total === 0) return { done: 0, total: 0, hasMore: false }
+  if (total === 0) return { done: 0, total: 0, hasMore: false, quotaReached: false }
 
   let cursor = 0
   const worker = async (): Promise<void> => {
-    while (cursor < pending.length && !shouldPause?.()) {
+    while (cursor < pending.length && !shouldPause?.() && !quotaReached) {
       const item = pending[cursor++]
       try {
         if (item.type === 'thumb') {
@@ -397,10 +419,11 @@ export async function processPendingMedia({
             item.remote_url,
             signal
           )
-        } else if (item.video_source && readSettings().mediaStorageMode === 'offline') {
+        } else if (item.video_source && (clips || readSettings().mediaStorageMode === 'offline')) {
           await cacheVideo(item.platform, item.post_id, item.idx, item.video_source, signal)
         }
       } catch (err) {
+        if (err instanceof CacheQuotaReached) quotaReached = true
         if (item.type === 'thumb' && !signal?.aborted) {
           markThumbnailFailure(item.post_id, item.idx)
         }
@@ -424,5 +447,5 @@ export async function processPendingMedia({
 
   await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker))
   if (changedPostIds.size > 0) onProgress?.({ done, total, postIds: [...changedPostIds] })
-  return { done, total, hasMore }
+  return { done, total, hasMore, quotaReached }
 }

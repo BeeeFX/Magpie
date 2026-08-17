@@ -165,6 +165,25 @@ export function IconCopy({ size = 16 }: IconProps): React.JSX.Element {
   )
 }
 
+export function IconDownload({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)}>
+      <path d="M10 3.4v8.4" />
+      <path d="M6.4 8.6L10 12.2l3.6-3.6" />
+      <path d="M4 14.2v1.2a1.4 1.4 0 001.4 1.4h9.2a1.4 1.4 0 001.4-1.4v-1.2" />
+    </svg>
+  )
+}
+
+export function IconPause({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)} fill="currentColor" stroke="none">
+      <rect x="6" y="5" width="2.8" height="10" rx="1" />
+      <rect x="11.2" y="5" width="2.8" height="10" rx="1" />
+    </svg>
+  )
+}
+
 export function IconPlay({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...base(size)} fill="currentColor" stroke="none">

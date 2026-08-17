@@ -47,10 +47,12 @@ const SELECT_POST = /* sql */ `
   FROM posts p
 `
 
-export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): PostPage {
-  const db = getDb()
-  const offset = Math.max(0, Math.floor(rawOffset))
-  const limit = Math.min(500, Math.max(1, Math.floor(rawLimit)))
+/**
+ * Traduit une requête d'interface en condition SQL, une seule fois pour tous ceux qui en
+ * ont besoin. Le préchargement se limite ainsi exactement à ce que l'utilisateur voit —
+ * un tag, une collection, une recherche — sans réécrire ni faire diverger ces filtres.
+ */
+export function postFilter(query: PostQuery): { condition: string; params: unknown[] } {
   const where: string[] = [
     `p.is_archived = 0`,
     `p.platform IN (${PUBLIC_PLATFORMS.map(() => '?').join(', ')})`
@@ -121,7 +123,14 @@ export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): P
     params.push(match)
   }
 
-  const condition = where.join(' AND ')
+  return { condition: where.join(' AND '), params }
+}
+
+export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): PostPage {
+  const db = getDb()
+  const offset = Math.max(0, Math.floor(rawOffset))
+  const limit = Math.min(500, Math.max(1, Math.floor(rawLimit)))
+  const { condition, params } = postFilter(query)
 
   // Le COUNT parcourt tout le jeu de résultats : à 60 000 posts il pèse une trentaine de
   // millisecondes contre une fraction de milliseconde pour la page elle-même, et
@@ -1469,20 +1478,26 @@ const PENDING_THUMBNAIL_WHERE = `m.thumb_path IS NULL
   AND m.thumb_attempts < 3
   AND (m.source_path IS NOT NULL OR m.remote_url LIKE 'http%')`
 
-export function pendingThumbnails(rawLimit = 400, coverOnly = false): PendingMedia[] {
+export function pendingThumbnails(
+  rawLimit = 400,
+  coverOnly = false,
+  query?: PostQuery | null
+): PendingMedia[] {
   const limit = Math.min(1000, Math.max(1, Math.floor(rawLimit)))
+  const scope = query ? postFilter(query) : null
   return getDb()
     .prepare(
       `SELECT m.post_id, m.idx, p.platform, m.source_path, m.remote_url, m.video_source,
               m.thumb_attempts, m.video_attempts
          FROM media m JOIN posts p ON p.id = m.post_id
         WHERE ${PENDING_THUMBNAIL_WHERE}${coverOnly ? ' AND m.idx = 0' : ''}
+          ${scope ? `AND ${scope.condition}` : ''}
         ORDER BY CASE WHEN m.idx = 0 THEN 0 ELSE 1 END,
                  CASE WHEN p.saved_rank IS NULL THEN 1 ELSE 0 END,
                  p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx
         LIMIT ?`
     )
-    .all(limit) as PendingMedia[]
+    .all(...(scope?.params ?? []), limit) as PendingMedia[]
 }
 
 /**
@@ -1490,14 +1505,70 @@ export function pendingThumbnails(rawLimit = 400, coverOnly = false): PendingMed
  * puis à en suivre l'avancement : un décompte recalculé est la seule mesure qui reste juste
  * quand un même média est réessayé plusieurs fois.
  */
-export function countPendingThumbnails(coverOnly = false): number {
+export function countPendingThumbnails(coverOnly = false, query?: PostQuery | null): number {
+  const scope = query ? postFilter(query) : null
   return (
     getDb()
       .prepare(
         `SELECT COUNT(*) AS n FROM media m
-          WHERE ${PENDING_THUMBNAIL_WHERE}${coverOnly ? ' AND m.idx = 0' : ''}`
+          WHERE ${PENDING_THUMBNAIL_WHERE}${coverOnly ? ' AND m.idx = 0' : ''}
+          ${scope ? `AND EXISTS (SELECT 1 FROM posts p WHERE p.id = m.post_id AND ${scope.condition})` : ''}`
       )
-      .get() as { n: number }
+      .get(...(scope?.params ?? [])) as { n: number }
+  ).n
+}
+
+/**
+ * Clips restant à télécharger, avec la variante la plus légère disponible.
+ *
+ * On préfère `media_variants` à `video_source` : ce dernier a été figé au moment de la
+ * synchronisation, selon la qualité réglée à l'époque. Choisir ici permet de préparer une
+ * bibliothèque entière en 480p sans avoir à tout resynchroniser.
+ */
+const PENDING_CLIP_WHERE = `m.kind = 'video'
+  AND m.video_path IS NULL
+  AND m.video_attempts < 3
+  AND m.video_cache_state <> 'skipped'`
+
+const CLIP_SOURCE = `COALESCE(
+  (SELECT v.source FROM media_variants v
+    WHERE v.post_id = m.post_id AND v.idx = m.idx
+    ORDER BY CASE v.quality
+      WHEN '480p' THEN 1 WHEN '720p' THEN 2 WHEN '1080p' THEN 3 ELSE 4 END
+    LIMIT 1),
+  m.video_source
+)`
+
+export function pendingClips(rawLimit = 40, query?: PostQuery | null): PendingMedia[] {
+  const limit = Math.min(200, Math.max(1, Math.floor(rawLimit)))
+  const scope = query ? postFilter(query) : null
+  return getDb()
+    .prepare(
+      `SELECT m.post_id, m.idx, p.platform, m.source_path, m.remote_url,
+              ${CLIP_SOURCE} AS video_source, m.video_attempts, m.thumb_attempts
+         FROM media m JOIN posts p ON p.id = m.post_id
+        WHERE ${PENDING_CLIP_WHERE}
+          AND p.is_archived = 0
+          AND ${CLIP_SOURCE} LIKE 'http%'
+          ${scope ? `AND ${scope.condition}` : ''}
+        ORDER BY p.saved_rank ASC, p.discovered_at DESC, m.post_id, m.idx
+        LIMIT ?`
+    )
+    .all(...(scope?.params ?? []), limit) as PendingMedia[]
+}
+
+export function countPendingClips(query?: PostQuery | null): number {
+  const scope = query ? postFilter(query) : null
+  return (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) AS n FROM media m JOIN posts p ON p.id = m.post_id
+          WHERE ${PENDING_CLIP_WHERE}
+            AND p.is_archived = 0
+            AND ${CLIP_SOURCE} LIKE 'http%'
+            ${scope ? `AND ${scope.condition}` : ''}`
+      )
+      .get(...(scope?.params ?? [])) as { n: number }
   ).n
 }
 
