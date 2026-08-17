@@ -4,6 +4,7 @@ import type {
   AiCollectionRoute,
   AiCollectionSuggestion,
   Language,
+  OrganizerMap,
   OrganizerProgress
 } from '@shared/types'
 import { app } from 'electron'
@@ -23,6 +24,7 @@ import {
   type OrganizationItem
 } from '../db/queries'
 import { centreVectors, embedItems, embedTexts } from './embeddings'
+import { project } from './projection'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
 
@@ -586,6 +588,9 @@ function categoryDescription(
 }
 
 let currentProposal: Promise<AiCollectionPlan> | null = null
+/** Vecteurs recentrés de la dernière analyse. La carte les réutilise plutôt que de réencoder
+ *  toute la bibliothèque pour afficher les mêmes points. */
+let lastSemanticVectors: Map<string, Float32Array> | null = null
 
 export async function buildLocalCollectionPlan(
   items: OrganizationItem[],
@@ -732,6 +737,7 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
         items: new Map([...vectors.keys()].map((id) => [id, centred.get(id) as Float32Array])),
         topics: new Map(topicIds.map((id) => [id, centred.get(`topic:${id}`) as Float32Array]))
       }
+      lastSemanticVectors = semantic.items
     }
   } catch (error) {
     console.warn('[magpie] Embeddings indisponibles, tri par mots-clés seul :', error)
@@ -741,6 +747,51 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
   const plan = await buildLocalCollectionPlan(items, visuals, language(), breathe, semantic)
   setProgress({ stage: 'grouping', done: items.length, total: items.length, running: true })
   return withoutRemovedPosts(plan, organizerCollectionResolver(), collectionRemovals())
+}
+
+/**
+ * Le plan, plus une position pour chaque post.
+ *
+ * La carte n'est pas un second calcul : elle réutilise exactement les vecteurs et le plan de
+ * l'analyse, et n'y ajoute qu'une projection. Un point et sa catégorie racontent donc la même
+ * chose, ce qui serait faux si les deux étaient calculés séparément.
+ */
+export async function buildOrganizerMap(): Promise<OrganizerMap> {
+  const plan = await proposeVideoCollections()
+  const vectors = lastSemanticVectors
+  if (!vectors || vectors.size === 0) return { points: [], plan }
+
+  setProgress({ stage: 'projecting', done: 0, total: 100, running: true })
+  const projected = await project(vectors, (done, total) =>
+    setProgress({ stage: 'projecting', done, total, running: true })
+  )
+  setProgress({ stage: 'idle', done: 0, total: 0, running: false })
+
+  const groupOf = new Map<string, string>()
+  for (const suggestion of plan.suggestions) {
+    for (const postId of suggestion.postIds) groupOf.set(postId, suggestion.id)
+  }
+  const details = new Map(organizationItems().map((item) => [item.id, item]))
+
+  return {
+    plan,
+    points: projected.flatMap((point) => {
+      const item = details.get(point.id)
+      if (!item) return []
+      return [
+        {
+          id: point.id,
+          x: point.x,
+          y: point.y,
+          group: groupOf.get(point.id) ?? null,
+          thumbUrl: item.thumbPath ? `magpie://thumb/${item.thumbPath}` : null,
+          platform: item.platform,
+          kind: item.kind,
+          sources: item.sources
+        }
+      ]
+    })
+  }
 }
 
 export function proposeVideoCollections(): Promise<AiCollectionPlan> {

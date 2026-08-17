@@ -4,6 +4,7 @@ import type {
   AiCollectionPlan,
   AiCollectionSuggestion,
   OrganizerApplicationSummary,
+  OrganizerMap as OrganizerMapData,
   OrganizerProgress,
   OrganizerUndoResult,
   Post
@@ -13,6 +14,7 @@ import { magpie, magpieEvents } from '../bridge'
 import { displayName, formatDateTime } from '../format'
 import { useStore, useT } from '../store'
 import { IconChevronRight, IconClose } from './Icons'
+import { OrganizerMap, type ColourMode } from './OrganizerMap'
 import { PlatformIcon } from './PlatformIcon'
 
 interface Props {
@@ -22,6 +24,8 @@ interface Props {
 
 interface EditableSuggestion extends AiCollectionSuggestion {
   included: boolean
+  /** Vrai pour un groupe tracé à la main : ses posts sont désignés, pas déduits. */
+  pinned?: boolean
 }
 
 const PREVIEW_LIMIT = 12
@@ -49,6 +53,10 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
   const [previewPosts, setPreviewPosts] = useState<Post[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(false)
+  const [view, setView] = useState<'map' | 'list'>('map')
+  const [colourMode, setColourMode] = useState<ColourMode>('group')
+  const [mapData, setMapData] = useState<OrganizerMapData | null>(null)
+  const [lassoed, setLassoed] = useState<string[]>([])
   const [lastApplication, setLastApplication] = useState<OrganizerApplicationSummary | null>(null)
   const [undoing, setUndoing] = useState(false)
   const [undone, setUndone] = useState<OrganizerUndoResult | null>(null)
@@ -61,6 +69,9 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     setPlan(null)
     setSuggestions([])
     setLastMerge(null)
+    setView('map')
+    setMapData(null)
+    setLassoed([])
     setError(null)
     setResult(null)
     setRememberChoices(autoOrganizeEnabled)
@@ -87,7 +98,13 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
   }, [open])
 
   const redistributed = useMemo(
-    () => redistributeOrganizerRoutes(suggestions, plan?.routes ?? []),
+    () =>
+      redistributeOrganizerRoutes(
+        suggestions.map((suggestion) =>
+          suggestion.pinned ? suggestion : { ...suggestion, postIds: undefined }
+        ),
+        plan?.routes ?? []
+      ),
     [plan?.routes, suggestions]
   )
   const selected = useMemo(
@@ -122,6 +139,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
       setLastMerge(null)
       setPreviewId(null)
       setPhase('review')
+      void magpie.organizerMap().then(setMapData).catch(() => setView('list'))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
       setPhase('intro')
@@ -152,6 +170,33 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
             : item
         )
     })
+  }
+
+  /* Entourer des points crée une catégorie comme une autre : renommable, exclue d'un clic,
+     fusionnable. C'est ce qui rend la fusion réversible — on redessine au lieu de défaire. */
+  const createFromLasso = async (): Promise<void> => {
+    if (lassoed.length === 0) return
+    const chosen = new Set(lassoed)
+    setSuggestions((current) => [
+      {
+        id: `lasso-${Date.now()}`,
+        ruleKeys: [],
+        name: t('organizer.lassoName', { count: chosen.size }),
+        description: t('organizer.lassoDescription'),
+        postIds: [...chosen],
+        included: true,
+        // Rattachement explicite : aucune route ne peut reprendre ces posts.
+        pinned: true
+      },
+      // Les posts entourés quittent leur groupe d'origine : un post ne vit que dans une
+      // collection à la fois, et laisser le doublon donnerait deux comptes contradictoires.
+      ...current.map((suggestion) => ({
+        ...suggestion,
+        postIds: suggestion.postIds.filter((postId) => !chosen.has(postId))
+      }))
+    ])
+    setLassoed([])
+    setView('list')
   }
 
   const undoMerge = (): void => {
@@ -382,7 +427,84 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                   <span className="switch__knob" />
                 </button>
               </div>
-              <div className="organizer-list">
+              {/* La carte est la vue par défaut : voir pourquoi l'algorithme a groupé ce
+                  qu'il a groupé vaut mieux que le croire sur parole, et zéro collection
+                  n'avait jamais été créée depuis la seule liste. La liste reste à un clic
+                  pour renommer et cocher en série, ce qu'une carte fait mal. */}
+              <div className="organizer-views">
+                <div className="segmented">
+                  <button
+                    type="button"
+                    className={view === 'map' ? 'is-active' : ''}
+                    onClick={() => setView('map')}
+                  >
+                    {t('organizer.mapTab')}
+                  </button>
+                  <button
+                    type="button"
+                    className={view === 'list' ? 'is-active' : ''}
+                    onClick={() => setView('list')}
+                  >
+                    {t('organizer.listTab')}
+                  </button>
+                </div>
+                {view === 'map' ? (
+                  <div className="segmented segmented--quiet">
+                    {(['group', 'platform', 'kind', 'source'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={colourMode === mode ? 'is-active' : ''}
+                        onClick={() => setColourMode(mode)}
+                      >
+                        {t(
+                          `organizer.colour${mode[0].toUpperCase()}${mode.slice(1)}` as Parameters<
+                            typeof t
+                          >[0]
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {view === 'map' ? (
+                mapData ? (
+                  <>
+                    <OrganizerMap
+                      data={mapData}
+                      colourMode={colourMode}
+                      includedGroups={
+                        new Set(suggestions.filter((s) => s.included).map((s) => s.id))
+                      }
+                      onLasso={setLassoed}
+                      onHover={() => {}}
+                    />
+                    {lassoed.length > 0 ? (
+                      <div className="organizer-lasso" role="status">
+                        <span>{t('organizer.mapSelected', { count: lassoed.length })}</span>
+                        <button type="button" className="btn" onClick={() => setLassoed([])}>
+                          {t('organizer.mapClear')}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          onClick={() => void createFromLasso()}
+                        >
+                          {t('organizer.mapCreate')}
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="organizer-loading">
+                    <div className="organizer-spinner" />
+                    <p>{t('organizer.projecting')}</p>
+                  </div>
+                )
+              ) : null}
+
+              <div className="organizer-list" hidden={view === 'map'}>
                 {suggestions.map((suggestion) => {
                   const effectivePostIds = suggestion.included
                     ? redistributed.get(suggestion.id) ?? []

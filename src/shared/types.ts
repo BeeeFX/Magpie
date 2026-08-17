@@ -329,6 +329,7 @@ export interface MagpieApi {
     choices: AiCollectionChoice[],
     memory: AiCollectionMemoryOptions
   ): Promise<AiCollectionApplyResult>
+  organizerMap(): Promise<OrganizerMap>
   lastOrganizerApplication(): Promise<OrganizerApplicationSummary | null>
   undoOrganizerApplication(): Promise<OrganizerUndoResult>
   copyToClipboard(text: string): Promise<void>
@@ -404,7 +405,7 @@ export interface AiTagProgress {
 }
 
 export interface OrganizerProgress {
-  stage: 'idle' | 'preparing' | 'visuals' | 'embedding' | 'grouping'
+  stage: 'idle' | 'preparing' | 'visuals' | 'embedding' | 'grouping' | 'projecting'
   done: number
   total: number
   running: boolean
@@ -432,6 +433,31 @@ export interface AiCollectionPlan {
   routes: AiCollectionRoute[]
   analysedVideos: number
   unassignedVideos: number
+}
+
+/**
+ * Un post sur la carte sémantique.
+ *
+ * `x` et `y` sont dans [0, 1] : la vue décide de l'échelle, pas le calcul. Ils viennent de la
+ * projection des vecteurs, donc la distance affichée est de la proximité de sens.
+ */
+export interface OrganizerMapPoint {
+  id: string
+  x: number
+  y: number
+  /** Identifiant de la suggestion à laquelle il appartient, ou null s'il flotte seul. */
+  group: string | null
+  thumbUrl: string | null
+  platform: Platform
+  kind: PostKind
+  /** Signets et likes se distinguent à l'œil sans jamais filtrer l'analyse. */
+  sources: ContentSource[]
+}
+
+export interface OrganizerMap {
+  points: OrganizerMapPoint[]
+  /** Le plan qui a servi à colorer la carte : mêmes identifiants que `points.group`. */
+  plan: AiCollectionPlan
 }
 
 export interface AiCollectionChoice {

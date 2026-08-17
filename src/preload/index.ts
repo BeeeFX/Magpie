@@ -18,6 +18,7 @@ import type {
   MagpieEvents,
   MediaDiagnostic,
   OrganizerApplicationSummary,
+  OrganizerMap,
   OrganizerProgress,
   OrganizerUndoResult,
   PlaybackQuality,
@@ -59,6 +60,7 @@ const api: MagpieApi = {
     memory: AiCollectionMemoryOptions
   ): Promise<AiCollectionApplyResult> =>
     ipcRenderer.invoke('ai:applyCollections', choices, memory),
+  organizerMap: (): Promise<OrganizerMap> => ipcRenderer.invoke('organizer:map'),
   lastOrganizerApplication: (): Promise<OrganizerApplicationSummary | null> =>
     ipcRenderer.invoke('organizer:lastApplication'),
   undoOrganizerApplication: (): Promise<OrganizerUndoResult> =>

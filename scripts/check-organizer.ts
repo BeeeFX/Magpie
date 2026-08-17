@@ -226,6 +226,33 @@ assert(
   `le regroupement rend la main au fil de l'eau (plus long blocage : ${Math.round(longestBlock)} ms)`
 )
 
+console.log('\ngroupe tracé à la main')
+{
+  /* Un contour dessiné sur la carte ne porte aucune règle : sans rattachement explicite, la
+     redistribution l'ignorait et le groupe affichait « 0 posts ». */
+  const routes = [
+    { postId: 'p1', rankedRuleKeys: ['guitar'] },
+    { postId: 'p2', rankedRuleKeys: ['guitar'] },
+    { postId: 'p3', rankedRuleKeys: ['guitar'] }
+  ]
+  const spread = redistributeOrganizerRoutes(
+    [
+      { id: 'lasso', ruleKeys: [], included: true, postIds: ['p1', 'p9'] },
+      { id: 'guitar', ruleKeys: ['guitar'], included: true }
+    ],
+    routes
+  )
+  assert(
+    spread.get('lasso')?.length === 2,
+    'un groupe tracé à la main garde les posts qu’on lui a désignés'
+  )
+  assert(
+    !spread.get('guitar')?.includes('p1'),
+    'une règle ne peut pas reprendre un post rattaché à la main'
+  )
+  assert(spread.get('guitar')?.length === 2, 'les autres posts suivent leur règle normalement')
+}
+
 console.log('\nrappel sémantique')
 {
   /* Vecteurs synthétiques plutôt que le vrai modèle : on vérifie le câblage et la règle, pas

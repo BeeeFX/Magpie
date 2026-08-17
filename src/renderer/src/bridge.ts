@@ -1,8 +1,10 @@
 import type {
   AiCollectionPlan,
+  ContentSource,
   LibraryStats,
   MagpieApi,
   MagpieEvents,
+  OrganizerMap,
   Platform,
   Post,
   PostPage,
@@ -131,7 +133,9 @@ const previewApi: MagpieApi = {
   setAiKey: async () => {},
   startAiTagging: async () => ({ done: 0, total: 0, tagged: 0, failed: 0, running: false }),
   proposeAiCollections: async (): Promise<AiCollectionPlan> => {
-    const videos = (await previewPosts())
+    // Sans instantané sur disque — worktree neuf, `npm run dev` jamais lancé — l'aperçu doit
+    // quand même montrer le parcours d'organisation, qui ne dépend pas des vrais posts.
+    const videos = (await previewPosts().catch(() => []))
       .filter((post) => post.media.some((media) => media.kind === 'video'))
       .slice(0, 18)
     const suggestions = [
@@ -167,6 +171,58 @@ const previewApi: MagpieApi = {
       )
     }
   },
+  /* Une carte de démonstration bien plus fournie que la fixture : la question qu'on se pose
+     en la regardant est « est-ce lisible et fluide à neuf mille points », et vingt points n'y
+     répondraient pas. Les îles sont posées à la main plutôt que projetées — l'aperçu vérifie
+     le rendu et les gestes, la justesse des positions est l'affaire de la vraie analyse. */
+  organizerMap: async (): Promise<OrganizerMap> => {
+    const posts = await previewPosts().catch(() => [])
+    const islands = [
+      { group: 'music', name: 'Music', cx: 0.28, cy: 0.32, spread: 0.13 },
+      { group: 'visual', name: 'Visual inspiration', cx: 0.7, cy: 0.4, spread: 0.15 },
+      { group: null, name: '', cx: 0.5, cy: 0.75, spread: 0.24 }
+    ]
+    let seed = 7
+    const random = (): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      return seed / 2147483648
+    }
+    const points = Array.from({ length: 1800 }, (_, index) => {
+      const island = islands[index % islands.length]
+      const angle = random() * Math.PI * 2
+      const radius = Math.sqrt(random()) * island.spread
+      const post = posts.length > 0 ? posts[index % posts.length] : null
+      return {
+        id: `map-${index}`,
+        x: Math.min(0.98, Math.max(0.02, island.cx + Math.cos(angle) * radius)),
+        y: Math.min(0.98, Math.max(0.02, island.cy + Math.sin(angle) * radius)),
+        group: island.group,
+        thumbUrl: post?.thumbUrl ?? null,
+        platform: post?.platform ?? ('instagram' as const),
+        kind: post?.kind ?? ('image' as const),
+        sources: (index % 3 === 0 ? ['liked'] : ['saved']) as ContentSource[]
+      }
+    })
+    const suggestions = islands
+      .filter((island) => island.group !== null)
+      .map((island) => ({
+        id: island.group as string,
+        ruleKeys: [island.group as string],
+        name: island.name,
+        description: 'Rapprochés localement.',
+        postIds: points.filter((point) => point.group === island.group).map((point) => point.id)
+      }))
+    return {
+      points,
+      plan: {
+        suggestions,
+        routes: [],
+        analysedVideos: points.length,
+        unassignedVideos: points.filter((point) => point.group === null).length
+      }
+    }
+  },
+
   applyAiCollections: async (choices) => ({
     collections: choices.length,
     added: choices.reduce((total, choice) => total + choice.postIds.length, 0),

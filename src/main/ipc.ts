@@ -61,7 +61,7 @@ import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
 import { checkForUpdates, getUpdateState, installUpdate } from './updater'
-import { proposeVideoCollections } from './tagging/organize'
+import { buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
 
 function platformValue(value: unknown): Platform {
   if (!PLATFORMS.includes(value as Platform)) throw new Error('Plateforme invalide')
@@ -330,6 +330,7 @@ export function registerIpc({
     }
   )
 
+  ipcMain.handle('organizer:map', () => buildOrganizerMap())
   ipcMain.handle('organizer:lastApplication', () => lastOrganizerApplication())
   ipcMain.handle('organizer:undo', () => revertOrganizerApplication())
 
