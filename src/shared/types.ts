@@ -332,6 +332,9 @@ export interface MagpieApi {
   setBandwidthLimit(bytesPerSecond: number): Promise<BackgroundState>
   setLoadProfile(profile: LoadProfile): Promise<BackgroundState>
   setTaskPaused(id: string, paused: boolean): Promise<BackgroundState>
+  transcriptState(): Promise<{ pending: number; running: boolean }>
+  startTranscription(): Promise<BackgroundState>
+  stopTranscription(): Promise<BackgroundState>
   organizerMap(): Promise<OrganizerMap>
   lastOrganizerApplication(): Promise<OrganizerApplicationSummary | null>
   undoOrganizerApplication(): Promise<OrganizerUndoResult>
@@ -489,7 +492,7 @@ export interface AiCollectionApplyResult {
  * leur propre événement et leur propre coin d'interface. Les réunir derrière un seul état
  * permet de n'avoir qu'un indicateur à regarder — et de tout suspendre d'un geste.
  */
-export type BackgroundTaskKind = 'sync' | 'thumbnails' | 'clips' | 'organizer'
+export type BackgroundTaskKind = 'sync' | 'thumbnails' | 'clips' | 'organizer' | 'transcribe'
 
 export interface BackgroundTask {
   /** Octets par seconde observés sur cette tâche, ou null si elle ne transfère rien. */

@@ -63,6 +63,12 @@ import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
 import { checkForUpdates, getUpdateState, installUpdate } from './updater'
 import { buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
+import {
+  countPendingTranscripts,
+  isTranscribing,
+  stopTranscribing,
+  transcribeAll
+} from './tagging/transcribe'
 
 function platformValue(value: unknown): Platform {
   if (!PLATFORMS.includes(value as Platform)) throw new Error('Plateforme invalide')
@@ -341,6 +347,19 @@ export function registerIpc({
   })
   ipcMain.handle('tasks:setTaskPaused', (_event, id: string, paused: boolean) => {
     backgroundTasks.setTaskPaused(id, paused)
+    return backgroundTasks.current()
+  })
+
+  ipcMain.handle('transcribe:state', () => ({
+    pending: countPendingTranscripts(),
+    running: isTranscribing()
+  }))
+  ipcMain.handle('transcribe:start', () => {
+    void transcribeAll()
+    return backgroundTasks.current()
+  })
+  ipcMain.handle('transcribe:stop', () => {
+    stopTranscribing()
     return backgroundTasks.current()
   })
 

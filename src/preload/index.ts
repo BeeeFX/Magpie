@@ -67,6 +67,10 @@ const api: MagpieApi = {
     ipcRenderer.invoke('tasks:setLoadProfile', profile),
   setTaskPaused: (id: string, paused: boolean): Promise<BackgroundState> =>
     ipcRenderer.invoke('tasks:setTaskPaused', id, paused),
+  transcriptState: (): Promise<{ pending: number; running: boolean }> =>
+    ipcRenderer.invoke('transcribe:state'),
+  startTranscription: (): Promise<BackgroundState> => ipcRenderer.invoke('transcribe:start'),
+  stopTranscription: (): Promise<BackgroundState> => ipcRenderer.invoke('transcribe:stop'),
   organizerMap: (): Promise<OrganizerMap> => ipcRenderer.invoke('organizer:map'),
   lastOrganizerApplication: (): Promise<OrganizerApplicationSummary | null> =>
     ipcRenderer.invoke('organizer:lastApplication'),

@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 13
+export const SCHEMA_VERSION = 14
 
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
@@ -73,6 +73,46 @@ CREATE TABLE IF NOT EXISTS post_embeddings (
 );
 `
 
+export const MIGRATION_14_SQL = /* sql */ `
+ALTER TABLE posts ADD COLUMN transcript TEXT;
+
+-- L'index plein texte gagne une colonne : il faut le refaire, triggers compris. Chercher un
+-- reel par ce qui y est dit vaut à lui seul la reconstruction.
+DROP TRIGGER IF EXISTS posts_fts_ai;
+DROP TRIGGER IF EXISTS posts_fts_ad;
+DROP TRIGGER IF EXISTS posts_fts_au;
+DROP TABLE IF EXISTS posts_fts;
+
+CREATE VIRTUAL TABLE posts_fts USING fts5(
+  text,
+  ai_description,
+  author_handle,
+  transcript,
+  content='posts',
+  content_rowid='rowid',
+  tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER posts_fts_ai AFTER INSERT ON posts BEGIN
+  INSERT INTO posts_fts(rowid, text, ai_description, author_handle, transcript)
+  VALUES (new.rowid, new.text, new.ai_description, new.author_handle, new.transcript);
+END;
+
+CREATE TRIGGER posts_fts_ad AFTER DELETE ON posts BEGIN
+  INSERT INTO posts_fts(posts_fts, rowid, text, ai_description, author_handle, transcript)
+  VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle, old.transcript);
+END;
+
+CREATE TRIGGER posts_fts_au AFTER UPDATE ON posts BEGIN
+  INSERT INTO posts_fts(posts_fts, rowid, text, ai_description, author_handle, transcript)
+  VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle, old.transcript);
+  INSERT INTO posts_fts(rowid, text, ai_description, author_handle, transcript)
+  VALUES (new.rowid, new.text, new.ai_description, new.author_handle, new.transcript);
+END;
+
+INSERT INTO posts_fts(posts_fts) VALUES('rebuild');
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -84,6 +124,9 @@ CREATE TABLE IF NOT EXISTS posts (
   author_avatar   TEXT,
   text            TEXT,
   ai_description  TEXT,
+  -- Transcription locale de l'audio. C'est souvent le seul texte d'un Reel : sur la
+  -- bibliothèque de référence, un quart des vidéos n'ont aucune prose exploitable.
+  transcript      TEXT,
   kind            TEXT NOT NULL,
   media_count     INTEGER NOT NULL DEFAULT 0,
   width           INTEGER,
@@ -278,25 +321,26 @@ CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(
   text,
   ai_description,
   author_handle,
+  transcript,
   content='posts',
   content_rowid='rowid',
   tokenize='unicode61 remove_diacritics 2'
 );
 
 CREATE TRIGGER IF NOT EXISTS posts_fts_ai AFTER INSERT ON posts BEGIN
-  INSERT INTO posts_fts(rowid, text, ai_description, author_handle)
-  VALUES (new.rowid, new.text, new.ai_description, new.author_handle);
+  INSERT INTO posts_fts(rowid, text, ai_description, author_handle, transcript)
+  VALUES (new.rowid, new.text, new.ai_description, new.author_handle, new.transcript);
 END;
 
 CREATE TRIGGER IF NOT EXISTS posts_fts_ad AFTER DELETE ON posts BEGIN
-  INSERT INTO posts_fts(posts_fts, rowid, text, ai_description, author_handle)
-  VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle);
+  INSERT INTO posts_fts(posts_fts, rowid, text, ai_description, author_handle, transcript)
+  VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle, old.transcript);
 END;
 
 CREATE TRIGGER IF NOT EXISTS posts_fts_au AFTER UPDATE ON posts BEGIN
-  INSERT INTO posts_fts(posts_fts, rowid, text, ai_description, author_handle)
-  VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle);
-  INSERT INTO posts_fts(rowid, text, ai_description, author_handle)
-  VALUES (new.rowid, new.text, new.ai_description, new.author_handle);
+  INSERT INTO posts_fts(posts_fts, rowid, text, ai_description, author_handle, transcript)
+  VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle, old.transcript);
+  INSERT INTO posts_fts(rowid, text, ai_description, author_handle, transcript)
+  VALUES (new.rowid, new.text, new.ai_description, new.author_handle, new.transcript);
 END;
 `

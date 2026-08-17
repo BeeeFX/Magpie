@@ -291,6 +291,16 @@ export function IconVolume({
   )
 }
 
+/** Micro : la transcription écoute la piste audio, elle ne regarde pas l'image. */
+export function IconMic({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)}>
+      <rect x="7.4" y="2.6" width="5.2" height="9.4" rx="2.6" />
+      <path d="M4.6 9.6a5.4 5.4 0 0010.8 0M10 15v2.4" />
+    </svg>
+  )
+}
+
 export function IconVideo({ size = 16 }: IconProps): React.JSX.Element {
   return (
     <svg {...base(size)}>

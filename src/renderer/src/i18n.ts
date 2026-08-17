@@ -310,6 +310,12 @@ const fr = {
   'actions.more': 'Autres actions',
   'actions.organize': 'Organiser en collections',
   'actions.organizeHint': 'Regroupe la bibliothèque par thème, en local.',
+  'actions.transcribe': 'Transcrire les vidéos',
+  'actions.transcribeHint': '{count} vidéos sans transcription',
+  'actions.transcribeAskReady':
+    'Transcrire {count} vidéos ?\n\nTes vidéos sont déjà sur le disque : rien à télécharger. Le calcul tourne en fond, en local, et rien ne quitte ta machine. Tu peux le suspendre à tout moment.',
+  'actions.transcribeAskDownload':
+    'Transcrire {count} vidéos ?\n\nTes vidéos ne sont pas encore sur le disque : elles seront téléchargées pour en extraire l’audio, soit environ {size}. Rien n’est conservé — seul le son transite, puis il est jeté. Ta limite de cache n’est pas touchée.\n\nLe calcul tourne en fond, en local, et se suspend à tout moment.',
   'actions.recheck': 'Tout revérifier sur {platform}',
   'downloads.title': 'Téléchargements',
   'downloads.prepareHint':
@@ -343,6 +349,7 @@ const fr = {
   'downloads.kind.thumbnails': 'Images des tuiles',
   'downloads.kind.clips': 'Copies vidéo',
   'downloads.kind.organizer': 'Organisation',
+  'downloads.kind.transcribe': 'Transcription',
   'settings.preloadTitle': 'Préparer toutes les vignettes',
   'settings.preloadPending':
     '{count} vignettes du mur restent à préparer, soit environ {size}. Elles se préparent sinon au fil de votre défilement.',
@@ -766,6 +773,12 @@ const en: Record<TranslationKey, string> = {
   'actions.more': 'More actions',
   'actions.organize': 'Organise into collections',
   'actions.organizeHint': 'Groups the library by theme, locally.',
+  'actions.transcribe': 'Transcribe videos',
+  'actions.transcribeHint': '{count} videos without a transcript',
+  'actions.transcribeAskReady':
+    'Transcribe {count} videos?\n\nYour videos are already on disk: nothing to download. The work runs in the background, locally, and nothing leaves your machine. You can pause it at any time.',
+  'actions.transcribeAskDownload':
+    'Transcribe {count} videos?\n\nYour videos are not on disk yet: they will be downloaded to extract the audio, about {size}. Nothing is kept — only the sound passes through, then it is discarded. Your cache limit is untouched.\n\nThe work runs in the background, locally, and pauses at any time.',
   'actions.recheck': 'Re-check everything on {platform}',
   'downloads.title': 'Downloads',
   'downloads.prepareHint':
@@ -799,6 +812,7 @@ const en: Record<TranslationKey, string> = {
   'downloads.kind.thumbnails': 'Tile images',
   'downloads.kind.clips': 'Video copies',
   'downloads.kind.organizer': 'Organising',
+  'downloads.kind.transcribe': 'Transcribing',
   'settings.preloadTitle': 'Prepare every thumbnail',
   'settings.preloadPending':
     '{count} wall thumbnails left to prepare, roughly {size}. Otherwise they are prepared as you scroll.',

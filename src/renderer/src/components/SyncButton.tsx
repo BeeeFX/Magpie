@@ -8,6 +8,7 @@ import {
   IconChevronRight,
   IconCollections,
   IconImage,
+  IconMic,
   IconPlus,
   IconSync,
   IconVideo
@@ -29,9 +30,11 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
   const setOrganizerOpen = useStore((s) => s.setOrganizerOpen)
   const cacheQuality = useStore((s) => s.videoCacheQuality)
   const [counts, setCounts] = useState<{ thumbnails: number; clips: number } | null>(null)
+  const [transcripts, setTranscripts] = useState<{ pending: number; running: boolean } | null>(null)
 
   useEffect(() => {
     void magpie.pendingCounts(null).then(setCounts).catch(() => {})
+    void magpie.transcriptState().then(setTranscripts).catch(() => {})
   }, [])
 
   const missing = accounts.filter((a) => !a.connected)
@@ -88,6 +91,36 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
                   count: counts?.clips ?? 0,
                   size: formatBytes((counts?.clips ?? 0) * CLIP_BYTES[cacheQuality])
                 })}
+          </em>
+        </span>
+      </button>
+
+      {/* Dire l'état réel des clips, pas une catégorie. Une vignette est une image fixe et ne
+          contient aucun son : c'est la présence des vidéos qui décide s'il y a 14 Go à
+          descendre ou rien du tout. La confusion s'est produite en conditions réelles. */}
+      <button
+        type="button"
+        role="menuitem"
+        disabled={(transcripts?.pending ?? 0) === 0}
+        onClick={run(() => {
+          const clipsMissing = counts?.clips ?? 0
+          const message =
+            clipsMissing > 0
+              ? t('actions.transcribeAskDownload', {
+                  count: transcripts?.pending ?? 0,
+                  size: formatBytes(clipsMissing * CLIP_BYTES[cacheQuality])
+                })
+              : t('actions.transcribeAskReady', { count: transcripts?.pending ?? 0 })
+          if (window.confirm(message)) void magpie.startTranscription()
+        })}
+      >
+        <IconMic size={15} />
+        <span>
+          <strong>{t('actions.transcribe')}</strong>
+          <em>
+            {(transcripts?.pending ?? 0) === 0
+              ? t('downloads.allDone')
+              : t('actions.transcribeHint', { count: transcripts?.pending ?? 0 })}
           </em>
         </span>
       </button>

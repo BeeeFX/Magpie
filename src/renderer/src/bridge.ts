@@ -191,6 +191,9 @@ const previewApi: MagpieApi = {
     ...PREVIEW_TASKS,
     tasks: PREVIEW_TASKS.tasks.map((task) => (task.id === id ? { ...task, paused } : task))
   }),
+  transcriptState: async () => ({ pending: 1287, running: false }),
+  startTranscription: async () => PREVIEW_TASKS,
+  stopTranscription: async () => PREVIEW_TASKS,
   organizerMap: async (): Promise<OrganizerMap> => {
     const posts = await previewPosts().catch(() => [])
     const islands = [
