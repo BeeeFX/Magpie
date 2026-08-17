@@ -9,7 +9,16 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     resolve: { alias: { '@shared': shared } },
     build: {
-      rollupOptions: { input: { index: resolve('src/main/index.ts') } }
+      rollupOptions: {
+        // La projection de la carte tourne dans un fil séparé : la construction du graphe de
+        // voisins d'UMAP est atomique et figeait la fenêtre près de trois secondes. C'est le
+        // seul calcul du projet qu'on ne peut pas découper, d'où sa propre entrée.
+        input: {
+          index: resolve('src/main/index.ts'),
+          'projection.worker': resolve('src/main/tagging/projection.worker.ts')
+        },
+        output: { entryFileNames: '[name].js' }
+      }
     }
   },
   preload: {
