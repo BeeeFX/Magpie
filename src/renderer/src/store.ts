@@ -139,6 +139,8 @@ interface State {
   density: number
   sidebarOpen: boolean
   settingsOpen: boolean
+  /** L'organisateur s'ouvre depuis le menu d'actions, donc hors de portée d'un état local. */
+  organizerOpen: boolean
   /** Volume du lecteur, partagé entre tous les posts et conservé entre les sessions. */
   volume: number
   muted: boolean
@@ -205,6 +207,7 @@ interface State {
   tagSelection: (name: string) => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
   setSettingsOpen: (open: boolean) => void
+  setOrganizerOpen: (open: boolean) => void
   loadSettings: () => Promise<void>
   setTheme: (theme: ThemeChoice) => Promise<void>
   setAccent: (accent: AccentName) => Promise<void>
@@ -261,6 +264,7 @@ export const useStore = create<State>()(
       density: 320,
       sidebarOpen: true,
       settingsOpen: false,
+      organizerOpen: false,
       volume: 0.7,
       muted: false,
       hoverAudio: false,
@@ -488,6 +492,7 @@ export const useStore = create<State>()(
       },
 
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+      setOrganizerOpen: (organizerOpen) => set({ organizerOpen }),
 
       loadSettings: async () => {
         const settings = await magpie.getSettings()

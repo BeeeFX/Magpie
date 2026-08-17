@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { PLATFORMS } from '@shared/types'
 import { magpie, magpieEvents } from './bridge'
 import { Detail } from './components/Detail'
@@ -31,7 +31,8 @@ export function App(): React.JSX.Element {
   const lastSyncRevision = useRef('')
   const pendingPostIds = useRef(new Set<string>())
   const mediaRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [aiOrganizerOpen, setAiOrganizerOpen] = useState(false)
+  const aiOrganizerOpen = useStore((s) => s.organizerOpen)
+  const setAiOrganizerOpen = useStore((s) => s.setOrganizerOpen)
   const openAiOrganizer = useCallback(() => {
     setSettingsOpen(false)
     setAiOrganizerOpen(true)

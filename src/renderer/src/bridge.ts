@@ -266,12 +266,15 @@ const previewApi: MagpieApi = {
 
   // La connexion des comptes n'a pas d'équivalent hors Electron : l'aperçu se contente
   // d'annoncer trois comptes déconnectés, ce qui suffit à juger de l'interface.
+  /* Un compte connecté et un autre non : c'est l'état réel de la plupart des installations,
+     et c'est le seul qui montre à la fois le bouton scindé et l'invitation à connecter. Avec
+     tout déconnecté, l'aperçu ne rendait jamais la barre d'outils telle qu'on la voit. */
   listAccounts: async () =>
-    PUBLIC_PLATFORMS.map((platform) => ({
+    PUBLIC_PLATFORMS.map((platform, index) => ({
       platform,
-      connected: false,
-      handle: null,
-      lastSyncAt: null,
+      connected: index === 0,
+      handle: index === 0 ? 'apercu' : null,
+      lastSyncAt: index === 0 ? Date.now() - 3_600_000 : null,
       lastSyncStatus: null
     })),
   connectAccount: async (platform) => {

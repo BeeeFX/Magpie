@@ -1,9 +1,140 @@
 import { useEffect, useRef, useState } from 'react'
 import { PUBLIC_PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
-import { PLATFORM_LABEL } from '../format'
+import { magpie } from '../bridge'
+import { CLIP_BYTES, THUMBNAIL_BYTES } from '../estimates'
+import { formatBytes, PLATFORM_LABEL } from '../format'
 import { useStore, useT } from '../store'
-import { IconChevronRight, IconSync } from './Icons'
+import {
+  IconChevronRight,
+  IconCollections,
+  IconImage,
+  IconPlus,
+  IconSync,
+  IconVideo
+} from './Icons'
 import { PlatformIcon } from './PlatformIcon'
+
+/**
+ * Tout ce qui agit sur la bibliothèque, au même endroit.
+ *
+ * Chaque entrée dit ce qu'elle rapporte plutôt que sa catégorie technique, et annonce ce
+ * qu'il reste à faire : un bouton qui propose de préparer mille images déjà préparées ne
+ * veut rien dire.
+ */
+function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
+  const t = useT()
+  const accounts = useStore((s) => s.accounts)
+  const startSync = useStore((s) => s.startSync)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const setOrganizerOpen = useStore((s) => s.setOrganizerOpen)
+  const cacheQuality = useStore((s) => s.videoCacheQuality)
+  const [counts, setCounts] = useState<{ thumbnails: number; clips: number } | null>(null)
+
+  useEffect(() => {
+    void magpie.pendingCounts(null).then(setCounts).catch(() => {})
+  }, [])
+
+  const missing = accounts.filter((a) => !a.connected)
+  const connected = accounts.filter((a) => a.connected)
+  const run = (action: () => void): (() => void) => () => {
+    action()
+    onDone()
+  }
+
+  return (
+    <>
+      <button type="button" role="menuitem" onClick={run(() => setOrganizerOpen(true))}>
+        <IconCollections size={15} />
+        <span>
+          <strong>{t('actions.organize')}</strong>
+          <em>{t('actions.organizeHint')}</em>
+        </span>
+      </button>
+
+      <div className="action-menu__sep" />
+
+      <button
+        type="button"
+        role="menuitem"
+        disabled={(counts?.thumbnails ?? 0) === 0}
+        onClick={run(() => void magpie.startPreload({ what: 'thumbnails' }))}
+      >
+        <IconImage size={15} />
+        <span>
+          <strong>{t('downloads.thumbsName')}</strong>
+          <em>
+            {(counts?.thumbnails ?? 0) === 0
+              ? t('downloads.allDone')
+              : t('downloads.amount', {
+                  count: counts?.thumbnails ?? 0,
+                  size: formatBytes((counts?.thumbnails ?? 0) * THUMBNAIL_BYTES)
+                })}
+          </em>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={(counts?.clips ?? 0) === 0}
+        onClick={run(() => void magpie.startPreload({ what: 'clips' }))}
+      >
+        <IconVideo size={15} />
+        <span>
+          <strong>{t('downloads.clipsName', { quality: t(`quality.${cacheQuality}`) })}</strong>
+          <em>
+            {(counts?.clips ?? 0) === 0
+              ? t('downloads.allDone')
+              : t('downloads.amount', {
+                  count: counts?.clips ?? 0,
+                  size: formatBytes((counts?.clips ?? 0) * CLIP_BYTES[cacheQuality])
+                })}
+          </em>
+        </span>
+      </button>
+
+      <div className="action-menu__sep" />
+
+      {missing.length > 0 ? (
+        <button type="button" role="menuitem" onClick={run(() => setSettingsOpen(true))}>
+          <IconPlus size={15} />
+          <span>
+            <strong>{t('sync.connectAccount')}</strong>
+          </span>
+        </button>
+      ) : null}
+      {connected.map((account) => (
+        <button
+          key={account.platform}
+          type="button"
+          role="menuitem"
+          onClick={run(() => {
+            if (
+              window.confirm(
+                t('accounts.fullSyncConfirm', { platform: PLATFORM_LABEL[account.platform] })
+              )
+            ) {
+              void magpie.startFullSync(account.platform)
+            }
+          })}
+        >
+          <PlatformIcon platform={account.platform} size={15} />
+          <span>
+            <strong>
+              {t('actions.recheck', { platform: PLATFORM_LABEL[account.platform] })}
+            </strong>
+            <em>{t('accounts.fullSyncHint')}</em>
+          </span>
+        </button>
+      ))}
+      <button type="button" role="menuitem" onClick={run(() => void startSync())}>
+        <IconSync size={15} />
+        <span>
+          <strong>{t('sync.fetchNew')}</strong>
+        </span>
+      </button>
+    </>
+  )
+}
 
 /** Bouton de synchronisation et progression détaillée de chaque plateforme. */
 export function SyncButton(): React.JSX.Element {
@@ -138,15 +269,45 @@ export function SyncButton(): React.JSX.Element {
   const attention = PUBLIC_PLATFORMS.filter((p) => sync.byPlatform[p].needsAttention)
   const message = attention.map((p) => sync.byPlatform[p].message).filter(Boolean).join('\n')
 
+  /* Bouton scindé : l'action la plus fréquente reste à un clic, et tout ce qui « agit sur la
+     bibliothèque » se range derrière le même chevron. Ces commandes vivaient jusqu'ici à
+     quatre endroits — réglages, comptes, indicateur de téléchargement — et l'organisateur
+     enfoui dans les réglages n'avait jamais servi une seule fois. */
   return (
-    <button
-      type="button"
-      className={`control control--primary ${attention.length > 0 ? 'is-warning' : ''}`}
-      onClick={() => void startSync()}
-      title={message || t('sync.fetchNew')}
-    >
-      <IconSync />
-      <span>{attention.length > 0 ? t('sync.needsAttention') : t('sync.sync')}</span>
-    </button>
+    <div className="sync-control-wrap" ref={wrapRef}>
+      <div className="sync-control">
+        <button
+          type="button"
+          className={`control control--primary sync-control__main ${
+            attention.length > 0 ? 'is-warning' : ''
+          }`}
+          onClick={() => void startSync()}
+          title={message || t('sync.fetchNew')}
+        >
+          <IconSync />
+          <span>{attention.length > 0 ? t('sync.needsAttention') : t('sync.sync')}</span>
+        </button>
+        <button
+          type="button"
+          className="sync-control__toggle"
+          aria-expanded={expanded}
+          aria-haspopup="menu"
+          aria-label={t('actions.more')}
+          title={t('actions.more')}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <IconChevronRight
+            size={14}
+            className={`sync-control__chevron ${expanded ? 'is-open' : ''}`}
+          />
+        </button>
+      </div>
+
+      {expanded ? (
+        <div className="action-menu" role="menu">
+          <ActionsMenu onDone={() => setExpanded(false)} />
+        </div>
+      ) : null}
+    </div>
   )
 }
