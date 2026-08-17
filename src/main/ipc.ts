@@ -54,7 +54,7 @@ import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
 import { getCacheUsage, resetCacheUsage, VIDEO_NAME_PATTERN } from './media/cache'
 import { createRemoteMediaUrl } from './media/remote'
-import { sessionFor, userAgent } from './adapters/session'
+import { streamMedia } from './adapters/http'
 import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
@@ -618,77 +618,61 @@ export function registerIpc({
           return null
         }
       })()
-      const origin =
-        media.platform === 'instagram'
-          ? 'https://www.instagram.com/'
-          : media.platform === 'x'
-            ? 'https://x.com/'
-            : 'https://www.reddit.com/'
 
-      // Le diagnostic emprunte le chemin qu'il teste : sans limite de temps, une requête
-      // qui pend le ferait pendre avec elle — et « toujours en cours » n'apprend rien.
-      // Un dépassement est ici un résultat à part entière, pas un échec du test.
-      const DIAGNOSTIC_TIMEOUT_MS = 8000
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), DIAGNOSTIC_TIMEOUT_MS)
+      // Le diagnostic doit emprunter *exactement* le chemin de la lecture, sinon son
+      // verdict porte sur autre chose que le problème observé.
+      const header = (name: string): string | null => {
+        const value = remoteHeaders?.[name]
+        return value === undefined ? null : Array.isArray(value) ? value.join(', ') : value
+      }
+      let remoteHeaders: Record<string, string | string[]> | null = null
+      const TIMEOUT_MS = 8000
 
       try {
-        const remote = await sessionFor(media.platform).fetch(media.source, {
-          method: 'GET',
-          headers: new Headers({
-            Accept: kind === 'video' ? 'video/*,application/octet-stream,*/*;q=0.8' : 'image/*,*/*;q=0.8',
-            Referer: origin,
-            'User-Agent': userAgent(),
-            // Les premiers octets suffisent : on mesure le transport, on ne télécharge pas.
-            Range: 'bytes=0-65535'
-          }),
-          credentials: 'include',
-          redirect: 'follow',
-          signal: controller.signal
+        const remote = await streamMedia(media.platform, media.source, {
+          range: 'bytes=0-65535',
+          accept: kind === 'video' ? 'video/*,application/octet-stream,*/*;q=0.8' : 'image/*,*/*;q=0.8',
+          timeoutMs: TIMEOUT_MS
         })
+        remoteHeaders = remote.headers
 
+        // Un flux qui ne délivre jamais rien est le symptôme même qu'on traque : on borne
+        // aussi la première lecture, faute de quoi le diagnostic pendrait comme le lecteur.
         let firstChunkBytes: number | null = null
-        try {
-          const reader = remote.body?.getReader()
-          if (reader) {
-            const { value } = await reader.read()
-            firstChunkBytes = value?.byteLength ?? 0
-            await reader.cancel()
-          }
-        } catch (error) {
-          firstChunkBytes = null
-          console.warn('[magpie] Diagnostic média : flux illisible', error)
+        const reader = remote.body?.getReader()
+        if (reader) {
+          const first = await Promise.race([
+            reader.read().then((chunk: { value?: Uint8Array }) => chunk.value?.byteLength ?? 0),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), TIMEOUT_MS))
+          ])
+          firstChunkBytes = first
+          await reader.cancel().catch(() => {})
         }
-        clearTimeout(timeout)
 
         return {
           ok: remote.status >= 200 && remote.status < 300 && (firstChunkBytes ?? 0) > 0,
           host,
           status: remote.status,
           statusText: remote.statusText,
-          contentType: remote.headers.get('content-type'),
-          contentLength: remote.headers.get('content-length'),
-          acceptRanges: remote.headers.get('accept-ranges'),
-          contentEncoding: remote.headers.get('content-encoding'),
-          contentRange: remote.headers.get('content-range'),
+          contentType: header('content-type'),
+          contentLength: header('content-length'),
+          acceptRanges: header('accept-ranges'),
+          contentEncoding: header('content-encoding'),
+          contentRange: header('content-range'),
           firstChunkBytes,
           elapsedMs: Date.now() - started,
-          error: null
+          error:
+            firstChunkBytes === null
+              ? `En-têtes reçus, mais aucun octet après ${Math.round(TIMEOUT_MS / 1000)} s : le corps ne s'écoule pas.`
+              : null
         }
       } catch (error) {
-        clearTimeout(timeout)
-        const elapsedMs = Date.now() - started
-        const aborted = controller.signal.aborted
         return {
           ok: false,
           ...empty,
           host,
-          elapsedMs,
-          error: aborted
-            ? `Aucune réponse après ${Math.round(DIAGNOSTIC_TIMEOUT_MS / 1000)} s : la requête n'aboutit pas (ni refus, ni données).`
-            : error instanceof Error
-              ? error.message
-              : String(error)
+          elapsedMs: Date.now() - started,
+          error: error instanceof Error ? error.message : String(error)
         }
       }
     }

@@ -287,6 +287,40 @@ export async function downloadMediaToFile(
   })
 }
 
+/**
+ * Convertit la réponse d'`net.request` en flux web, à la main.
+ *
+ * `Readable.toWeb()` convient aux flux de fichiers, mais la réponse d'Electron n'est pas un
+ * `stream.Readable` complet : la conversion rendait un flux qui livrait ses en-têtes puis
+ * plus jamais un octet — exactement ce que le diagnostic a mesuré, un 206 suivi de zéro
+ * donnée. On s'abonne donc directement aux événements, en respectant la contre-pression
+ * pour qu'un clip volumineux ne s'entasse pas en mémoire.
+ */
+function toWebStream(response: NodeJS.EventEmitter & { pause?: () => void; resume?: () => void }): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      response.on('data', (chunk: Buffer) => {
+        controller.enqueue(new Uint8Array(chunk))
+        if ((controller.desiredSize ?? 1) <= 0) response.pause?.()
+      })
+      response.on('end', () => {
+        try {
+          controller.close()
+        } catch {
+          // Flux déjà refermé par l'appelant : rien à signaler.
+        }
+      })
+      response.on('error', (error: Error) => controller.error(error))
+    },
+    pull() {
+      response.resume?.()
+    },
+    cancel() {
+      response.resume?.()
+    }
+  })
+}
+
 export interface MediaStream {
   status: number
   statusText: string
@@ -335,10 +369,7 @@ export function streamMedia(
         status: response.statusCode,
         statusText: response.statusMessage ?? '',
         headers: response.headers,
-        body:
-          method === 'HEAD'
-            ? null
-            : (Readable.toWeb(response as unknown as Readable) as ReadableStream<Uint8Array>)
+        body: method === 'HEAD' ? null : toWebStream(response)
       })
     })
     req.on('error', (error) => {
