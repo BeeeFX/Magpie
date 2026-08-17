@@ -153,6 +153,12 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
     [selected]
   )
   const unassignedVideos = Math.max(0, (plan?.analysedVideos ?? 0) - selectedVideos)
+  /* Les noms suivent les renommages en cours : l'étiquette sur la carte doit dire ce que
+     l'utilisateur vient de taper, pas ce que l'analyse avait proposé. */
+  const groupNames = useMemo(
+    () => new Map(suggestions.map((suggestion) => [suggestion.id, suggestion.name.trim()])),
+    [suggestions]
+  )
 
   if (!open) return null
 
@@ -524,7 +530,8 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                     <OrganizerMap
                       data={mapData}
                       colourMode={colourMode}
-                      includedGroups={
+                      groupNames={groupNames}
+                  includedGroups={
                         new Set(suggestions.filter((s) => s.included).map((s) => s.id))
                       }
                       onLasso={setLassoed}

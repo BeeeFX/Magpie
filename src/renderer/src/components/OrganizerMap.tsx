@@ -34,6 +34,8 @@ interface Props {
   colourMode: ColourMode
   /** Groupes retenus, pour griser ce qui est exclu sans le faire disparaître. */
   includedGroups: Set<string>
+  /** Nom de chaque groupe, pour poser une étiquette sur son îlot. */
+  groupNames: Map<string, string>
   onLasso(ids: string[]): void
   onHover(point: OrganizerMapPoint | null): void
 }
@@ -68,6 +70,7 @@ export function OrganizerMap({
   data,
   colourMode,
   includedGroups,
+  groupNames,
   onLasso,
   onHover
 }: Props): React.JSX.Element {
@@ -88,9 +91,24 @@ export function OrganizerMap({
    *  premier plan. Ainsi, n'importe quel dessin rend l'état juste. */
   const landingStartRef = useRef(0)
   const draggingRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  const zoomRef = useRef<(event: WheelEvent) => void>(() => {})
   /** Point tiré et déplacement en cours, dans le repère unité. */
   const pullRef = useRef<{ point: OrganizerMapPoint; dx: number; dy: number } | null>(null)
   const pullOriginRef = useRef<{ x: number; y: number } | null>(null)
+
+  /* React attache ses écouteurs de molette en mode passif, où `preventDefault` est ignoré :
+     zoomer sur la carte faisait donc défiler la fenêtre derrière elle. Il faut poser
+     l'écouteur soi-même en non passif. */
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const handler = (event: WheelEvent): void => {
+      event.preventDefault()
+      zoomRef.current(event)
+    }
+    canvas.addEventListener('wheel', handler, { passive: false })
+    return () => canvas.removeEventListener('wheel', handler)
+  }, [])
 
   const groupIndex = useMemo(
     () => new Map(data.plan.suggestions.map((suggestion, index) => [suggestion.id, index])),
@@ -134,6 +152,29 @@ export function OrganizerMap({
     }
     return pairs
   }, [buckets, data.points])
+
+  /* Sans étiquettes, neuf mille points colorés ne sont qu'une tache : on voit qu'il y a des
+     amas, jamais lesquels. C'est ce qui sépare une jolie image d'une carte. */
+  const islands = useMemo(() => {
+    const sums = new Map<string, { x: number; y: number; count: number }>()
+    for (const point of data.points) {
+      if (!point.group) continue
+      const entry = sums.get(point.group) ?? { x: 0, y: 0, count: 0 }
+      entry.x += point.x
+      entry.y += point.y
+      entry.count += 1
+      sums.set(point.group, entry)
+    }
+    return [...sums.entries()]
+      .filter(([, entry]) => entry.count >= 12)
+      .map(([group, entry]) => ({
+        group,
+        x: entry.x / entry.count,
+        y: entry.y / entry.count,
+        count: entry.count
+      }))
+      .sort((left, right) => right.count - left.count)
+  }, [data.points])
 
   const reduced = useMemo(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -210,6 +251,34 @@ export function OrganizerMap({
       context.fill()
     }
 
+    /* Taille proportionnelle à la racine du nombre de posts : un îlot deux fois plus gros
+       n'écrase pas son voisin, il se remarque simplement davantage. */
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    const drawn: { x: number; y: number; size: number }[] = []
+    for (const island of islands) {
+      const name = groupNames.get(island.group)
+      if (!name) continue
+      const [x, y] = toScreen({ x: island.x, y: island.y } as OrganizerMapPoint)
+      if (x < 0 || y < 0 || x > width || y > height) continue
+      const size = Math.min(30, 9 + Math.sqrt(island.count) * 1.5) * Math.min(1.6, view.scale)
+      // Deux étiquettes superposées ne se lisent ni l'une ni l'autre : la plus petite cède.
+      if (drawn.some((other) => Math.hypot(other.x - x, other.y - y) < (other.size + size) * 1.1)) {
+        continue
+      }
+      drawn.push({ x, y, size })
+      const faded = !includedGroups.has(island.group)
+      context.font = `600 ${size.toFixed(1)}px system-ui, sans-serif`
+      context.globalAlpha = faded ? 0.3 : 0.95
+      // Halo sombre : le texte doit rester lisible par-dessus n'importe quelle densité.
+      context.lineWidth = size / 5
+      context.strokeStyle = 'rgba(0, 0, 0, 0.75)'
+      context.strokeText(name, x, y)
+      context.fillStyle = colourFor({ group: island.group } as OrganizerMapPoint, 'group', groupIndex)
+      context.fillText(name, x, y)
+    }
+    context.globalAlpha = 1
+
     if (hovered) {
       const [x, y] = toScreen(hovered)
       context.globalAlpha = 1
@@ -236,7 +305,7 @@ export function OrganizerMap({
       context.setLineDash([])
     }
     context.globalAlpha = 1
-  }, [colourMode, data.points, groupIndex, hovered, includedGroups, links, view])
+  }, [colourMode, data.points, groupIndex, groupNames, hovered, includedGroups, islands, links, view])
 
   /* La boucle d'animation lit `draw` par référence.
      En la faisant dépendre de `draw`, elle se démontait et se remontait à chaque rendu — un
@@ -442,7 +511,7 @@ export function OrganizerMap({
     return inside
   }
 
-  const onWheel = (event: React.WheelEvent): void => {
+  zoomRef.current = (event: WheelEvent): void => {
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return
     const pointerX = event.clientX - rect.left
@@ -474,7 +543,6 @@ export function OrganizerMap({
           pullRef.current = null
           pullOriginRef.current = null
         }}
-        onWheel={onWheel}
         onContextMenu={(event) => event.preventDefault()}
       />
       {hovered?.thumbUrl ? (

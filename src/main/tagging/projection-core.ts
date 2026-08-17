@@ -144,8 +144,12 @@ export function projectSync(
   const reduced = reduce(raw, PCA_DIMS)
   const umap = new UMAP({
     nComponents: 2,
-    nNeighbors: Math.min(15, ids.length - 1),
-    minDist: 0.1,
+    /* Plus de voisins pour que la structure d'ensemble ressorte, et une distance minimale
+       très faible pour que les amas se resserrent : sur neuf mille posts, les réglages par
+       défaut donnaient une seule tache continue où l'on ne distinguait aucun îlot. */
+    nNeighbors: Math.min(30, ids.length - 1),
+    minDist: 0.015,
+    spread: 1.6,
     // Graine fixe : la carte doit être la même d'une ouverture à l'autre.
     random: mulberry32(0x5eed)
   })
