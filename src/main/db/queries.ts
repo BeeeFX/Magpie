@@ -599,6 +599,46 @@ export function saveLocalVideoFeatures(features: LocalVideoFeature[]): void {
   })()
 }
 
+export interface PostEmbedding {
+  postId: string
+  hash: string
+  vector: Buffer
+}
+
+/**
+ * Vecteurs de sens déjà calculés, indexés par post.
+ *
+ * Le hash porte sur le texte encodé : un post dont la légende n'a pas changé n'est jamais
+ * réencodé. C'est ce qui rend la deuxième analyse d'une grande bibliothèque quasi gratuite,
+ * comme le fait déjà la signature visuelle.
+ */
+export function postEmbeddings(): Map<string, PostEmbedding> {
+  const rows = getDb()
+    .prepare('SELECT post_id, hash, vector FROM post_embeddings')
+    .all() as { post_id: string; hash: string; vector: Buffer }[]
+  return new Map(
+    rows.map((row) => [row.post_id, { postId: row.post_id, hash: row.hash, vector: row.vector }])
+  )
+}
+
+export function savePostEmbeddings(embeddings: PostEmbedding[]): void {
+  if (embeddings.length === 0) return
+  const statement = getDb().prepare(`
+    INSERT INTO post_embeddings (post_id, hash, vector, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(post_id) DO UPDATE SET
+      hash = excluded.hash,
+      vector = excluded.vector,
+      updated_at = excluded.updated_at
+  `)
+  const now = Date.now()
+  getDb().transaction(() => {
+    for (const embedding of embeddings) {
+      statement.run(embedding.postId, embedding.hash, embedding.vector, now)
+    }
+  })()
+}
+
 export function aiCandidates(postIds?: string[], limit = 500): AiCandidate[] {
   const db = getDb()
   const params: unknown[] = []

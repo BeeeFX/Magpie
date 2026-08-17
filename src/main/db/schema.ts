@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 12
+export const SCHEMA_VERSION = 13
 
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS organizer_applications (
   posts         INTEGER NOT NULL,
   created_ids   TEXT NOT NULL,
   filed         TEXT NOT NULL
+);
+`
+
+export const MIGRATION_13_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS post_embeddings (
+  post_id    TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  hash       TEXT NOT NULL,
+  vector     BLOB NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 `
 
@@ -238,6 +247,16 @@ CREATE TABLE IF NOT EXISTS local_video_features (
   thumb_path  TEXT,
   visual      BLOB,
   updated_at  INTEGER NOT NULL
+);
+
+-- Vecteur de sens du texte d'un post, calculé localement. Le hash porte sur le texte
+-- source : un post dont la légende n'a pas bougé n'est jamais réencodé, ce qui rend les
+-- analyses suivantes quasi gratuites même sur une grande bibliothèque.
+CREATE TABLE IF NOT EXISTS post_embeddings (
+  post_id    TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  hash       TEXT NOT NULL,
+  vector     BLOB NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 
 -- Préférences apprises lors du premier tri local. Plusieurs clés peuvent pointer vers

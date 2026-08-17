@@ -22,6 +22,7 @@
     "check:layout": "tsx scripts/check-layout.ts",
     "check:organizer": "tsx --tsconfig tsconfig.node.json scripts/check-organizer.ts",
     "check:media": "tsx --tsconfig tsconfig.node.json scripts/check-media.ts",
+    "check:embeddings": "tsx --tsconfig tsconfig.node.json scripts/check-embeddings.ts",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "check:db": "tsx scripts/check-db.ts",
     "logo": "tsx scripts/make-logo.ts",
@@ -32,12 +33,14 @@
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "@huggingface/transformers": "^4.2.0",
     "better-sqlite3": "^13.0.3",
     "electron-updater": "^6.8.9",
     "ffmpeg-static": "^5.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sharp": "^0.35.3",
+    "umap-js": "^1.4.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

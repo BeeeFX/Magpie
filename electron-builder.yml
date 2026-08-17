@@ -15,6 +15,12 @@ files:
   - '!src/**/*'
   - '!scripts/**/*'
   - '!icons/**/*'
+  # `onnxruntime-node` livre 210 Mo de binaires pour toutes les plateformes et toutes les
+  # architectures. La cible étant Windows x64, les 151 Mo restants tripleraient l'installeur
+  # sans jamais servir. À revoir le jour où une autre plateforme est réellement produite.
+  - '!**/node_modules/onnxruntime-node/bin/napi-v6/linux/**'
+  - '!**/node_modules/onnxruntime-node/bin/napi-v6/darwin/**'
+  - '!**/node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**'
 
 # `better-sqlite3` et `sharp` embarquent des binaires natifs, et `ffmpeg-static` un
 # exécutable : ils doivent rester hors de l'archive asar, dont on ne peut rien exécuter.
@@ -23,6 +29,8 @@ asarUnpack:
   - '**/node_modules/sharp/**'
   - '**/node_modules/@img/**'
   - '**/node_modules/ffmpeg-static/**'
+  # Le moteur ONNX charge un `.node` : comme les autres, il doit rester déballé.
+  - '**/node_modules/onnxruntime-node/**'
 
 # L'icône est aussi lue au runtime pour la fenêtre et la zone de notification. Les
 # ressources de build servent normalement seulement à l'installateur, donc on l'embarque
