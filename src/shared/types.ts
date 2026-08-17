@@ -449,6 +449,8 @@ export interface AiCollectionApplyResult {
   collections: number
   added: number
   alreadyThere: number
+  /** Collections déjà existantes que le classement a rejointes plutôt que créées. */
+  joinedExisting: string[]
 }
 
 /**

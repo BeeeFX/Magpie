@@ -14,17 +14,21 @@ import {
   listCollections,
   localVideoFeatures,
   organizerRules,
+  recordOrganizerApplication,
   saveLocalVideoFeatures,
-  videoOrganizationItems,
+  organizationItems,
   addToCollection,
   type LocalVideoFeature,
   type OrganizerRuleRow,
-  type VideoOrganizationItem
+  type OrganizationItem
 } from '../db/queries'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
 
 const MAX_CATEGORIES = 24
+/** Marque les termes de facette — forme du post, plateforme. Jamais un thème, jamais un nom.
+ *  Le deux-points ne survit pas à `normalizePhrase`, donc aucun terme réel ne peut collisionner. */
+const FACET = 'facet:'
 const VISUAL_SIZE = 6
 const VISUAL_THRESHOLD = 0.94
 const VISUAL_MARGIN = 0.035
@@ -52,7 +56,7 @@ interface Topic {
 }
 
 interface PreparedItem {
-  item: VideoOrganizationItem
+  item: OrganizationItem
   terms: Map<string, number>
   visual: Float32Array | null
   choices: { id: string; score: number }[]
@@ -156,7 +160,7 @@ function addTerms(target: Map<string, number>, values: string[], weight: number)
   }
 }
 
-function prepareTerms(item: VideoOrganizationItem): Map<string, number> {
+function prepareTerms(item: OrganizationItem): Map<string, number> {
   const terms = new Map<string, number>()
   const text = item.text ?? ''
   const textWords = words(text)
@@ -172,6 +176,12 @@ function prepareTerms(item: VideoOrganizationItem): Map<string, number> {
     const phrase = `${textWords[index]} ${textWords[index + 1]}`
     if (phrase.length <= 40) terms.set(phrase, Math.max(terms.get(phrase) ?? 0, 1.35))
   }
+
+  /* La forme du post porte un peu de sens : un carrousel est presque toujours une liste ou un
+     tutoriel, un lien nu est une lecture à garder. Poids délibérément faible — c'est un
+     départage entre deux candidats à égalité, jamais une raison de créer une catégorie. Le
+     préfixe réservé les exclut du minage : sans lui, « Kind Image » deviendrait un thème. */
+  addTerms(terms, [`${FACET}kind ${item.kind}`, `${FACET}on ${item.platform}`], 0.8)
   return terms
 }
 
@@ -269,7 +279,7 @@ function similarity(left: Float32Array, right: Float32Array): number {
   return result
 }
 
-async function loadVisuals(items: VideoOrganizationItem[]): Promise<Map<string, Float32Array | null>> {
+async function loadVisuals(items: OrganizationItem[]): Promise<Map<string, Float32Array | null>> {
   const cached = localVideoFeatures()
   const result = new Map<string, Float32Array | null>()
   const pending = items.filter((item) => {
@@ -353,6 +363,7 @@ async function createChoices(
   const maximum = Math.max(10, Math.floor(items.length * 0.16))
   const dynamic = [...documentFrequency]
     .filter(([term, count]) => {
+      if (term.startsWith(FACET)) return false
       if (count < minimum || count > maximum || term.length < 3 || term.length > 35) return false
       if (topicKeyword.has(term) || STOP_WORDS.has(term)) return false
       return !term.split(' ').some((word) => STOP_WORDS.has(word))
@@ -523,7 +534,7 @@ function categoryDescription(
 let currentProposal: Promise<AiCollectionPlan> | null = null
 
 export async function buildLocalCollectionPlan(
-  items: VideoOrganizationItem[],
+  items: OrganizationItem[],
   visuals: Map<string, Float32Array | null> = new Map(),
   lang: Language = 'en',
   breathe: Breathe = NO_BREATHE
@@ -630,7 +641,7 @@ function organizerCollectionResolver(): (ruleKeys: string[], name: string) => nu
 }
 
 async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
-  const items = videoOrganizationItems()
+  const items = organizationItems()
   if (items.length === 0) {
     return { suggestions: [], routes: [], analysedVideos: 0, unassignedVideos: 0 }
   }
@@ -683,9 +694,15 @@ export function rememberedOrganizerDestinations(
 /** Applique les destinations apprises sans recréer ni renommer les collections. */
 export function applyRememberedOrganizerRules(): Promise<AiCollectionApplyResult> {
   if (automaticApply) return automaticApply
+  const idle: AiCollectionApplyResult = {
+    collections: 0,
+    added: 0,
+    alreadyThere: 0,
+    joinedExisting: []
+  }
   automaticApply = (async () => {
     const remembered = organizerRules()
-    if (remembered.length === 0) return { collections: 0, added: 0, alreadyThere: 0 }
+    if (remembered.length === 0) return idle
 
     const plan = await proposeVideoCollections()
     const postsByCollection = rememberedOrganizerDestinations(
@@ -696,14 +713,30 @@ export function applyRememberedOrganizerRules(): Promise<AiCollectionApplyResult
 
     let added = 0
     let alreadyThere = 0
+    /* Un rangement automatique se défaisait jusqu'ici sans trace : l'utilisateur voyait des
+       posts apparaître dans ses collections après une synchronisation, sans rien pour les en
+       sortir d'un geste. On l'enregistre comme un classement manuel. Seules les collections
+       existantes sont concernées, donc rien à supprimer en annulant. */
+    const filed: Array<{ collectionId: number; postIds: string[] }> = []
     for (const [collectionId, postIds] of postsByCollection) {
       const result = addToCollection(collectionId, postIds)
       added += result.added
       alreadyThere += result.alreadyThere.length
+      const untouched = new Set(result.alreadyThere)
+      const freshly = postIds.filter((postId) => !untouched.has(postId))
+      if (freshly.length > 0) filed.push({ collectionId, postIds: freshly })
     }
-    return { collections: postsByCollection.size, added, alreadyThere }
+    if (added > 0) {
+      recordOrganizerApplication({
+        collections: filed.length,
+        posts: added,
+        createdCollectionIds: [],
+        filed
+      })
+    }
+    return { collections: postsByCollection.size, added, alreadyThere, joinedExisting: [] }
   })().finally(() => {
     automaticApply = null
   })
-  return automaticApply
+  return automaticApply ?? Promise.resolve(idle)
 }

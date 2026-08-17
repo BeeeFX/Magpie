@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks'
-import type { VideoOrganizationItem } from '../src/main/db/queries'
+import type { OrganizationItem } from '../src/main/db/queries'
 import { redistributeOrganizerRoutes } from '../src/shared/organizer'
 import {
   buildLocalCollectionPlan,
@@ -18,9 +18,20 @@ function item(
   id: string,
   text: string | null,
   authorHandle: string | null = null,
-  tags: string[] = []
-): VideoOrganizationItem {
-  return { id, platform: 'instagram', text, authorHandle, thumbPath: null, tags }
+  tags: string[] = [],
+  extra: Partial<OrganizationItem> = {}
+): OrganizationItem {
+  return {
+    id,
+    platform: 'instagram',
+    kind: 'video',
+    sources: ['saved'],
+    text,
+    authorHandle,
+    thumbPath: null,
+    tags,
+    ...extra
+  }
 }
 
 async function main(): Promise<void> {
@@ -34,7 +45,7 @@ assert(
   'un nom de vignette stocké en base est résolu dans le dossier média'
 )
 
-const sample: VideoOrganizationItem[] = [
+const sample: OrganizationItem[] = [
   item('g1', 'A new guitar riff and pedalboard setup', 'strings'),
   item('g2', 'Guitar lesson: unusual jazz chords', 'strings'),
   item('g3', '#guitartok fingerstyle practice', 'strings'),
@@ -55,11 +66,28 @@ const sample: VideoOrganizationItem[] = [
   item('l2', 'Generative AI tutorial explained with ComfyUI'),
   item('l3', 'Guitar tutorial explained step by step'),
   item('l4', 'Tutorial explained for beginners'),
-  item('u1', null, 'unknown')
+  item('u1', null, 'unknown'),
+
+  /* Toute la bibliothèque entre dans le tri, pas seulement les vidéos Instagram et X. Un
+     carrousel de recettes et un tweet de cuisine doivent se ranger ensemble ; sur la vraie
+     base, ces formes-là représentaient 54 % des posts et n'étaient jamais analysées. */
+  item('c1', 'Best pasta recipe from a Roman chef', 'cucina', [], { kind: 'carousel' }),
+  item('c2', 'Cooking a slow food meal, restaurant style', 'cucina', [], { kind: 'carousel' }),
+  item('i1', 'Baking bread at home, my favourite recipe', 'oven', [], {
+    kind: 'image',
+    platform: 'x'
+  }),
+  item('t1', 'A chef explains why this recipe works', null, [], {
+    kind: 'text',
+    platform: 'x',
+    sources: ['liked']
+  })
 ]
 
 const plan = await buildLocalCollectionPlan(sample, new Map(), 'en')
 const names = new Set(plan.suggestions.map((suggestion) => suggestion.name))
+const categoryOf = (postId: string): string | null =>
+  plan.suggestions.find((suggestion) => suggestion.postIds.includes(postId))?.name ?? null
 assert(names.has('Guitar'), 'la guitare est reconnue')
 assert(names.has('Skateboarding'), 'le skateboard est reconnu')
 assert(names.has('DJ & mixing'), 'les contenus DJ sont reconnus')
@@ -67,6 +95,22 @@ assert(names.has('3D & Blender'), 'les contenus 3D sont reconnus')
 assert(
   plan.suggestions.find((suggestion) => suggestion.name === '3D & Blender')?.ruleKeys.includes('3d'),
   'chaque catégorie conserve une règle stable pour les prochaines synchronisations'
+)
+
+/* Le tri ne voyait que les vidéos Instagram et X : plus de la moitié d'une bibliothèque réelle
+   lui échappait. Ces quatre-là couvrent les formes qui étaient exclues. */
+assert(names.has('Food & cooking'), 'un thème émerge de posts qui ne sont pas des vidéos')
+assert(categoryOf('c1') === 'Food & cooking', 'un carrousel est rangé')
+assert(categoryOf('i1') === 'Food & cooking', 'une image X est rangée')
+assert(categoryOf('t1') === 'Food & cooking', 'un post texte est rangé')
+assert(
+  sample.find((entry) => entry.id === 't1')?.sources.includes('liked') &&
+    categoryOf('t1') !== null,
+  'un post venant des likes est rangé comme un signet'
+)
+assert(
+  !plan.suggestions.some((suggestion) => /^Kind |^On /i.test(suggestion.name)),
+  'la forme du post et la plateforme ne deviennent jamais des thèmes'
 )
 assert(
   plan.suggestions.find((suggestion) => suggestion.name === 'Guitar')?.postIds.includes('g4'),
@@ -148,7 +192,7 @@ assert(
   'les autres vidéos de la collection continuent d’être classées'
 )
 
-const large: VideoOrganizationItem[] = Array.from({ length: 10_000 }, (_, index) => {
+const large: OrganizationItem[] = Array.from({ length: 10_000 }, (_, index) => {
   const kind = index % 4
   if (kind === 0) return item(`large-${index}`, 'guitar riff music lesson', `artist-${index % 200}`)
   if (kind === 1) return item(`large-${index}`, 'skateboard kickflip street skate', `artist-${index % 200}`)

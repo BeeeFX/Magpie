@@ -220,6 +220,10 @@ const fr = {
   'organizer.videos': 'vidéos analysées',
   'organizer.categories': 'catégories proposées',
   'organizer.unassigned': 'sans catégorie',
+  'organizer.mergedInto': '« {source} » a rejoint « {target} ».',
+  'organizer.undoMerge': 'Annuler la fusion',
+  'organizer.joinedExisting':
+    'Ces collections existaient déjà et ont été complétées plutôt que créées : {names}.',
   'organizer.reviewHint':
     'Décochez une catégorie pour redistribuer ses vidéos vers les catégories conservées. Sans alternative fiable, elles resteront simplement sans collection.',
   'organizer.rememberTitle': 'Mémoriser mes choix',
@@ -648,6 +652,10 @@ const en: Record<TranslationKey, string> = {
   'organizer.videos': 'videos analysed',
   'organizer.categories': 'suggested categories',
   'organizer.unassigned': 'uncategorised',
+  'organizer.mergedInto': '“{source}” joined “{target}”.',
+  'organizer.undoMerge': 'Undo merge',
+  'organizer.joinedExisting':
+    'These collections already existed and were added to rather than created: {names}.',
   'organizer.reviewHint':
     'Untick a category to redistribute its videos into the categories you keep. Without a reliable alternative, they will simply remain outside collections.',
   'organizer.rememberTitle': 'Remember my choices',

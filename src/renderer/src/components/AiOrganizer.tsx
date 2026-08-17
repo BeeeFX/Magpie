@@ -35,6 +35,13 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
   const [phase, setPhase] = useState<'intro' | 'loading' | 'review' | 'applying' | 'done'>('intro')
   const [plan, setPlan] = useState<AiCollectionPlan | null>(null)
   const [suggestions, setSuggestions] = useState<EditableSuggestion[]>([])
+  /** Dernière fusion, pour pouvoir la défaire. Une seule profondeur suffit : au-delà, on
+   *  relance l'analyse. */
+  const [lastMerge, setLastMerge] = useState<{
+    before: EditableSuggestion[]
+    sourceName: string
+    targetName: string
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<AiCollectionApplyResult | null>(null)
   const [rememberChoices, setRememberChoices] = useState(false)
@@ -53,6 +60,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     setPhase('intro')
     setPlan(null)
     setSuggestions([])
+    setLastMerge(null)
     setError(null)
     setResult(null)
     setRememberChoices(autoOrganizeEnabled)
@@ -111,6 +119,7 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
       const next = await magpie.proposeAiCollections()
       setPlan(next)
       setSuggestions(next.suggestions.map((suggestion) => ({ ...suggestion, included: true })))
+      setLastMerge(null)
       setPreviewId(null)
       setPhase('review')
     } catch (reason) {
@@ -119,13 +128,18 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     }
   }
 
+  /* Une fusion se décidait sans retour possible : la catégorie source disparaissait de la
+     liste et seule une nouvelle analyse la ramenait. On garde l'état d'avant pour pouvoir
+     revenir en arrière — c'est un geste d'exploration, il doit se défaire. */
   const merge = (sourceId: string, targetId: string): void => {
     if (!targetId || sourceId === targetId) return
     setPreviewId(null)
     setPreviewPosts([])
     setSuggestions((current) => {
       const source = current.find((item) => item.id === sourceId)
-      if (!source) return current
+      const target = current.find((item) => item.id === targetId)
+      if (!source || !target) return current
+      setLastMerge({ before: current, sourceName: source.name, targetName: target.name })
       return current
         .filter((item) => item.id !== sourceId)
         .map((item) =>
@@ -138,6 +152,12 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
             : item
         )
     })
+  }
+
+  const undoMerge = (): void => {
+    if (!lastMerge) return
+    setSuggestions(lastMerge.before)
+    setLastMerge(null)
   }
 
   const setIncluded = (suggestionId: string, included: boolean): void => {
@@ -328,6 +348,19 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                 <div><strong>{unassignedVideos}</strong><span>{t('organizer.unassigned')}</span></div>
               </div>
               <p className="organizer-review-hint">{t('organizer.reviewHint')}</p>
+              {lastMerge ? (
+                <div className="organizer-undo-merge" role="status">
+                  <span>
+                    {t('organizer.mergedInto', {
+                      source: lastMerge.sourceName,
+                      target: lastMerge.targetName
+                    })}
+                  </span>
+                  <button type="button" className="btn" onClick={undoMerge}>
+                    {t('organizer.undoMerge')}
+                  </button>
+                </div>
+              ) : null}
               <div className="organizer-memory">
                 <div>
                   <strong>{t('organizer.rememberTitle')}</strong>
@@ -492,6 +525,13 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                 collections: result?.collections ?? 0,
                 posts: result?.added ?? 0
               })}</p>
+              {/* Renommer une catégorie du nom d'une collection existante y verse son
+                  contenu. C'est voulu, mais ça se faisait sans le dire. */}
+              {result && result.joinedExisting.length > 0 ? (
+                <p className="organizer-joined">
+                  {t('organizer.joinedExisting', { names: result.joinedExisting.join(', ') })}
+                </p>
+              ) : null}
               {rememberChoices ? <p>{t('organizer.rememberDone')}</p> : null}
               {error ? <p className="organizer-error">{error}</p> : null}
               {undoPanel()}

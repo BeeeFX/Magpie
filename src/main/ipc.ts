@@ -289,12 +289,16 @@ export function registerIpc({
         // fait naître, et les seules vidéos qu'il range réellement.
         const createdCollectionIds: number[] = []
         const filed: Array<{ collectionId: number; postIds: string[] }> = []
+        // Renommer une catégorie du nom d'une collection existante y verse son contenu. C'est
+        // le comportement voulu, mais il se faisait en silence : on le rapporte.
+        const joinedExisting: string[] = []
         let added = 0
         let alreadyThere = 0
         for (const [key, group] of merged) {
           const known = existing.get(key)
           const collection = known ?? createCollection(group.name)
-          if (!known) createdCollectionIds.push(collection.id)
+          if (known) joinedExisting.push(collection.name)
+          else createdCollectionIds.push(collection.id)
           existing.set(key, collection)
           const result = addToCollection(collection.id, [...group.postIds])
           added += result.added
@@ -313,9 +317,15 @@ export function registerIpc({
           createdCollectionIds,
           filed
         })
-        return { collections: merged.size, added, alreadyThere }
+        return { collections: merged.size, added, alreadyThere, joinedExisting }
       })()
-      writeSettings({ autoOrganizeEnabled: remember })
+      /* Le tri après synchronisation ne s'allume qu'une fois qu'un premier classement a été
+         validé : ranger avant que l'utilisateur ait dit ce qu'il voulait n'aurait aucun sens.
+         Il ne s'éteint en revanche que depuis les réglages — le commutateur « mémoriser » de
+         la modale décidait jusqu'ici du comportement global à l'insu de l'utilisateur. */
+      if (remember && !readSettings().autoOrganizeEnabled) {
+        writeSettings({ autoOrganizeEnabled: true })
+      }
       return result
     }
   )

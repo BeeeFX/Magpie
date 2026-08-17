@@ -487,9 +487,13 @@ export interface AiCandidate {
   thumbPath: string | null
 }
 
-export interface VideoOrganizationItem {
+export interface OrganizationItem {
   id: string
   platform: Platform
+  kind: PostKind
+  /** Signet, like, ou les deux — un post peut être les deux à la fois. Jamais un filtre :
+   *  Magpie sert les deux à égalité, et l'organisateur doit voir toute la bibliothèque. */
+  sources: ContentSource[]
   text: string | null
   authorHandle: string | null
   thumbPath: string | null
@@ -509,34 +513,49 @@ export function videoAiCandidateIds(): string[] {
   ).map((row) => row.id)
 }
 
-export function videoOrganizationItems(): VideoOrganizationItem[] {
+/**
+ * Tout ce que l'organisateur peut ranger — c'est-à-dire toute la bibliothèque.
+ *
+ * La version précédente ne voyait que les vidéos Instagram et X, soit 46 % des posts sur une
+ * bibliothèque réelle : le plus gros paquet, les images X, restait invisible alors qu'il porte
+ * le texte du tweet, un excellent signal. Un post sans média ni texte ne sera de toute façon
+ * rattaché à rien, il n'y a donc pas de raison de l'écarter en amont.
+ *
+ * La première vignette disponible suffit, quel que soit le type de média : le repli visuel par
+ * centroïde ne demande rien d'autre.
+ */
+export function organizationItems(): OrganizationItem[] {
   const rows = getDb()
     .prepare(
-      `SELECT p.id, p.platform, p.text, p.author_handle,
+      `SELECT p.id, p.platform, p.kind, p.text, p.author_handle,
               (SELECT m2.thumb_path FROM media m2
-                WHERE m2.post_id = p.id AND m2.kind = 'video'
+                WHERE m2.post_id = p.id AND m2.thumb_path IS NOT NULL
                 ORDER BY m2.idx LIMIT 1) AS thumb_path,
+              (SELECT GROUP_CONCAT(ps.source) FROM post_sources ps
+                WHERE ps.post_id = p.id) AS sources,
               GROUP_CONCAT(DISTINCT CASE WHEN pt.source <> 'ai' THEN t.name END) AS tags
          FROM posts p
          LEFT JOIN post_tags pt ON pt.post_id = p.id
          LEFT JOIN tags t ON t.id = pt.tag_id
         WHERE p.is_archived = 0
-          AND p.platform IN ('instagram', 'x')
-          AND EXISTS (SELECT 1 FROM media m WHERE m.post_id = p.id AND m.kind = 'video')
         GROUP BY p.id
         ORDER BY p.discovered_at DESC`
     )
     .all() as {
     id: string
     platform: Platform
+    kind: PostKind
     text: string | null
     author_handle: string | null
     thumb_path: string | null
+    sources: string | null
     tags: string | null
   }[]
   return rows.map((row) => ({
     id: row.id,
     platform: row.platform,
+    kind: row.kind,
+    sources: (row.sources?.split(',').filter(Boolean) ?? []) as ContentSource[],
     text: row.text,
     authorHandle: row.author_handle,
     thumbPath: row.thumb_path,
@@ -1318,9 +1337,6 @@ export function lastOrganizerApplication(): OrganizerApplication | null {
   }
 }
 
-export function forgetOrganizerApplication(): void {
-  getDb().prepare('DELETE FROM organizer_applications').run()
-}
 
 /**
  * Défait le dernier classement : les vidéos sortent des collections où il les avait mises,

@@ -170,7 +170,8 @@ const previewApi: MagpieApi = {
   applyAiCollections: async (choices) => ({
     collections: choices.length,
     added: choices.reduce((total, choice) => total + choice.postIds.length, 0),
-    alreadyThere: 0
+    alreadyThere: 0,
+    joinedExisting: []
   }),
   // Un classement fictif « déjà appliqué », pour que l'aperçu visuel montre aussi la porte
   // de sortie et pas seulement le parcours heureux.

@@ -1800,6 +1800,24 @@ h1, h2, h3 {
   }
 }
 
+.organizer-undo-merge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--field);
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.organizer-joined {
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .organizer-list {
   display: grid;
   gap: 8px;
