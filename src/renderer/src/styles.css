@@ -1651,6 +1651,39 @@ h1, h2, h3 {
   width: 100%;
 }
 
+.downloads__action {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.downloads__action-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  font-weight: 600;
+}
+
+.downloads__action-top em {
+  color: var(--faint);
+  font-size: 11px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.downloads__action-hint {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+}
+
 .downloads__list {
   display: grid;
   gap: 12px;

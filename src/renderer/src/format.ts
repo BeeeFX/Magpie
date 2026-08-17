@@ -9,9 +9,11 @@ import { LOCALE } from './i18n'
  * les points d'appel pour une valeur qui change une fois par session.
  */
 let locale: string = LOCALE.fr
+let language: Language = 'fr'
 
-export function setFormatLanguage(language: Language): void {
-  locale = LOCALE[language]
+export function setFormatLanguage(next: Language): void {
+  locale = LOCALE[next]
+  language = next
 }
 
 /** Nom lisible de la source, tel qu'affiché en pied de carte. */
@@ -71,11 +73,12 @@ export function formatDuration(ms: number): string {
   return rest === 0 ? `${hours} h` : `${hours} h ${String(rest).padStart(2, '0')}`
 }
 
-/** Tailles de fichiers, en unités françaises comme le reste de l'interface. */
+/** Tailles de fichiers. Les unités suivent la langue : « Mo » en français, « MB » ailleurs. */
 export function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '0 Mo'
+  const [mo, go] = language === 'fr' ? ['Mo', 'Go'] : ['MB', 'GB']
+  if (bytes <= 0) return `0 ${mo}`
   const mb = bytes / 1024 / 1024
-  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} Go` : `${mb.toFixed(1)} Mo`
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} ${go}` : `${mb.toFixed(1)} ${mo}`
 }
 
 export function displayName(post: Post): string {

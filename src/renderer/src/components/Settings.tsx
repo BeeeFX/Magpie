@@ -683,7 +683,7 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
                   disabled={(pending?.thumbnails ?? 0) === 0}
                   onClick={() => void magpie.startPreload({ what: 'thumbnails' })}
                 >
-                  {t('downloads.allThumbnails', { count: pending?.thumbnails ?? 0 })}
+                  {t('downloads.thumbsName')}
                 </button>
                 <button
                   type="button"
@@ -691,7 +691,7 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
                   disabled={(pending?.clips ?? 0) === 0}
                   onClick={() => void magpie.startPreload({ what: 'clips' })}
                 >
-                  {t('downloads.allClips', { count: pending?.clips ?? 0 })}
+                  {t('downloads.clipsName')}
                 </button>
               </div>
             </div>

@@ -6,6 +6,41 @@ import { useStore, useT } from '../store'
 import { IconClose, IconDownload, IconPause, IconPlay } from './Icons'
 import { Popover } from './Popover'
 
+/* Ordres de grandeur mesurés sur une bibliothèque réelle : une vignette WebP 480p pèse
+   une quarantaine de kilo-octets, un clip 480p environ trois méga-octets. L'estimation ne
+   sert qu'à faire sentir l'écart — annoncer « 5 Mo » ou « 14 Go » change la décision. */
+const THUMBNAIL_BYTES = 40 * 1024
+const CLIP_BYTES = 3 * 1024 * 1024
+
+function PreloadButton({
+  name,
+  hint,
+  count,
+  bytes,
+  onClick
+}: {
+  name: string
+  hint?: string
+  count: number
+  bytes: number
+  onClick: () => void
+}): React.JSX.Element {
+  const t = useT()
+  return (
+    <button type="button" className="btn downloads__action" disabled={count === 0} onClick={onClick}>
+      <span className="downloads__action-top">
+        <span>{name}</span>
+        <em>
+          {count === 0
+            ? t('downloads.allDone')
+            : t('downloads.amount', { count, size: formatBytes(bytes) })}
+        </em>
+      </span>
+      {hint ? <span className="downloads__action-hint">{hint}</span> : null}
+    </button>
+  )
+}
+
 /**
  * Téléchargements : ce qu'on peut demander, et ce qui se passe déjà.
  *
@@ -127,29 +162,30 @@ export function Downloads(): React.JSX.Element {
           <div className="modal__sep" />
           <p className="downloads__hint">{t('downloads.prepareHint')}</p>
 
+          {/* Deux mots suffisaient — « vignettes » et « clips » — mais ils ne disaient ni
+              ce qu'on obtient ni ce que ça coûte. Le nom dit la chose, la ligne dessous dit
+              à quoi elle sert, et le poids estimé rend l'écart entre les deux évident. */}
           <div className="downloads__actions">
-            <button
-              type="button"
-              className="btn"
-              disabled={(counts?.thumbnails ?? 0) === 0}
+            <PreloadButton
+              name={t('downloads.thumbsName')}
+              hint={t('downloads.thumbsHint')}
+              count={counts?.thumbnails ?? 0}
+              bytes={(counts?.thumbnails ?? 0) * THUMBNAIL_BYTES}
               onClick={() => {
                 start('thumbnails', false)
                 close()
               }}
-            >
-              {t('downloads.allThumbnails', { count: counts?.thumbnails ?? 0 })}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={(counts?.clips ?? 0) === 0}
+            />
+            <PreloadButton
+              name={t('downloads.clipsName')}
+              hint={t('downloads.clipsHint')}
+              count={counts?.clips ?? 0}
+              bytes={(counts?.clips ?? 0) * CLIP_BYTES}
               onClick={() => {
                 start('clips', false)
                 close()
               }}
-            >
-              {t('downloads.allClips', { count: counts?.clips ?? 0 })}
-            </button>
+            />
           </div>
 
           {/* Le périmètre suit l'écran plutôt que d'imposer un second jeu de filtres :
@@ -158,28 +194,24 @@ export function Downloads(): React.JSX.Element {
             <>
               <p className="downloads__hint">{t('downloads.scopeHint')}</p>
               <div className="downloads__actions">
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={(scoped?.thumbnails ?? 0) === 0}
+                <PreloadButton
+                  name={t('downloads.thumbsName')}
+                  count={scoped?.thumbnails ?? 0}
+                  bytes={(scoped?.thumbnails ?? 0) * THUMBNAIL_BYTES}
                   onClick={() => {
                     start('thumbnails', true)
                     close()
                   }}
-                >
-                  {t('downloads.viewThumbnails', { count: scoped?.thumbnails ?? 0 })}
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={(scoped?.clips ?? 0) === 0}
+                />
+                <PreloadButton
+                  name={t('downloads.clipsName')}
+                  count={scoped?.clips ?? 0}
+                  bytes={(scoped?.clips ?? 0) * CLIP_BYTES}
                   onClick={() => {
                     start('clips', true)
                     close()
                   }}
-                >
-                  {t('downloads.viewClips', { count: scoped?.clips ?? 0 })}
-                </button>
+                />
               </div>
             </>
           ) : null}
