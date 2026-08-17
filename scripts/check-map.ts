@@ -51,20 +51,30 @@ async function main(): Promise<void> {
      'electron' ». On lit donc le bundle construit, seule preuve qui vaille. */
   console.log('\nisolement du fil')
   const seen = new Set<string>()
+  const external = new Set<string>()
   const queue = [built]
   while (queue.length > 0) {
     const file = queue.pop() as string
     if (seen.has(file)) continue
     seen.add(file)
     const source = await readFile(file, 'utf8').catch(() => '')
-    assert(
-      !/require\(["']electron["']\)|from ["']electron["']/.test(source),
-      `${basename(file)} n'atteint jamais le module electron`
-    )
-    for (const match of source.matchAll(/require\(["'](\.[^"']+)["']\)/g)) {
-      queue.push(join(dirname(file), match[1]))
+    for (const match of source.matchAll(/require\(["']([^"']+)["']\)/g)) {
+      const id = match[1]
+      if (id.startsWith('.')) queue.push(join(dirname(file), id))
+      else if (!id.startsWith('node:')) external.add(id)
     }
   }
+  console.log(`  fichiers atteints : ${[...seen].map((file) => basename(file)).join(', ')}`)
+  /* Le fil est déballé hors de l'archive asar : depuis cet emplacement, la résolution de
+     modules n'atteint aucun `node_modules`. Toute dépendance externe ne casse donc qu'en
+     version installée — `electron` puis `umap-js` l'ont chacune démontré à leur tour. Un fil
+     autonome ne dépend pas de l'endroit où il vit. */
+  assert(
+    external.size === 0,
+    external.size === 0
+      ? "le fil n'exige aucun module externe"
+      : `le fil exige des modules externes : ${[...external].join(', ')}`
+  )
 
   console.log('\nexécution')
   const ids = Array.from({ length: POINTS }, (_, index) => `p${index}`)

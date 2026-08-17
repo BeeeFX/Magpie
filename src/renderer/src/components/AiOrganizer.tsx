@@ -368,8 +368,15 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
               <strong>{t('organizer.leaveTitle')}</strong>
               <p>{t('organizer.leaveRunning')}</p>
               <div className="confirm__actions">
-                <button type="button" className="btn" onClick={() => setLeaving(false)}>
-                  {t('organizer.leaveStay')}
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    setLeaving(false)
+                    requestClose()
+                  }}
+                >
+                  {t('organizer.leaveBackground')}
                 </button>
                 {/* Continuer en fond n'est pas toujours ce qu'on veut : une transcription
                     lancée par erreur occupe la machine des heures. Il faut pouvoir tout
@@ -385,15 +392,8 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                 >
                   {t('organizer.leaveStop')}
                 </button>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={() => {
-                    setLeaving(false)
-                    requestClose()
-                  }}
-                >
-                  {t('organizer.leaveBackground')}
+                <button type="button" className="btn" onClick={() => setLeaving(false)}>
+                  {t('organizer.leaveStay')}
                 </button>
               </div>
             </div>

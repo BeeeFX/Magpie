@@ -6,7 +6,10 @@ const shared = resolve('src/shared')
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    /* `umap-js` est embarqué dans le paquet plutôt que laissé en dépendance externe : le fil
+       de projection est déballé hors de l'archive asar, et la résolution de modules depuis cet
+       emplacement n'atteint aucun `node_modules`. Un fil autonome ne dépend pas d'où il vit. */
+    plugins: [externalizeDepsPlugin({ exclude: ['umap-js'] })],
     resolve: { alias: { '@shared': shared } },
     build: {
       rollupOptions: {
@@ -22,7 +25,10 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    /* `umap-js` est embarqué dans le paquet plutôt que laissé en dépendance externe : le fil
+       de projection est déballé hors de l'archive asar, et la résolution de modules depuis cet
+       emplacement n'atteint aucun `node_modules`. Un fil autonome ne dépend pas d'où il vit. */
+    plugins: [externalizeDepsPlugin({ exclude: ['umap-js'] })],
     resolve: { alias: { '@shared': shared } },
     build: {
       rollupOptions: { input: { index: resolve('src/preload/index.ts') } }
