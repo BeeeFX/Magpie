@@ -24,7 +24,7 @@ import {
   type OrganizationItem
 } from '../db/queries'
 import { centreVectors, embedItems, embedTexts } from './embeddings'
-import { project } from './projection'
+import { project, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
 
@@ -591,6 +591,10 @@ let currentProposal: Promise<AiCollectionPlan> | null = null
 /** Vecteurs recentrés de la dernière analyse. La carte les réutilise plutôt que de réencoder
  *  toute la bibliothèque pour afficher les mêmes points. */
 let lastSemanticVectors: Map<string, Float32Array> | null = null
+/** Dernier plan produit. La carte le réutilise au lieu de relancer toute l'analyse. */
+let lastPlan: AiCollectionPlan | null = null
+/** Dernière projection. Rouvrir l'organisateur ne doit pas refaire neuf secondes de calcul. */
+let lastProjection: ProjectedPoint[] | null = null
 
 export async function buildLocalCollectionPlan(
   items: OrganizationItem[],
@@ -737,6 +741,7 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
         items: new Map([...vectors.keys()].map((id) => [id, centred.get(id) as Float32Array])),
         topics: new Map(topicIds.map((id) => [id, centred.get(`topic:${id}`) as Float32Array]))
       }
+      if (lastSemanticVectors?.size !== semantic.items.size) lastProjection = null
       lastSemanticVectors = semantic.items
     }
   } catch (error) {
@@ -746,7 +751,8 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
   setProgress({ stage: 'grouping', done: 0, total: items.length, running: true })
   const plan = await buildLocalCollectionPlan(items, visuals, language(), breathe, semantic)
   setProgress({ stage: 'grouping', done: items.length, total: items.length, running: true })
-  return withoutRemovedPosts(plan, organizerCollectionResolver(), collectionRemovals())
+  lastPlan = withoutRemovedPosts(plan, organizerCollectionResolver(), collectionRemovals())
+  return lastPlan
 }
 
 /**
@@ -757,15 +763,23 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
  * chose, ce qui serait faux si les deux étaient calculés séparément.
  */
 export async function buildOrganizerMap(): Promise<OrganizerMap> {
-  const plan = await proposeVideoCollections()
+  /* Le plan vient d'être calculé par l'écran qui nous appelle : le redemander relançait
+     toute l'analyse une seconde fois — chargement des vignettes, regroupement, tout. */
+  const plan = lastPlan ?? (await proposeVideoCollections())
   const vectors = lastSemanticVectors
   if (!vectors || vectors.size === 0) return { points: [], plan }
 
-  setProgress({ stage: 'projecting', done: 0, total: 100, running: true })
-  const projected = await project(vectors, (done, total) =>
-    setProgress({ stage: 'projecting', done, total, running: true })
-  )
-  setProgress({ stage: 'idle', done: 0, total: 0, running: false })
+  try {
+    if (!lastProjection || lastProjection.length !== vectors.size) {
+      setProgress({ stage: 'projecting', done: 0, total: 100, running: true })
+      lastProjection = await project(vectors, (done, total) =>
+        setProgress({ stage: 'projecting', done, total, running: true })
+      )
+    }
+  } finally {
+    // Toujours, y compris sur échec : sinon l'indicateur reste violet et animé sans fin.
+    setProgress({ stage: 'idle', done: 0, total: 0, running: false })
+  }
 
   const groupOf = new Map<string, string>()
   for (const suggestion of plan.suggestions) {
@@ -775,7 +789,7 @@ export async function buildOrganizerMap(): Promise<OrganizerMap> {
 
   return {
     plan,
-    points: projected.flatMap((point) => {
+    points: lastProjection.flatMap((point) => {
       const item = details.get(point.id)
       if (!item) return []
       return [
@@ -797,6 +811,9 @@ export async function buildOrganizerMap(): Promise<OrganizerMap> {
 export function proposeVideoCollections(): Promise<AiCollectionPlan> {
   if (currentProposal) return currentProposal
   currentProposal = buildVideoCollectionProposal().finally(() => {
+    // Sans cela, une analyse qui échoue laisse la tâche « Organisation » affichée pour
+    // toujours, et l'indicateur de téléchargement animé avec elle.
+    setProgress({ stage: 'idle', done: 0, total: 0, running: false })
     currentProposal = null
     setProgress({ ...progress, running: false })
   })

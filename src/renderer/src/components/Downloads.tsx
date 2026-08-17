@@ -17,7 +17,7 @@ import { Popover } from './Popover'
  * Auparavant il fallait rester dans les réglages pour voir avancer une préparation, et la
  * synchronisation ne se lisait qu'ailleurs encore — tout se regroupe ici.
  */
-export function Downloads(): React.JSX.Element | null {
+export function Downloads(): React.JSX.Element {
   const t = useT()
   const [state, setState] = useState<BackgroundState | null>(null)
 
@@ -42,9 +42,10 @@ export function Downloads(): React.JSX.Element | null {
   const recent = (state?.history ?? []).slice(-60)
   const items = Math.round(recent.reduce((sum, sample) => sum + sample.itemsPerSecond, 0))
 
-  /* Purement un indicateur d'état depuis que le menu d'actions porte les lancements : rien
-     en cours et rien à signaler, il n'a aucune raison d'occuper la barre d'outils. */
-  if (!busy && !warning) return null
+  /* Il reste en place même au repos : voir un bouton disparaître et réapparaître dans une
+     barre d'outils décale tout le reste, et on perd le seul endroit où consulter l'historique
+     de débit. Au repos il devient gris et cesse de bouger — c'est la couleur et le mouvement
+     qui portent l'information, pas la présence. */
 
   return (
     <Popover

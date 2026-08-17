@@ -159,11 +159,35 @@ export function project(
   const flat = new Float32Array(ids.length * width)
   ids.forEach((id, index) => flat.set(vectors.get(id) as Float32Array, index * width))
 
-  return new Promise<ProjectedPoint[]>((resolve, reject) => {
-    const worker = new Worker(join(__dirname, 'projection.worker.js'), {
+  /* En version installée, `__dirname` pointe dans l'archive asar. Le fichier y est bien
+     redirigé vers sa copie déballée pour les lectures, mais un fil d'exécution résout ses
+     propres imports et cette redirection n'est pas garantie. On vise donc directement le
+     chemin déballé : c'est le même fichier, sans la question. */
+  const here = __dirname.includes('app.asar')
+    ? __dirname.replace('app.asar', 'app.asar.unpacked')
+    : __dirname
+  const script = join(here, 'projection.worker.js')
+
+  return new Promise<ProjectedPoint[]>((done, fail) => {
+    const worker = new Worker(script, {
       workerData: { ids, flat, width },
       transferList: [flat.buffer]
     })
+    /* Sans borne, un fil qui ne répond pas laisse l'écran sur son indicateur pour toujours —
+       c'est exactement ce qui s'est produit en version installée. Mieux vaut échouer et le
+       dire que faire attendre dix minutes devant un rond qui tourne. */
+    const guard = setTimeout(() => {
+      void worker.terminate()
+      fail(new Error(`Projection sans réponse après trois minutes (${script}).`))
+    }, 180_000)
+    const resolve = (value: ProjectedPoint[]): void => {
+      clearTimeout(guard)
+      done(value)
+    }
+    const reject = (error: Error): void => {
+      clearTimeout(guard)
+      fail(error)
+    }
     worker.on('message', (message: { type: string; points?: ProjectedPoint[]; done?: number; total?: number }) => {
       if (message.type === 'progress') onProgress?.(message.done ?? 0, message.total ?? 0)
       else if (message.type === 'done') resolve(message.points ?? [])

@@ -1537,6 +1537,9 @@ h1, h2, h3 {
   align-items: center;
   gap: 5px;
   position: relative;
+  /* Au repos, ni couleur ni mouvement : le bouton reste, il ne réclame simplement rien. */
+  color: var(--faint);
+  transition: color var(--fast) var(--ease);
 }
 
 .downloads__trigger.is-busy {

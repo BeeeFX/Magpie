@@ -330,13 +330,22 @@ const fr = {
     'Ce texte est écrit dans PROMPT.md. Vous pouvez l’adapter avant de le copier — c’est vous qui conversez, pas Magpie.',
   'export.done':
     '{posts} posts exportés · {collections} collections · {transcripts} transcriptions · {size}',
+  'actions.prepareThumbs': 'Télécharger les images des tuiles',
+  'actions.prepareClips': 'Télécharger les vidéos en {quality}',
+  'actions.qualityHint': 'Qualité réglable dans Réglages › Vidéo et stockage.',
+  'actions.recheck': 'Revérifier toute la bibliothèque',
+  'actions.recheckHint':
+    'Reparcourt tout l’historique de vos comptes pour retrouver d’anciens posts que Magpie aurait manqués.',
+  'actions.recheckConfirm':
+    'Reparcourir tout l’historique de {platforms} ? Cela peut prendre plusieurs minutes.',
+  'actions.fetchNew': 'Chercher les nouveautés',
+  'actions.fetchNewHint': 'Récupère ce que vous avez enregistré ou aimé depuis la dernière fois.',
   'actions.transcribe': 'Transcrire les vidéos',
   'actions.transcribeHint': '{count} vidéos sans transcription',
   'actions.transcribeAskReady':
     'Transcrire {count} vidéos ?\n\nTes vidéos sont déjà sur le disque : rien à télécharger. Le calcul tourne en fond, en local, et rien ne quitte ta machine. Tu peux le suspendre à tout moment.',
   'actions.transcribeAskDownload':
     'Transcrire {count} vidéos ?\n\nTes vidéos ne sont pas encore sur le disque : elles seront téléchargées pour en extraire l’audio, soit environ {size}. Rien n’est conservé — seul le son transite, puis il est jeté. Ta limite de cache n’est pas touchée.\n\nLe calcul tourne en fond, en local, et se suspend à tout moment.',
-  'actions.recheck': 'Tout revérifier sur {platform}',
   'downloads.title': 'Téléchargements',
   'downloads.prepareHint':
     'Prépare les médias à l’avance pour un affichage instantané, même hors connexion. Le travail se poursuit en arrière-plan.',
@@ -813,13 +822,22 @@ const en: Record<TranslationKey, string> = {
     'This text is written to PROMPT.md. Adapt it before copying — you are the one having the conversation, not Magpie.',
   'export.done':
     '{posts} posts exported · {collections} collections · {transcripts} transcripts · {size}',
+  'actions.prepareThumbs': 'Download tile images',
+  'actions.prepareClips': 'Download videos in {quality}',
+  'actions.qualityHint': 'Quality is set in Settings › Video and storage.',
+  'actions.recheck': 'Re-check the whole library',
+  'actions.recheckHint':
+    'Walks back through your accounts’ full history to find older posts Magpie may have missed.',
+  'actions.recheckConfirm':
+    'Walk back through the whole history of {platforms}? This can take several minutes.',
+  'actions.fetchNew': 'Check for new items',
+  'actions.fetchNewHint': 'Fetches what you saved or liked since last time.',
   'actions.transcribe': 'Transcribe videos',
   'actions.transcribeHint': '{count} videos without a transcript',
   'actions.transcribeAskReady':
     'Transcribe {count} videos?\n\nYour videos are already on disk: nothing to download. The work runs in the background, locally, and nothing leaves your machine. You can pause it at any time.',
   'actions.transcribeAskDownload':
     'Transcribe {count} videos?\n\nYour videos are not on disk yet: they will be downloaded to extract the audio, about {size}. Nothing is kept — only the sound passes through, then it is discarded. Your cache limit is untouched.\n\nThe work runs in the background, locally, and pauses at any time.',
-  'actions.recheck': 'Re-check everything on {platform}',
   'downloads.title': 'Downloads',
   'downloads.prepareHint':
     'Prepare media ahead of time so it appears instantly, even offline. The work continues in the background.',

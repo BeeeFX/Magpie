@@ -6,6 +6,7 @@ import { formatBytes, PLATFORM_LABEL } from '../format'
 import { useStore, useT } from '../store'
 import {
   IconChevronRight,
+  IconClock,
   IconCollections,
   IconImage,
   IconMic,
@@ -66,7 +67,7 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
       >
         <IconImage size={15} />
         <span>
-          <strong>{t('downloads.thumbsName')}</strong>
+          <strong>{t('actions.prepareThumbs')}</strong>
           <em>
             {(counts?.thumbnails ?? 0) === 0
               ? t('downloads.allDone')
@@ -85,7 +86,7 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
       >
         <IconVideo size={15} />
         <span>
-          <strong>{t('downloads.clipsName', { quality: t(`quality.${cacheQuality}`) })}</strong>
+          <strong>{t('actions.prepareClips', { quality: t(`quality.${cacheQuality}`) })}</strong>
           <em>
             {(counts?.clips ?? 0) === 0
               ? t('downloads.allDone')
@@ -145,34 +146,28 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
           </span>
         </button>
       ) : null}
-      {connected.map((account) => (
+      {connected.length > 0 ? (
         <button
-          key={account.platform}
           type="button"
           role="menuitem"
           onClick={run(() => {
-            if (
-              window.confirm(
-                t('accounts.fullSyncConfirm', { platform: PLATFORM_LABEL[account.platform] })
-              )
-            ) {
-              void magpie.startFullSync(account.platform)
-            }
+            const names = connected.map((a) => PLATFORM_LABEL[a.platform]).join(' et ')
+            if (!window.confirm(t('actions.recheckConfirm', { platforms: names }))) return
+            for (const account of connected) void magpie.startFullSync(account.platform)
           })}
         >
-          <PlatformIcon platform={account.platform} size={15} />
+          <IconClock size={15} />
           <span>
-            <strong>
-              {t('actions.recheck', { platform: PLATFORM_LABEL[account.platform] })}
-            </strong>
-            <em>{t('accounts.fullSyncHint')}</em>
+            <strong>{t('actions.recheck')}</strong>
+            <em>{t('actions.recheckHint')}</em>
           </span>
         </button>
-      ))}
+      ) : null}
       <button type="button" role="menuitem" onClick={run(() => void startSync())}>
         <IconSync size={15} />
         <span>
-          <strong>{t('sync.fetchNew')}</strong>
+          <strong>{t('actions.fetchNew')}</strong>
+          <em>{t('actions.fetchNewHint')}</em>
         </span>
       </button>
     </>

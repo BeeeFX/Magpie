@@ -53,7 +53,6 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
   const [previewPosts, setPreviewPosts] = useState<Post[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(false)
-  const [view, setView] = useState<'map' | 'list'>('map')
   const [colourMode, setColourMode] = useState<ColourMode>('group')
   const [mapData, setMapData] = useState<OrganizerMapData | null>(null)
   const [lassoed, setLassoed] = useState<string[]>([])
@@ -69,7 +68,6 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     setPlan(null)
     setSuggestions([])
     setLastMerge(null)
-    setView('map')
     setMapData(null)
     setLassoed([])
     setError(null)
@@ -139,7 +137,14 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
       setLastMerge(null)
       setPreviewId(null)
       setPhase('review')
-      void magpie.organizerMap().then(setMapData).catch(() => setView('list'))
+      void magpie
+        .organizerMap()
+        .then(setMapData)
+        // La carte peut échouer sans emporter le reste : les catégories restent utilisables.
+        .catch((reason: unknown) => {
+          setMapData({ points: [], plan: next })
+          setError(reason instanceof Error ? reason.message : String(reason))
+        })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
       setPhase('intro')
@@ -196,7 +201,6 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
       }))
     ])
     setLassoed([])
-    setView('list')
   }
 
   const undoMerge = (): void => {
@@ -431,45 +435,29 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                   qu'il a groupé vaut mieux que le croire sur parole, et zéro collection
                   n'avait jamais été créée depuis la seule liste. La liste reste à un clic
                   pour renommer et cocher en série, ce qu'une carte fait mal. */}
+              {/* Pas d'onglets Carte / Liste : la carte est la vue, et les catégories se
+                  listent dessous pour renommer et cocher. Deux onglets pour deux moitiés du
+                  même écran faisaient chercher où était passé le reste. */}
               <div className="organizer-views">
-                <div className="segmented">
-                  <button
-                    type="button"
-                    className={view === 'map' ? 'is-active' : ''}
-                    onClick={() => setView('map')}
-                  >
-                    {t('organizer.mapTab')}
-                  </button>
-                  <button
-                    type="button"
-                    className={view === 'list' ? 'is-active' : ''}
-                    onClick={() => setView('list')}
-                  >
-                    {t('organizer.listTab')}
-                  </button>
+                <div className="segmented segmented--quiet">
+                  {(['group', 'platform', 'kind', 'source'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={colourMode === mode ? 'is-active' : ''}
+                      onClick={() => setColourMode(mode)}
+                    >
+                      {t(
+                        `organizer.colour${mode[0].toUpperCase()}${mode.slice(1)}` as Parameters<
+                          typeof t
+                        >[0]
+                      )}
+                    </button>
+                  ))}
                 </div>
-                {view === 'map' ? (
-                  <div className="segmented segmented--quiet">
-                    {(['group', 'platform', 'kind', 'source'] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        className={colourMode === mode ? 'is-active' : ''}
-                        onClick={() => setColourMode(mode)}
-                      >
-                        {t(
-                          `organizer.colour${mode[0].toUpperCase()}${mode.slice(1)}` as Parameters<
-                            typeof t
-                          >[0]
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
               </div>
 
-              {view === 'map' ? (
-                mapData ? (
+              {mapData ? (
                   <>
                     <OrganizerMap
                       data={mapData}
@@ -496,15 +484,14 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                       </div>
                     ) : null}
                   </>
-                ) : (
-                  <div className="organizer-loading">
-                    <div className="organizer-spinner" />
-                    <p>{t('organizer.projecting')}</p>
-                  </div>
-                )
-              ) : null}
+              ) : (
+                <div className="organizer-loading">
+                  <div className="organizer-spinner" />
+                  <p>{t('organizer.projecting')}</p>
+                </div>
+              )}
 
-              <div className="organizer-list" hidden={view === 'map'}>
+              <div className="organizer-list">
                 {suggestions.map((suggestion) => {
                   const effectivePostIds = suggestion.included
                     ? redistributed.get(suggestion.id) ?? []
