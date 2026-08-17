@@ -15,7 +15,6 @@ import { useT } from '../store'
  * seconde ; en canvas, c'est confortable.
  */
 
-const DOT = 3
 const HOVER_DOT = 7
 /** Grille de recherche du point sous le curseur : un balayage linéaire de 9 738 points à
  *  chaque mouvement de souris coûterait plus cher que le dessin lui-même. */
@@ -23,7 +22,40 @@ const BUCKET = 0.02
 /** Rayon de voisinage pour les liens, dans le repère unité de la carte. */
 const LINK_RADIUS = 0.022
 /** Au-delà, la toile devient une bouillie : on garde les plus proches. */
-const LINKS_PER_POINT = 3
+/* Vingt-quatre voisins : mesuré sur la bibliothèque de référence, sans plafond le voisinage
+   par rayon produit 465 872 arêtes et le mélange additif sature en blanc dans les zones
+   denses. Vingt-quatre en garde 133 814 — la texture partout, sans les points chauds. */
+const LINKS_PER_POINT = 24
+
+/**
+ * Rendu de la toile, réglé à l'œil sur la vraie bibliothèque.
+ *
+ * Deux régimes : ce que vaut chaque grandeur de loin, et ce qu'elle gagne en approchant. La
+ * distinction est indispensable — le rendu qui fonctionne à l'échelle de la bibliothèque
+ * entière ne fonctionne pas une fois dedans, où les arêtes se raréfient et où les points,
+ * devenus gros, noieraient les fils.
+ */
+const WEB = {
+  /** À zéro, la toile n'existe pas tant qu'on n'a pas commencé à zoomer. Voulu. */
+  edgeFar: 0,
+  edgeNear: 0.39,
+  lineFar: 0.5,
+  lineNear: 0.2,
+  /** De loin le halo porte tout le rendu, les fils eux-mêmes étant transparents. */
+  bloomFar: 1,
+  bloomNear: 0.25,
+  bloomWidth: 11,
+  dotFar: 0.1,
+  dotNear: 0,
+  dotGlowFar: 0,
+  dotGlowNear: 0.26,
+  dotSizeFar: 0.5,
+  dotSizeNear: 0.8,
+  /** Zoom auquel le régime « de près » est pleinement atteint. */
+  nearAt: 6,
+  /** Arêtes de référence pour l'amortissement d'opacité. */
+  reference: 60_000
+}
 /** Portée du ressort quand on tire un point : ses voisins suivent, de moins en moins. */
 const PULL_RADIUS = 0.06
 
@@ -223,33 +255,83 @@ export function OrganizerMap({
       ]
     }
 
-    /* Les liens ne s'affichent qu'une fois zoomé : à pleine échelle ils noient les îles au
-       lieu de les révéler, et neuf mille segments ne se lisent pas. */
-    if (view.scale > 1.8) {
-      context.globalAlpha = Math.min(0.3, (view.scale - 1.8) * 0.25)
-      context.strokeStyle = 'currentColor'
-      context.lineWidth = 0.6
-      context.beginPath()
+    const closeness = Math.min(1, (view.scale - 1) / WEB.nearAt)
+
+    /* La toile, en deux passes par couleur : un tracé large et très faible qui fait la lueur,
+       puis le fil net. Un chemin par couleur et non par arête — cent trente mille appels à
+       `stroke` était le vrai coût, pas les courbes. */
+    const edgeAlpha =
+      (WEB.edgeFar + WEB.edgeNear * closeness) /
+      Math.sqrt(Math.max(1, links.length / WEB.reference))
+    if (edgeAlpha > 0.002) {
+      context.globalCompositeOperation = 'lighter'
+      const core = WEB.lineFar + WEB.lineNear * closeness
+      const bloom = WEB.bloomFar + (WEB.bloomNear - WEB.bloomFar) * closeness
+      const paths = new Map<string, Path2D>()
       for (const [from, to] of links) {
         const [x1, y1] = toScreen(from)
-        if (x1 < -20 || y1 < -20 || x1 > width + 20 || y1 > height + 20) continue
         const [x2, y2] = toScreen(to)
-        context.moveTo(x1, y1)
-        context.lineTo(x2, y2)
+        // Écarter seulement si les deux bouts sortent du même côté : ne tester que le premier
+        // effaçait la moitié de la toile dès qu'on zoomait.
+        if (
+          (x1 < -40 && x2 < -40) || (x1 > width + 40 && x2 > width + 40) ||
+          (y1 < -40 && y2 < -40) || (y1 > height + 40 && y2 > height + 40)
+        ) continue
+        const tone = colourFor(from, colourMode, groupIndex)
+        let path = paths.get(tone)
+        if (!path) { path = new Path2D(); paths.set(tone, path) }
+        path.moveTo(x1, y1)
+        path.quadraticCurveTo(
+          (x1 + x2) / 2 - (y2 - y1) * 0.26,
+          (y1 + y2) / 2 + (x2 - x1) * 0.26,
+          x2,
+          y2
+        )
       }
-      context.stroke()
+      for (const [tone, path] of paths) {
+        context.strokeStyle = tone
+        if (bloom > 0.02) {
+          context.lineWidth = core * WEB.bloomWidth
+          context.globalAlpha = edgeAlpha * bloom * 0.5
+          context.stroke(path)
+          context.lineWidth = core * Math.max(1.5, WEB.bloomWidth / 2.3)
+          context.globalAlpha = edgeAlpha * bloom * 0.6
+          context.stroke(path)
+        }
+        context.lineWidth = core
+        context.globalAlpha = edgeAlpha
+        context.stroke(path)
+      }
+      context.globalCompositeOperation = 'source-over'
+      context.globalAlpha = 1
     }
 
+    /* Les points restent petits et translucides : c'est la lueur qui leur donne leur
+       présence. Pleins, ils recouvraient exactement la toile qu'on veut lire. */
+    const dotRadius = WEB.dotSizeFar + WEB.dotSizeNear * closeness
     for (const point of data.points) {
       const [x, y] = toScreen(point)
       if (x < -8 || y < -8 || x > width + 8 || y > height + 8) continue
       const dimmed = point.group !== null && !includedGroups.has(point.group)
-      context.globalAlpha = dimmed ? 0.18 : 0.85 * (0.3 + 0.7 * landing)
-      context.fillStyle = colourFor(point, colourMode, groupIndex)
+      const shade =
+        (WEB.dotFar + WEB.dotNear * closeness) * (dimmed ? 0.2 : 1) * (0.3 + 0.7 * landing)
+      const tone = colourFor(point, colourMode, groupIndex)
+      context.fillStyle = tone
+      const glow = WEB.dotGlowFar + WEB.dotGlowNear * closeness
+      if (glow > 0.01) {
+        context.globalCompositeOperation = 'lighter'
+        context.globalAlpha = shade * glow
+        context.beginPath()
+        context.arc(x, y, dotRadius * (2.4 + 1.4 * closeness), 0, Math.PI * 2)
+        context.fill()
+        context.globalCompositeOperation = 'source-over'
+      }
+      context.globalAlpha = shade
       context.beginPath()
-      context.arc(x, y, DOT * Math.min(2.5, view.scale), 0, Math.PI * 2)
+      context.arc(x, y, dotRadius, 0, Math.PI * 2)
       context.fill()
     }
+    context.globalAlpha = 1
 
     /* Taille proportionnelle à la racine du nombre de posts : un îlot deux fois plus gros
        n'écrase pas son voisin, il se remarque simplement davantage. */
