@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AiCollectionApplyResult,
   AiCollectionPlan,
@@ -31,11 +31,12 @@ interface EditableSuggestion extends AiCollectionSuggestion {
 
 const PREVIEW_LIMIT = 12
 
-export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null {
+export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.Element | null {
   const t = useT()
   const refresh = useStore((state) => state.refresh)
   const loadSettings = useStore((state) => state.loadSettings)
   const autoOrganizeEnabled = useStore((state) => state.autoOrganizeEnabled)
+  const stepsRunning = useStore((state) => state.stepsRunning)
   const [organizerProgress, setOrganizerProgress] = useState<OrganizerProgress | null>(null)
   const [phase, setPhase] = useState<'intro' | 'loading' | 'review' | 'applying' | 'done'>('intro')
   const [plan, setPlan] = useState<AiCollectionPlan | null>(null)
@@ -48,6 +49,18 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
     targetName: string
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  /* Une préparation peut durer des heures. La fermer ne doit ni tout perdre en silence ni
+     retenir l'utilisateur devant la fenêtre : on lui pose la question, et par défaut le
+     travail continue en fond — l'indicateur de la barre d'outils prend le relais, et rouvrir
+     cet écran le ramène exactement là où il en était. */
+  const onClose = useCallback((): void => {
+    if (!stepsRunning) {
+      requestClose()
+      return
+    }
+    if (window.confirm(t('organizer.leaveRunning'))) requestClose()
+  }, [requestClose, stepsRunning, t])
   const [result, setResult] = useState<AiCollectionApplyResult | null>(null)
   const [rememberChoices, setRememberChoices] = useState(false)
   const [previewId, setPreviewId] = useState<string | null>(null)
@@ -65,6 +78,8 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
 
   useEffect(() => {
     if (!open) return
+    // Rouvrir pendant une préparation doit retrouver l'écran tel qu'il était, pas le vider.
+    if (useStore.getState().stepsRunning) return
     setPhase('intro')
     setPlan(null)
     setSuggestions([])

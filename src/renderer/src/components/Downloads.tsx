@@ -208,7 +208,10 @@ function TaskRow({
   const halted = paused || task.paused
   const done = Math.min(task.done, task.total || task.done)
   const percent = task.total > 0 ? Math.min(100, (done / task.total) * 100) : null
-  const stoppable = task.kind === 'thumbnails' || task.kind === 'clips'
+  /* La transcription dure des heures : ne pas pouvoir l'arrêter était le pire cas. Le
+     regroupement et la synchronisation, eux, se terminent d'eux-mêmes en peu de temps. */
+  const stoppable =
+    task.kind === 'thumbnails' || task.kind === 'clips' || task.kind === 'transcribe'
 
   return (
     <li className={`downloads__task ${halted ? 'is-paused' : ''}`}>
@@ -232,7 +235,12 @@ function TaskRow({
             className="icon-btn-ghost"
             title={t('downloads.stop')}
             aria-label={t('downloads.stop')}
-            onClick={() => void magpie.stopPreload(task.kind as 'thumbnails' | 'clips').then(onStop)}
+            onClick={() =>
+              void (task.kind === 'transcribe'
+                ? magpie.stopTranscription()
+                : magpie.stopPreload(task.kind as 'thumbnails' | 'clips')
+              ).then(onStop)
+            }
           >
             <IconClose size={12} />
           </button>

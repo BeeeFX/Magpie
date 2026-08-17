@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { StepId, StepState } from './steps'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
 import type {
   AccentName,
@@ -143,6 +144,12 @@ interface State {
   organizerOpen: boolean
   /** L'export vit hors du tri : on peut vouloir converser sans avoir jamais rangé. */
   exportOpen: boolean
+  /* La préparation continue en arrière-plan quand on ferme la fenêtre : son état vit donc
+     ici, pas dans le composant, sinon revenir dedans repart de zéro pendant que le travail
+     tourne toujours. */
+  stepChoices: StepId[]
+  stepStates: Record<StepId, StepState>
+  stepsRunning: boolean
   /** Volume du lecteur, partagé entre tous les posts et conservé entre les sessions. */
   volume: number
   muted: boolean
@@ -211,6 +218,9 @@ interface State {
   setSettingsOpen: (open: boolean) => void
   setOrganizerOpen: (open: boolean) => void
   setExportOpen: (open: boolean) => void
+  setStepChoices: (ids: StepId[]) => void
+  setStepStates: (patch: Partial<Record<StepId, StepState>>) => void
+  setStepsRunning: (running: boolean) => void
   loadSettings: () => Promise<void>
   setTheme: (theme: ThemeChoice) => Promise<void>
   setAccent: (accent: AccentName) => Promise<void>
@@ -269,6 +279,17 @@ export const useStore = create<State>()(
       settingsOpen: false,
       organizerOpen: false,
       exportOpen: false,
+      // Tout coché : la préparation complète donne le meilleur résultat, on décoche ce qu'on
+      // ne veut pas payer plutôt que de deviner ce qu'il faut ajouter.
+      stepChoices: ['sync', 'thumbnails', 'clips', 'transcribe', 'group'],
+      stepStates: {
+        sync: 'todo',
+        thumbnails: 'todo',
+        clips: 'todo',
+        transcribe: 'todo',
+        group: 'todo'
+      },
+      stepsRunning: false,
       volume: 0.7,
       muted: false,
       hoverAudio: false,
@@ -498,6 +519,9 @@ export const useStore = create<State>()(
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setOrganizerOpen: (organizerOpen) => set({ organizerOpen }),
       setExportOpen: (exportOpen) => set({ exportOpen }),
+      setStepChoices: (stepChoices) => set({ stepChoices }),
+      setStepStates: (patch) => set((s) => ({ stepStates: { ...s.stepStates, ...patch } })),
+      setStepsRunning: (stepsRunning) => set({ stepsRunning }),
 
       loadSettings: async () => {
         const settings = await magpie.getSettings()

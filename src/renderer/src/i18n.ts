@@ -226,6 +226,8 @@ const fr = {
   'steps.skipped': 'ignorée',
   'steps.halted': 'suspendue',
   'steps.failed': 'échouée',
+  'organizer.leaveRunning':
+    'La préparation continue en arrière-plan si vous fermez cette fenêtre. Vous pourrez suivre son avancement depuis l’indicateur de téléchargement, et revenir ici à tout moment.\n\nFermer ?',
   'organizer.title': 'Organiser localement',
   'organizer.subtitle': 'Privé, modifiable et sans LLM.',
   'organizer.introTitle': 'Transformez votre bibliothèque en collections utiles',
@@ -735,6 +737,8 @@ const en: Record<TranslationKey, string> = {
   'steps.skipped': 'skipped',
   'steps.halted': 'paused',
   'steps.failed': 'failed',
+  'organizer.leaveRunning':
+    'Preparation keeps running in the background if you close this window. You can follow it from the downloads indicator and come back here at any time.\n\nClose?',
   'organizer.title': 'Organise locally',
   'organizer.subtitle': 'Private, editable, and LLM-free.',
   'organizer.introTitle': 'Turn your library into useful collections',

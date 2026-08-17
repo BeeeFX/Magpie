@@ -3,6 +3,7 @@ import type { BackgroundTaskKind } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { CLIP_BYTES, THUMBNAIL_BYTES } from '../estimates'
 import { formatBytes, formatDuration } from '../format'
+import { STEP_ORDER, type StepId, type StepState } from '../steps'
 import { useStore, useT } from '../store'
 import { IconCheck, IconImage, IconMic, IconSync, IconTag, IconVideo } from './Icons'
 
@@ -18,8 +19,6 @@ import { IconCheck, IconImage, IconMic, IconSync, IconTag, IconVideo } from './I
  * Seul le regroupement est obligatoire : c'est le but de l'écran.
  */
 
-export type StepId = 'sync' | 'thumbnails' | 'clips' | 'transcribe' | 'group'
-export type StepState = 'todo' | 'running' | 'done' | 'skipped' | 'halted' | 'failed'
 
 interface Props {
   onFinished(): void
@@ -39,15 +38,16 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   const cacheQuality = useStore((state) => state.videoCacheQuality)
   const startSync = useStore((state) => state.startSync)
   const [counts, setCounts] = useState<Counts | null>(null)
-  const [chosen, setChosen] = useState<Set<StepId>>(new Set(['thumbnails', 'group']))
-  const [state, setState] = useState<Record<StepId, StepState>>({
-    sync: 'todo',
-    thumbnails: 'todo',
-    clips: 'todo',
-    transcribe: 'todo',
-    group: 'todo'
-  })
-  const [running, setRunning] = useState(false)
+  /* Tout coché d'entrée : c'est la préparation complète qui donne le meilleur résultat, et
+     l'utilisateur décoche ce qu'il ne veut pas payer plutôt que d'avoir à deviner ce qu'il
+     faut ajouter. L'état vit dans le store pour survivre à la fermeture de la fenêtre —
+     revenir dedans repartait de zéro alors que le travail, lui, continuait. */
+  const chosen = useStore((state) => state.stepChoices)
+  const setChosen = useStore((state) => state.setStepChoices)
+  const state = useStore((s) => s.stepStates)
+  const setState = useStore((s) => s.setStepStates)
+  const running = useStore((s) => s.stepsRunning)
+  const setRunning = useStore((s) => s.setStepsRunning)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -103,11 +103,10 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   const run = async (): Promise<void> => {
     setRunning(true)
     setError(null)
-    const mark = (id: StepId, value: StepState): void =>
-      setState((current) => ({ ...current, [id]: value }))
+    const mark = (id: StepId, value: StepState): void => setState({ [id]: value })
 
-    for (const id of ['sync', 'thumbnails', 'clips', 'transcribe', 'group'] as StepId[]) {
-      if (!chosen.has(id)) {
+    for (const id of STEP_ORDER) {
+      if (!chosen.includes(id)) {
         mark(id, 'skipped')
         continue
       }
@@ -139,12 +138,7 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   }
 
   const toggle = (id: StepId): void =>
-    setChosen((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    setChosen(chosen.includes(id) ? chosen.filter((entry) => entry !== id) : [...chosen, id])
 
   const rows: {
     id: StepId
@@ -196,12 +190,15 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
       <ul className="steps__list">
         {rows.map((row) => {
           const status = state[row.id]
-          const active = row.locked || chosen.has(row.id)
+          const active = row.locked || chosen.includes(row.id)
           return (
             <li key={row.id} className={`steps__row is-${status} ${active ? '' : 'is-off'}`}>
               <label>
+                {/* Une vraie bascule plutôt qu'une case : elle dit « allumé / éteint », ce
+                    qui est exactement le sens ici, et se voit d'un coup d'œil sur cinq lignes. */}
                 <input
                   type="checkbox"
+                  className="steps__switch"
                   checked={active}
                   disabled={row.locked || running}
                   onChange={() => toggle(row.id)}
@@ -216,6 +213,7 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
                   </strong>
                   <em>{t(`steps.${row.id}Hint` as Parameters<typeof t>[0])}</em>
                 </span>
+                {status === 'running' ? <span className="steps__bar" aria-hidden="true" /> : null}
                 <span className="steps__cost">
                   {status === 'running' ? (
                     <span className="spinner" />
