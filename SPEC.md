@@ -324,6 +324,13 @@ plafond mensuel configurable.
 
 **Un abonnement Claude Pro ou Max ne donne pas accès à l'API** : ce sont deux facturations
 distinctes, et il n'existe pas de « Se connecter avec Claude » pour une application tierce.
+
+C'est précisément pourquoi Magpie ne cherche plus à appeler un modèle lui-même. Qui veut
+parler de sa bibliothèque avec un assistant **exporte un dossier** (§8.5) et le lui donne :
+son abonnement existant suffit, aucune clé n'entre en jeu, et le tri reste identique pour
+tout le monde. La clé API ci-dessous ne concerne que l'étiquetage automatique, resté
+optionnel et masqué.
+
 Le parcours réel :
 
 1. Un écran unique dans les réglages, avec un bouton qui ouvre la console Anthropic à la bonne page.
@@ -334,12 +341,36 @@ La clé est chiffrée via `safeStorage` (DPAPI sur Windows, Keychain sur macOS),
 clair, jamais transmise ailleurs qu'à l'API Anthropic. Le tagging par IA est **entièrement
 optionnel** : sans clé, l'app fonctionne avec les règles seules et les tags manuels.
 
-### 8.4 Écarté pour l'instant : embeddings CLIP
+### 8.4 Compréhension locale : embeddings de texte et transcription
 
-Un modèle CLIP local (~90 Mo, gratuit, hors-ligne) donnerait une vraie similarité visuelle —
-« montre-moi ce qui ressemble à ça » — et un regroupement automatique en piles à nommer.
-Écarté en v1 au profit de Claude, dont les tags sont meilleurs. La recherche plein texte sur
-`ai_description` couvre une partie du besoin. À rouvrir en v2 si la similarité visuelle manque.
+Rouvert et fait. Deux modèles locaux, téléchargés à la demande, jamais rien qui sorte de la
+machine :
+
+- **Embeddings de texte** (`multilingual-e5-small`, ~120 Mo) — le vote par mots-clés ne
+  rapprochait que ce qui partageait un mot. Mesuré : 5,3 ms par post, 53 s pour 10 000. Le
+  recentrage du nuage est indispensable, pas optionnel — sans lui l'écart entre paires
+  proches et étrangères tombe à 0,050 au lieu de 0,307.
+- **Transcription** (`whisper-base`, ~140 Mo) — sur la bibliothèque de référence, un quart
+  des vidéos n'a aucune prose exploitable et la légende médiane fait douze mots. Le
+  transcript sert au regroupement, à la recherche plein texte et à l'export.
+
+La **similarité visuelle** reste écartée : une fois du texte partout, elle n'apporte plus
+grand-chose. La signature couleur 6×6 demeure comme repli pour les posts sans aucun texte.
+
+Ces vecteurs donnent aussi ses coordonnées à la carte sémantique (§9) : la position d'un
+point *est* la projection de son sens, jamais le résultat d'une simulation à ressorts.
+
+### 8.5 Exporter pour son propre assistant
+
+Magpie n'appelle aucun modèle et n'embarque aucun CLI. Il écrit un dossier — un sommaire, un
+index découpé en tranches, une fiche par post, une liste par collection, et un prompt système
+modifiable — que l'utilisateur donne à l'assistant de son choix.
+
+La forme est dictée par une mesure : l'index complet d'une bibliothèque de 9 738 posts pèse
+2,1 Mo, soit un demi-million de jetons. Il est donc découpé en tranches d'environ 74 k jetons,
+et le prompt demande de fouiller par motif de texte avant de lire quoi que ce soit.
+
+Découplé du reste : utilisable sans avoir jamais créé une collection ni transcrit une vidéo.
 
 ---
 
