@@ -170,6 +170,8 @@ const fr = {
   'settings.storageMode.offline': 'Mode hors-ligne',
   'settings.storageMode.offlineHint': 'Conserve aussi une copie locale de chaque vidéo.',
   'settings.cacheQuality': 'Qualité mise en cache',
+  'settings.cacheQualityHint':
+    'Définition des vidéos téléchargées sur le disque. Plus haut, c’est plus net et bien plus lourd.',
   'settings.playbackQuality': 'Qualité de lecture préférée',
   'settings.cacheLimit': 'Taille maximale du cache',
   'settings.moveLibrary': 'Déplacer la bibliothèque…',
@@ -663,6 +665,8 @@ const en: Record<TranslationKey, string> = {
   'settings.storageMode.offline': 'Offline mode',
   'settings.storageMode.offlineHint': 'Also keeps a local copy of every video.',
   'settings.cacheQuality': 'Cached quality',
+  'settings.cacheQualityHint':
+    'Resolution of videos downloaded to disk. Higher looks better and weighs a great deal more.',
   'settings.playbackQuality': 'Preferred playback quality',
   'settings.cacheLimit': 'Maximum cache size',
   'settings.moveLibrary': 'Move library…',

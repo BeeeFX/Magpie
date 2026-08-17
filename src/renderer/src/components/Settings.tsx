@@ -389,10 +389,13 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
                 ))}
               </div>
             </div>
-            {mediaStorageMode === 'offline' ? (
-              <div className="setting setting--compact">
+            {/* Visible dans les deux modes : depuis que le menu d'actions permet de
+                télécharger les vidéos sans basculer en hors-ligne, ce réglage compte partout.
+                Caché, il laissait un choix fait au premier lancement impossible à revenir. */}
+            <div className="setting setting--compact">
                 <div className="setting__label">
                   <strong>{t('settings.cacheQuality')}</strong>
+                  <p>{t('settings.cacheQualityHint')}</p>
                 </div>
                 <div className="segmented segmented--wide">
                   {cacheQualities.map((quality) => (
@@ -406,8 +409,7 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
                     </button>
                   ))}
                 </div>
-              </div>
-            ) : null}
+            </div>
             <div className="setting setting--compact">
               <div className="setting__label">
                 <strong>{t('settings.playbackQuality')}</strong>
