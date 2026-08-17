@@ -324,9 +324,14 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
                       done: organizerProgress.done,
                       total: organizerProgress.total
                     })
-                  : organizerProgress?.stage === 'grouping'
-                    ? t('organizer.grouping')
-                    : t('organizer.preparing')}
+                  : organizerProgress?.stage === 'embedding'
+                    ? t('organizer.embedding', {
+                        done: organizerProgress.done,
+                        total: organizerProgress.total
+                      })
+                    : organizerProgress?.stage === 'grouping'
+                      ? t('organizer.grouping')
+                      : t('organizer.preparing')}
               </p>
               {organizerProgress?.total ? (
                 <div className="organizer-progress" aria-hidden="true">

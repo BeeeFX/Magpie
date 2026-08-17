@@ -226,6 +226,63 @@ assert(
   `le regroupement rend la main au fil de l'eau (plus long blocage : ${Math.round(longestBlock)} ms)`
 )
 
+console.log('\nrappel sémantique')
+{
+  /* Vecteurs synthétiques plutôt que le vrai modèle : on vérifie le câblage et la règle, pas
+     la qualité de l'encodeur — c'est le travail de check:embeddings. Un post sur Bitwig ne
+     figure dans aucune liste de mots-clés ; seul son vecteur peut le rapprocher. */
+  const axis = (index: number, size = 8): Float32Array => {
+    const vector = new Float32Array(size)
+    vector[index] = 1
+    return vector
+  }
+  const music = axis(0)
+  const other = axis(1)
+  const withBitwig: OrganizationItem[] = [
+    item('m1', 'Ableton session with a new synth patch', 'beats'),
+    item('m2', 'Beatmaking and mixdown in FL Studio', 'beats'),
+    item('m3', 'Mastering a track, sound design tips', 'beats'),
+    item('x1', 'Bitwig modulators walkthrough', 'grids'),
+    item('n1', 'Skateboarding kickflip tutorial', 'wheels'),
+    item('n2', 'Perfect skate line and a long grind', 'wheels'),
+    item('n3', '#skateboard street session', 'wheels')
+  ]
+  const semantic = {
+    items: new Map<string, Float32Array>([
+      ['m1', music],
+      ['m2', music],
+      ['m3', music],
+      ['x1', music],
+      ['n1', other],
+      ['n2', other],
+      ['n3', other]
+    ]),
+    topics: new Map<string, Float32Array>([['music-production', music]])
+  }
+
+  const blindPlan = await buildLocalCollectionPlan(withBitwig, new Map(), 'en')
+  assert(
+    !blindPlan.suggestions.some((entry) => entry.postIds.includes('x1')),
+    'sans vecteur, un sujet absent des listes de mots-clés reste sans catégorie'
+  )
+
+  const seeingPlan = await buildLocalCollectionPlan(
+    withBitwig,
+    new Map(),
+    'en',
+    undefined,
+    semantic
+  )
+  const found = seeingPlan.suggestions.find((entry) => entry.postIds.includes('x1'))
+  assert(found?.name === 'Music production', 'son vecteur le rattache au bon thème')
+  assert(
+    !seeingPlan.suggestions.some(
+      (entry) => entry.name === 'Music production' && entry.postIds.includes('n1')
+    ),
+    'un post étranger n’est pas aspiré au passage'
+  )
+}
+
 console.log('\nretraits manuels dans la proposition')
 const removedPlan = withoutRemovedPosts(
   plan,

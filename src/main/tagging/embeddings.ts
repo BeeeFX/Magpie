@@ -175,6 +175,18 @@ export async function embedItems(
   return result
 }
 
+/** Encode des textes libres, sans passer par le cache — sert aux descripteurs de thème. */
+export async function embedTexts(texts: string[]): Promise<Float32Array[]> {
+  if (texts.length === 0) return []
+  const encode = await load()
+  const output = await encode(
+    texts.map((text) => `${PREFIX}${text}`),
+    { pooling: 'mean', normalize: true }
+  )
+  const width = output.dims[output.dims.length - 1]
+  return texts.map((_, index) => output.data.slice(index * width, (index + 1) * width))
+}
+
 /**
  * Retire le centre du nuage, puis renormalise.
  *

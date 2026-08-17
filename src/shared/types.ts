@@ -404,7 +404,7 @@ export interface AiTagProgress {
 }
 
 export interface OrganizerProgress {
-  stage: 'idle' | 'preparing' | 'visuals' | 'grouping'
+  stage: 'idle' | 'preparing' | 'visuals' | 'embedding' | 'grouping'
   done: number
   total: number
   running: boolean

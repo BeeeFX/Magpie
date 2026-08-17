@@ -22,6 +22,7 @@ import {
   type OrganizerRuleRow,
   type OrganizationItem
 } from '../db/queries'
+import { centreVectors, embedItems, embedTexts } from './embeddings'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
 
@@ -59,8 +60,26 @@ interface PreparedItem {
   item: OrganizationItem
   terms: Map<string, number>
   visual: Float32Array | null
+  vector: Float32Array | null
   choices: { id: string; score: number }[]
 }
+
+/**
+ * Vecteurs de sens, quand ils sont disponibles.
+ *
+ * Optionnels à dessein : le tri doit rester possible sans modèle téléchargé, et les tests
+ * du regroupement n'ont pas à faire tourner un réseau de neurones pour vérifier une règle.
+ */
+export interface SemanticInput {
+  items: Map<string, Float32Array>
+  topics: Map<string, Float32Array>
+}
+
+/** Poids du rappel sémantique. Une similarité recentrée de 0,3 est déjà un signal net ; le
+ *  facteur la met à l'échelle des scores de mots-clés, où un hashtag vaut 6,5. */
+const SEMANTIC_WEIGHT = 14
+/** En dessous, c'est du bruit : le nuage recentré place les paires étrangères autour de 0. */
+const SEMANTIC_FLOOR = 0.08
 
 interface CategoryDefinition {
   id: string
@@ -102,6 +121,18 @@ const TOPICS: Topic[] = [
 const STOP_WORDS = new Set(
   `a about above after again against ai all am an and any are arent as at avec avoir be because been before being below between both but by can could dans de des did do does doing dont down during each elle en encore est et few for from further get got had has have having he her here hers herself him himself his how i if in into is it its itself je just la le les lui mais me more most my myself ne no nor not nous of off on once only or other our ours ourselves out over own pas plus pour que qui re really same she should so some such sur than that the their theirs them themselves then there these they this those through to too très under until up very vous was we were what when where which while who why will with you your yours yourself yourselves ça comme cette ces ce une un video videos reel reels post posts instagram reddit twitter tiktok x com http https www fyp fy foryou foryoupage viral trending trend explore explorepage follow like likes share watch link bio indie`.split(/\s+/)
 )
+
+/**
+ * Texte représentatif de chaque thème, à encoder pour le comparer aux posts.
+ *
+ * Les mots-clés ne reconnaissent que ce qu'ils listent : un post sur Ableton ne rejoignait
+ * « Production musicale » que parce que le mot y figurait, et un post sur Bitwig ne
+ * rejoignait rien. Comparer les vecteurs rattrape ce que la liste ne prévoit pas.
+ */
+export const TOPIC_DESCRIPTORS: { id: string; text: string }[] = TOPICS.map((topic) => ({
+  id: topic.id,
+  text: `${topic.en}, ${topic.fr} — ${topic.keywords.slice(0, 10).join(', ')}`
+}))
 
 const topicKeyword = new Map<string, string>()
 for (const topic of TOPICS) {
@@ -346,7 +377,8 @@ function centroid(vectors: Float32Array[]): Float32Array | null {
 async function createChoices(
   items: PreparedItem[],
   lang: Language,
-  breathe: Breathe
+  breathe: Breathe,
+  semantic: SemanticInput | null
 ): Promise<Map<string, CategoryDefinition>> {
   const definitions = new Map<string, CategoryDefinition>()
   const documentFrequency = new Map<string, number>()
@@ -410,10 +442,32 @@ async function createChoices(
       const specificity = Math.log(1 + items.length / candidate.count)
       scores.push({ id: `term:${candidate.term}`, score: weight * specificity })
     }
+    /* Rappel sémantique : un post sur Bitwig ne figurait dans aucune liste de mots-clés et
+       ne rejoignait donc rien, alors que son vecteur le place tout près de « Production
+       musicale ». Le score s'ajoute au lieu de remplacer — les mots-clés restent le signal
+       le plus sûr quand ils tombent juste, et le nommage continue d'en dépendre. */
+    if (semantic && prepared.vector) {
+      for (const [topicId, topicVector] of semantic.topics) {
+        const similarity = dotProduct(prepared.vector, topicVector)
+        if (similarity < SEMANTIC_FLOOR) continue
+        const existing = scores.find((entry) => entry.id === topicId)
+        const bonus = (similarity - SEMANTIC_FLOOR) * SEMANTIC_WEIGHT
+        if (existing) existing.score += bonus
+        else scores.push({ id: topicId, score: bonus })
+      }
+    }
     prepared.choices = scores.sort((left, right) => right.score - left.score)
     if (index % BREATHE_EVERY === BREATHE_EVERY - 1) await breathe()
   }
   return definitions
+}
+
+/** Produit scalaire de deux vecteurs normalisés — leur similarité cosinus. */
+function dotProduct(left: Float32Array, right: Float32Array): number {
+  if (left.length !== right.length) return 0
+  let total = 0
+  for (let index = 0; index < left.length; index += 1) total += left[index] * right[index]
+  return total
 }
 
 async function assignCategories(
@@ -537,7 +591,8 @@ export async function buildLocalCollectionPlan(
   items: OrganizationItem[],
   visuals: Map<string, Float32Array | null> = new Map(),
   lang: Language = 'en',
-  breathe: Breathe = NO_BREATHE
+  breathe: Breathe = NO_BREATHE,
+  semantic: SemanticInput | null = null
 ): Promise<AiCollectionPlan> {
   const prepared: PreparedItem[] = []
   for (const [index, item] of items.entries()) {
@@ -545,11 +600,12 @@ export async function buildLocalCollectionPlan(
       item,
       terms: prepareTerms(item),
       visual: visuals.get(item.id) ?? null,
+      vector: semantic?.items.get(item.id) ?? null,
       choices: []
     })
     if (index % BREATHE_EVERY === BREATHE_EVERY - 1) await breathe()
   }
-  const definitions = await createChoices(prepared, lang, breathe)
+  const definitions = await createChoices(prepared, lang, breathe, semantic)
   const { groups, routes } = await assignCategories(prepared, definitions, breathe)
   const suggestions: AiCollectionSuggestion[] = [...groups]
     .sort((left, right) => right[1].length - left[1].length)
@@ -646,13 +702,43 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
     return { suggestions: [], routes: [], analysedVideos: 0, unassignedVideos: 0 }
   }
 
+  const breathe = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve))
+
   setProgress({ stage: 'preparing', done: 0, total: items.length, running: true })
   const visuals = await loadVisuals(items)
-  setProgress({ stage: 'grouping', done: 0, total: items.length, running: true })
 
-  const plan = await buildLocalCollectionPlan(items, visuals, language(), () =>
-    new Promise<void>((resolve) => setImmediate(resolve))
-  )
+  /* Le modèle peut manquer — pas encore téléchargé, ou hors ligne au premier lancement. Ce
+     n'est pas une erreur : le tri par mots-clés reste entier, il rappelle simplement moins. */
+  let semantic: SemanticInput | null = null
+  try {
+    setProgress({ stage: 'embedding', done: 0, total: items.length, running: true })
+    const vectors = await embedItems(items, breathe, (progress) =>
+      setProgress({
+        stage: 'embedding',
+        done: progress.done,
+        total: progress.total,
+        running: true
+      })
+    )
+    if (vectors.size > 0) {
+      // Les thèmes sont recentrés avec les posts : comparer un vecteur recentré à un vecteur
+      // brut n'aurait aucun sens, les deux doivent vivre dans le même repère.
+      const topicIds = TOPIC_DESCRIPTORS.map((topic) => topic.id)
+      const topicVectors = await embedTexts(TOPIC_DESCRIPTORS.map((topic) => topic.text))
+      const together = new Map(vectors)
+      topicIds.forEach((id, index) => together.set(`topic:${id}`, topicVectors[index]))
+      const centred = centreVectors(together)
+      semantic = {
+        items: new Map([...vectors.keys()].map((id) => [id, centred.get(id) as Float32Array])),
+        topics: new Map(topicIds.map((id) => [id, centred.get(`topic:${id}`) as Float32Array]))
+      }
+    }
+  } catch (error) {
+    console.warn('[magpie] Embeddings indisponibles, tri par mots-clés seul :', error)
+  }
+
+  setProgress({ stage: 'grouping', done: 0, total: items.length, running: true })
+  const plan = await buildLocalCollectionPlan(items, visuals, language(), breathe, semantic)
   setProgress({ stage: 'grouping', done: items.length, total: items.length, running: true })
   return withoutRemovedPosts(plan, organizerCollectionResolver(), collectionRemovals())
 }
