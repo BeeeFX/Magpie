@@ -55,6 +55,21 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
      une boîte de dialogue du système, avec son titre « magpie » et ses boutons OK / Cancel,
      est un corps étranger au milieu d'un écran soigné. */
   const [leaving, setLeaving] = useState(false)
+  const setStepsRunning = useStore((state) => state.setStepsRunning)
+  const setStepStates = useStore((state) => state.setStepStates)
+  const cancelSync = useStore((state) => state.cancelSync)
+
+  /** Coupe tout ce que la préparation a pu lancer, quelle qu'en soit l'étape. */
+  const stopEverything = useCallback(async (): Promise<void> => {
+    setStepsRunning(false)
+    setStepStates({ sync: 'todo', thumbnails: 'todo', clips: 'todo', transcribe: 'todo', group: 'todo' })
+    await Promise.allSettled([
+      cancelSync(),
+      magpie.stopPreload('thumbnails'),
+      magpie.stopPreload('clips'),
+      magpie.stopTranscription()
+    ])
+  }, [cancelSync, setStepStates, setStepsRunning])
   const onClose = useCallback((): void => {
     if (stepsRunning) setLeaving(true)
     else requestClose()
@@ -355,6 +370,20 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
               <div className="confirm__actions">
                 <button type="button" className="btn" onClick={() => setLeaving(false)}>
                   {t('organizer.leaveStay')}
+                </button>
+                {/* Continuer en fond n'est pas toujours ce qu'on veut : une transcription
+                    lancée par erreur occupe la machine des heures. Il faut pouvoir tout
+                    couper d'un geste, pas seulement s'en aller. */}
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    void stopEverything()
+                    setLeaving(false)
+                    requestClose()
+                  }}
+                >
+                  {t('organizer.leaveStop')}
                 </button>
                 <button
                   type="button"

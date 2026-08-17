@@ -37,6 +37,11 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   const t = useT()
   const cacheQuality = useStore((state) => state.videoCacheQuality)
   const startSync = useStore((state) => state.startSync)
+  /* La synchronisation publie son avancement dans le store, pas dans le registre de tâches :
+     sans la lire ici, l'étape la plus lente du lot était aussi la seule muette. Et elle est
+     lente par construction — le moteur pagine à trois secondes par page pour ne pas se faire
+     bloquer, donc quinze à vingt-cinq secondes minimum par plateforme. */
+  const sync = useStore((state) => state.sync)
   const [counts, setCounts] = useState<Counts | null>(null)
   /* Tout coché d'entrée : c'est la préparation complète qui donne le meilleur résultat, et
      l'utilisateur décoche ce qu'il ne veut pas payer plutôt que d'avoir à deviner ce qu'il
@@ -126,7 +131,19 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
       try {
         let outcome: 'done' | 'halted' = 'done'
         if (id === 'sync') {
-          await startSync()
+          /* L'application synchronise au démarrage : relancer par-dessus ferait attendre deux
+             passes au lieu d'une. On se raccroche à celle qui tourne déjà. */
+          if (useStore.getState().sync.running) {
+            await new Promise<void>((resolve) => {
+              const stop = useStore.subscribe((snapshot) => {
+                if (snapshot.sync.running) return
+                stop()
+                resolve()
+              })
+            })
+          } else {
+            await startSync()
+          }
         } else if (id === 'thumbnails') {
           await magpie.startPreload({ what: 'thumbnails' })
           outcome = await waitFor('thumbnails')
@@ -151,6 +168,12 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
 
   const toggle = (id: StepId): void =>
     setChosen(chosen.includes(id) ? chosen.filter((entry) => entry !== id) : [...chosen, id])
+
+  // La page la plus avancée parmi les plateformes en cours : un seul chiffre à lire.
+  const syncPage = Math.max(
+    1,
+    ...Object.values(sync.byPlatform).map((entry) => (entry.phase === 'running' ? entry.page : 0))
+  )
 
   const rows: {
     id: StepId
@@ -245,7 +268,17 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
                   {status === 'running' ? (
                     <>
                       <span className="spinner" />
-                      {measured ? t('downloads.progress', { done: measured.done, total: measured.total }) : null}
+                      {row.id === 'sync'
+                        ? sync.running
+                          ? t('sync.progress', {
+                              fetched: sync.fetched,
+                              added: sync.added,
+                              page: syncPage
+                            })
+                          : null
+                        : measured
+                          ? t('downloads.progress', { done: measured.done, total: measured.total })
+                          : null}
                     </>
                   ) : status === 'skipped' ? (
                     t('steps.skipped')

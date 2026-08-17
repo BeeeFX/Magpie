@@ -2040,6 +2040,7 @@ h1, h2, h3 {
 
 .confirm__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
