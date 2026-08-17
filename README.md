@@ -8,6 +8,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/BeeeFX/Magpie/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/BeeeFX/Magpie?label=release&color=5865F2"></a>
+  <a href="https://github.com/BeeeFX/Magpie/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/BeeeFX/Magpie/total?label=downloads&color=5865F2"></a>
+  <a href="LICENSE"><img alt="Licence" src="https://img.shields.io/github/license/BeeeFX/Magpie?label=licence&color=5865F2"></a>
+</p>
+
+<p align="center">
   <strong>Your Instagram and X bookmarks and likes, together in one calm visual library.</strong><br>
   Browse thousands of saved posts like a moodboard, organise them locally, and find them again.
 </p>

@@ -2002,6 +2002,90 @@ h1, h2, h3 {
   line-height: 1.5;
 }
 
+/* --- Étapes de préparation -------------------------------------------------- */
+
+.steps {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+}
+
+.steps__lead {
+  margin: 0;
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.steps__list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps__row label {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-md);
+  background: var(--field);
+  cursor: pointer;
+  transition:
+    opacity var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+
+.steps__row.is-off label {
+  opacity: 0.45;
+}
+
+.steps__row.is-running label {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.steps__row.is-done .steps__icon {
+  color: var(--accent);
+}
+
+.steps__row.is-failed .steps__cost {
+  color: var(--warn, #e0a030);
+}
+
+.steps__icon {
+  display: flex;
+  color: var(--faint);
+}
+
+.steps__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.steps__body strong {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.steps__body em {
+  color: var(--faint);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.4;
+}
+
+.steps__cost {
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* --- Carte sémantique ------------------------------------------------------ */
 
 .organizer-views {

@@ -15,6 +15,7 @@ import { displayName, formatDateTime } from '../format'
 import { useStore, useT } from '../store'
 import { IconChevronRight, IconClose } from './Icons'
 import { OrganizerMap, type ColourMode } from './OrganizerMap'
+import { OrganizerSteps } from './OrganizerSteps'
 import { PlatformIcon } from './PlatformIcon'
 
 interface Props {
@@ -349,15 +350,10 @@ export function AiOrganizer({ open, onClose }: Props): React.JSX.Element | null 
               <div className="organizer-orbit" aria-hidden="true"><span /><span /><span /></div>
               <h3>{t('organizer.introTitle')}</h3>
               <p>{t('organizer.introText')}</p>
-              <ul>
-                <li>{t('organizer.stepAnalyse')}</li>
-                <li>{t('organizer.stepReview')}</li>
-                <li>{t('organizer.stepApply')}</li>
-              </ul>
               {error ? <p className="organizer-error">{error}</p> : null}
-              <button type="button" className="btn btn--primary" onClick={() => void analyse()}>
-                {t('organizer.start')}
-              </button>
+              {/* Les étapes s'enchaînent au lieu d'être cinq entrées de menu à cliquer dans
+                  le bon ordre : on coche ce qu'on veut, on lance une fois. */}
+              <OrganizerSteps onFinished={() => void analyse()} />
               <small>{t('organizer.costNote')}</small>
               {undoPanel()}
             </div>

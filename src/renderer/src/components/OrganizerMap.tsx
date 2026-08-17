@@ -20,6 +20,12 @@ const HOVER_DOT = 7
 /** Grille de recherche du point sous le curseur : un balayage linéaire de 9 738 points à
  *  chaque mouvement de souris coûterait plus cher que le dessin lui-même. */
 const BUCKET = 0.02
+/** Rayon de voisinage pour les liens, dans le repère unité de la carte. */
+const LINK_RADIUS = 0.022
+/** Au-delà, la toile devient une bouillie : on garde les plus proches. */
+const LINKS_PER_POINT = 3
+/** Portée du ressort quand on tire un point : ses voisins suivent, de moins en moins. */
+const PULL_RADIUS = 0.06
 
 export type ColourMode = 'group' | 'platform' | 'kind' | 'source'
 
@@ -82,6 +88,9 @@ export function OrganizerMap({
    *  premier plan. Ainsi, n'importe quel dessin rend l'état juste. */
   const landingStartRef = useRef(0)
   const draggingRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  /** Point tiré et déplacement en cours, dans le repère unité. */
+  const pullRef = useRef<{ point: OrganizerMapPoint; dx: number; dy: number } | null>(null)
+  const pullOriginRef = useRef<{ x: number; y: number } | null>(null)
 
   const groupIndex = useMemo(
     () => new Map(data.plan.suggestions.map((suggestion, index) => [suggestion.id, index])),
@@ -100,6 +109,31 @@ export function OrganizerMap({
     }
     return map
   }, [data.points])
+
+  /* Les liens rendent la structure visible : deux points reliés parlent du même sujet. Ils se
+     calculent dans le repère 2D plutôt qu'en dimension 384 — la projection a justement pour
+     rôle de préserver le voisinage, donc la proximité à l'écran suffit, et c'est mille fois
+     moins cher. */
+  const links = useMemo(() => {
+    const pairs: [OrganizerMapPoint, OrganizerMapPoint][] = []
+    for (const point of data.points) {
+      const near: { other: OrganizerMapPoint; distance: number }[] = []
+      const cellX = Math.floor(point.x / BUCKET)
+      const cellY = Math.floor(point.y / BUCKET)
+      for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (const other of buckets.get(`${cellX + dx}:${cellY + dy}`) ?? []) {
+            if (other.id <= point.id) continue
+            const distance = Math.hypot(other.x - point.x, other.y - point.y)
+            if (distance < LINK_RADIUS) near.push({ other, distance })
+          }
+        }
+      }
+      near.sort((left, right) => left.distance - right.distance)
+      for (const entry of near.slice(0, LINKS_PER_POINT)) pairs.push([point, entry.other])
+    }
+    return pairs
+  }, [buckets, data.points])
 
   const reduced = useMemo(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -126,15 +160,43 @@ export function OrganizerMap({
 
     const size = Math.min(width, height)
     const landing = landingAt()
+    const pull = pullRef.current
     const toScreen = (point: OrganizerMapPoint): [number, number] => {
       // L'atterrissage tire les points depuis le centre : ils se posent au lieu de surgir.
       const eased = 1 - Math.pow(1 - landing, 3)
-      const cx = 0.5 + (point.x - 0.5) * eased
-      const cy = 0.5 + (point.y - 0.5) * eased
+      let cx = 0.5 + (point.x - 0.5) * eased
+      let cy = 0.5 + (point.y - 0.5) * eased
+      if (pull) {
+        // Les voisins suivent de moins en moins loin : la matière a l'air élastique, mais
+        // rien ne bouge vraiment — tout reprend sa place au relâchement.
+        const distance = Math.hypot(point.x - pull.point.x, point.y - pull.point.y)
+        if (distance < PULL_RADIUS) {
+          const share = (1 - distance / PULL_RADIUS) ** 2
+          cx += pull.dx * share
+          cy += pull.dy * share
+        }
+      }
       return [
         (cx * size + (width - size) / 2) * view.scale + view.x,
         (cy * size + (height - size) / 2) * view.scale + view.y
       ]
+    }
+
+    /* Les liens ne s'affichent qu'une fois zoomé : à pleine échelle ils noient les îles au
+       lieu de les révéler, et neuf mille segments ne se lisent pas. */
+    if (view.scale > 1.8) {
+      context.globalAlpha = Math.min(0.3, (view.scale - 1.8) * 0.25)
+      context.strokeStyle = 'currentColor'
+      context.lineWidth = 0.6
+      context.beginPath()
+      for (const [from, to] of links) {
+        const [x1, y1] = toScreen(from)
+        if (x1 < -20 || y1 < -20 || x1 > width + 20 || y1 > height + 20) continue
+        const [x2, y2] = toScreen(to)
+        context.moveTo(x1, y1)
+        context.lineTo(x2, y2)
+      }
+      context.stroke()
     }
 
     for (const point of data.points) {
@@ -174,7 +236,7 @@ export function OrganizerMap({
       context.setLineDash([])
     }
     context.globalAlpha = 1
-  }, [colourMode, data.points, groupIndex, hovered, includedGroups, view])
+  }, [colourMode, data.points, groupIndex, hovered, includedGroups, links, view])
 
   /* La boucle d'animation lit `draw` par référence.
      En la faisant dépendre de `draw`, elle se démontait et se remontait à chaque rendu — un
@@ -269,7 +331,17 @@ export function OrganizerMap({
         { x: event.clientX - (rect?.left ?? 0), y: event.clientY - (rect?.top ?? 0) }
       ]
     } else {
-      draggingRef.current = { x: event.clientX - view.x, y: event.clientY - view.y, moved: false }
+      /* Appuyer sur un point le saisit ; appuyer dans le vide déplace la carte. Un point
+         saisi ne se range pas ailleurs — il s'étire et revient. Le laisser se replacer
+         librement ferait mentir la carte, dont toute la valeur est que la distance affichée
+         soit la proximité de sens. */
+      const grabbed = pointAt(event.clientX, event.clientY)
+      if (grabbed) {
+        pullRef.current = { point: grabbed, dx: 0, dy: 0 }
+        pullOriginRef.current = { x: event.clientX, y: event.clientY }
+      } else {
+        draggingRef.current = { x: event.clientX - view.x, y: event.clientY - view.y, moved: false }
+      }
     }
   }
 
@@ -283,6 +355,22 @@ export function OrganizerMap({
       draw()
       return
     }
+    const pulling = pullRef.current
+    const origin = pullOriginRef.current
+    if (pulling && origin) {
+      const canvas = canvasRef.current
+      const size = canvas ? Math.min(rect?.width ?? 0, rect?.height ?? 0) : 1
+      const scale = (size || 1) * view.scale
+      // Amorti : au-delà d'une certaine traction le point résiste, comme une matière tendue.
+      const raw = { x: (event.clientX - origin.x) / scale, y: (event.clientY - origin.y) / scale }
+      const reach = Math.hypot(raw.x, raw.y)
+      const damped = reach > 0 ? Math.tanh(reach * 6) / 6 / reach : 0
+      pulling.dx = raw.x * damped
+      pulling.dy = raw.y * damped
+      drawRef.current()
+      return
+    }
+
     const dragging = draggingRef.current
     if (dragging) {
       dragging.moved = true
@@ -308,6 +396,26 @@ export function OrganizerMap({
       setLassoing(false)
       if (path.length > 3) onLasso(idsInside(path))
       draw()
+    }
+    if (pullRef.current) {
+      // Retour élastique : la matière reprend sa forme, personne n'a rien déplacé.
+      const released = pullRef.current
+      pullOriginRef.current = null
+      const started = performance.now()
+      const springBack = (): void => {
+        const progress = Math.min(1, (performance.now() - started) / 380)
+        // Rebond amorti plutôt qu'un retour plat : c'est ce qui rend le geste agréable.
+        const eased = 1 - Math.pow(2, -9 * progress) * Math.cos(progress * 14)
+        released.dx *= 1 - eased
+        released.dy *= 1 - eased
+        drawRef.current()
+        if (progress < 1) requestAnimationFrame(springBack)
+        else {
+          pullRef.current = null
+          drawRef.current()
+        }
+      }
+      requestAnimationFrame(springBack)
     }
     draggingRef.current = null
   }
@@ -363,6 +471,8 @@ export function OrganizerMap({
           setHovered(null)
           onHover(null)
           draggingRef.current = null
+          pullRef.current = null
+          pullOriginRef.current = null
         }}
         onWheel={onWheel}
         onContextMenu={(event) => event.preventDefault()}
