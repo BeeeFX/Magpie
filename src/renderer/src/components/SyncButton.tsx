@@ -299,6 +299,13 @@ export function SyncButton(): React.JSX.Element {
               </div>
             )
           })}
+
+          {/* Les actions restent joignables pendant une synchronisation : elle démarre à
+              l'ouverture de l'application, et elle bloquait donc l'accès à l'organisation
+              au moment précis où l'on vient de lancer Magpie. */}
+          <div className="action-menu action-menu--inline" role="menu">
+            <ActionsMenu onDone={() => setExpanded(false)} />
+          </div>
         </div> : null}
       </div>
     )

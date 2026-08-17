@@ -279,9 +279,10 @@ export const useStore = create<State>()(
       settingsOpen: false,
       organizerOpen: false,
       exportOpen: false,
-      // Tout coché : la préparation complète donne le meilleur résultat, on décoche ce qu'on
-      // ne veut pas payer plutôt que de deviner ce qu'il faut ajouter.
-      stepChoices: ['sync', 'thumbnails', 'clips', 'transcribe', 'group'],
+      /* Les deux étapes légères d'entrée, les deux lourdes à la demande : télécharger
+         quatorze gigaoctets et transcrire trois heures ne se déclenchent pas par défaut
+         parce qu'on a cliqué sur « organiser ». On les coche en connaissance de cause. */
+      stepChoices: ['sync', 'thumbnails', 'group'],
       stepStates: {
         sync: 'todo',
         thumbnails: 'todo',

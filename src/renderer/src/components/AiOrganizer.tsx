@@ -51,16 +51,14 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [error, setError] = useState<string | null>(null)
 
   /* Une préparation peut durer des heures. La fermer ne doit ni tout perdre en silence ni
-     retenir l'utilisateur devant la fenêtre : on lui pose la question, et par défaut le
-     travail continue en fond — l'indicateur de la barre d'outils prend le relais, et rouvrir
-     cet écran le ramène exactement là où il en était. */
+     retenir l'utilisateur devant la fenêtre : on lui pose la question dans l'interface —
+     une boîte de dialogue du système, avec son titre « magpie » et ses boutons OK / Cancel,
+     est un corps étranger au milieu d'un écran soigné. */
+  const [leaving, setLeaving] = useState(false)
   const onClose = useCallback((): void => {
-    if (!stepsRunning) {
-      requestClose()
-      return
-    }
-    if (window.confirm(t('organizer.leaveRunning'))) requestClose()
-  }, [requestClose, stepsRunning, t])
+    if (stepsRunning) setLeaving(true)
+    else requestClose()
+  }, [requestClose, stepsRunning])
   const [result, setResult] = useState<AiCollectionApplyResult | null>(null)
   const [rememberChoices, setRememberChoices] = useState(false)
   const [previewId, setPreviewId] = useState<string | null>(null)
@@ -349,6 +347,30 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
+        {leaving ? (
+          <div className="confirm" role="alertdialog" aria-modal="true">
+            <div className="confirm__panel">
+              <strong>{t('organizer.leaveTitle')}</strong>
+              <p>{t('organizer.leaveRunning')}</p>
+              <div className="confirm__actions">
+                <button type="button" className="btn" onClick={() => setLeaving(false)}>
+                  {t('organizer.leaveStay')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    setLeaving(false)
+                    requestClose()
+                  }}
+                >
+                  {t('organizer.leaveBackground')}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <header className="modal__head">
           <div>
             <h2 id="ai-organizer-title">{t('organizer.title')}</h2>

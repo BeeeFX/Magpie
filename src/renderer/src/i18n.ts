@@ -227,7 +227,10 @@ const fr = {
   'steps.halted': 'suspendue',
   'steps.failed': 'échouée',
   'organizer.leaveRunning':
-    'La préparation continue en arrière-plan si vous fermez cette fenêtre. Vous pourrez suivre son avancement depuis l’indicateur de téléchargement, et revenir ici à tout moment.\n\nFermer ?',
+    'Le travail continue en arrière-plan. Vous pourrez suivre son avancement depuis l’indicateur de téléchargement, et revenir ici à tout moment pour reprendre où vous en étiez.',
+  'organizer.leaveTitle': 'Fermer pendant la préparation ?',
+  'organizer.leaveStay': 'Rester ici',
+  'organizer.leaveBackground': 'Continuer en arrière-plan',
   'organizer.title': 'Organiser localement',
   'organizer.subtitle': 'Privé, modifiable et sans LLM.',
   'organizer.introTitle': 'Transformez votre bibliothèque en collections utiles',
@@ -738,7 +741,10 @@ const en: Record<TranslationKey, string> = {
   'steps.halted': 'paused',
   'steps.failed': 'failed',
   'organizer.leaveRunning':
-    'Preparation keeps running in the background if you close this window. You can follow it from the downloads indicator and come back here at any time.\n\nClose?',
+    'The work keeps running in the background. You can follow it from the downloads indicator and come back here at any time to pick up where you left off.',
+  'organizer.leaveTitle': 'Close while preparing?',
+  'organizer.leaveStay': 'Stay here',
+  'organizer.leaveBackground': 'Keep running in the background',
   'organizer.title': 'Organise locally',
   'organizer.subtitle': 'Private, editable, and LLM-free.',
   'organizer.introTitle': 'Turn your library into useful collections',

@@ -49,6 +49,18 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   const running = useStore((s) => s.stepsRunning)
   const setRunning = useStore((s) => s.setStepsRunning)
   const [error, setError] = useState<string | null>(null)
+  /* L'avancement vient du registre de tâches, seul endroit qui sache où en est un
+     téléchargement. Sans lui l'étape disait « en cours » sans jamais dire jusqu'où. */
+  const [live, setLive] = useState<{ kind: string; done: number; total: number } | null>(null)
+
+  useEffect(() => {
+    return magpieEvents.onBackgroundState((snapshot) => {
+      const task = snapshot.tasks.find((entry) =>
+        ['thumbnails', 'clips', 'transcribe', 'sync'].includes(entry.kind)
+      )
+      setLive(task ? { kind: task.kind, done: task.done, total: task.total } : null)
+    })
+  }, [])
 
   useEffect(() => {
     void Promise.all([magpie.pendingCounts(null), magpie.transcriptState()])
@@ -191,6 +203,11 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
         {rows.map((row) => {
           const status = state[row.id]
           const active = row.locked || chosen.includes(row.id)
+          const measured =
+            status === 'running' && live && live.kind === row.id && live.total > 0 ? live : null
+          const progress = measured
+            ? Math.min(100, Math.round((measured.done / measured.total) * 100))
+            : null
           return (
             <li key={row.id} className={`steps__row is-${status} ${active ? '' : 'is-off'}`}>
               <label>
@@ -213,10 +230,23 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
                   </strong>
                   <em>{t(`steps.${row.id}Hint` as Parameters<typeof t>[0])}</em>
                 </span>
-                {status === 'running' ? <span className="steps__bar" aria-hidden="true" /> : null}
+                {status === 'running' ? (
+                  <span
+                    className={`steps__bar ${progress !== null ? 'is-measured' : ''}`}
+                    aria-hidden="true"
+                    style={
+                      progress !== null
+                        ? ({ '--steps-progress': `${progress}%` } as React.CSSProperties)
+                        : undefined
+                    }
+                  />
+                ) : null}
                 <span className="steps__cost">
                   {status === 'running' ? (
-                    <span className="spinner" />
+                    <>
+                      <span className="spinner" />
+                      {measured ? t('downloads.progress', { done: measured.done, total: measured.total }) : null}
+                    </>
                   ) : status === 'skipped' ? (
                     t('steps.skipped')
                   ) : status === 'halted' ? (

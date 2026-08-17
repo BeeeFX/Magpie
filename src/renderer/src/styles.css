@@ -1267,23 +1267,6 @@ h1, h2, h3 {
   line-height: 1.6;
 }
 
-.organizer-intro ul {
-  display: grid;
-  gap: 8px;
-  margin: 22px 0;
-  padding: 0;
-  color: var(--muted);
-  list-style: none;
-  text-align: left;
-}
-
-.organizer-intro li::before {
-  margin-right: 9px;
-  color: var(--accent);
-  content: '✓';
-  font-weight: 750;
-}
-
 .organizer-intro small {
   margin-top: 12px;
   color: var(--faint);
@@ -1926,6 +1909,21 @@ h1, h2, h3 {
   line-height: 1.4;
 }
 
+/* Adossé au panneau de progression : plus une bulle flottante, mais la suite du même bloc. */
+.action-menu--inline {
+  position: static;
+  min-width: 0;
+  max-width: none;
+  margin-top: 8px;
+  padding: 8px 0 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
 .action-menu__sep {
   height: 1px;
   margin: 4px 6px;
@@ -2000,6 +1998,51 @@ h1, h2, h3 {
   color: var(--faint);
   font-size: 11px;
   line-height: 1.5;
+}
+
+/* Confirmation posée dans l'écran plutôt que par le système : une boîte Windows au milieu
+   d'une interface soignée est un corps étranger, et ses boutons ne parlent pas la même
+   langue que l'application. */
+.confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--sunken, #000) 62%, transparent);
+  backdrop-filter: blur(3px);
+  border-radius: inherit;
+  animation: popover-in 0.16s var(--ease) both;
+}
+
+.confirm__panel {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+  padding: 18px 20px;
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.confirm__panel strong {
+  font-size: 13.5px;
+}
+
+.confirm__panel p {
+  margin: 0;
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 /* --- Étapes de préparation -------------------------------------------------- */
@@ -2117,6 +2160,13 @@ h1, h2, h3 {
   animation: downloads-sweep 1.3s var(--ease) infinite;
 }
 
+/* Avancement connu : on montre où on en est, pas seulement qu'il se passe quelque chose. */
+.steps__bar.is-measured::after {
+  width: var(--steps-progress, 0%);
+  animation: none;
+  transition: width 0.3s var(--ease);
+}
+
 .steps__row label {
   position: relative;
 }
@@ -2198,6 +2248,13 @@ h1, h2, h3 {
   animation: downloads-sweep 1.3s var(--ease) infinite;
 }
 
+/* Avancement connu : on montre où on en est, pas seulement qu'il se passe quelque chose. */
+.steps__bar.is-measured::after {
+  width: var(--steps-progress, 0%);
+  animation: none;
+  transition: width 0.3s var(--ease);
+}
+
 .steps__row label {
   position: relative;
 }
@@ -2226,10 +2283,24 @@ h1, h2, h3 {
 }
 
 .steps__cost {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: var(--faint);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* La roue héritait d'une taille nulle dans cette grille et se réduisait à un trait. */
+.steps__cost .spinner {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.steps__row.is-running .steps__cost {
+  color: var(--text);
 }
 
 /* --- Carte sémantique ------------------------------------------------------ */
