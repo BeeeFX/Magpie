@@ -59,7 +59,6 @@ const WEB = {
   reference: 60_000
 }
 /** Portée du ressort quand on tire un point : ses voisins suivent, de moins en moins. */
-const PULL_RADIUS = 0.06
 
 export type ColourMode = 'group' | 'platform' | 'kind' | 'source'
 
@@ -77,9 +76,12 @@ interface Props {
 }
 
 /** Teintes bien séparées, reprises de la palette d'étiquettes : lisibles en clair et sombre. */
+/* Palette saturée, reprise de la maquette : celle des étiquettes de l'interface est sourde à
+   dessein, et sur fond noir elle rendait les amas indistincts. */
 const PALETTE = [
-  '#e0574f', '#e08a30', '#d9b330', '#5aa85a', '#4a90d9',
-  '#8a6ad9', '#c96aa8', '#3fa9a0', '#a8873f', '#6f7ad9'
+  '#ff5c5c', '#ff9f43', '#ffd93d', '#4ade80', '#38bdf8', '#a78bfa', '#f472b6', '#2dd4bf',
+  '#c9a227', '#818cf8', '#fb7185', '#34d399', '#e879f9', '#a3e635', '#60a5fa', '#fde047',
+  '#c084fc', '#22d3ee', '#f87171', '#86efac', '#f0abfc', '#94a3b8'
 ]
 
 function colourFor(
@@ -130,9 +132,7 @@ export function OrganizerMap({
   const draggingRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const zoomRef = useRef<(event: WheelEvent) => void>(() => {})
   /** Point tiré et déplacement en cours, dans le repère unité. */
-  const pullRef = useRef<{ point: OrganizerMapPoint; dx: number; dy: number } | null>(null)
-  const pullOriginRef = useRef<{ x: number; y: number } | null>(null)
-  const pullStartRef = useRef<{ x: number; y: number } | null>(null)
+  const clickedRef = useRef<OrganizerMapPoint | null>(null)
   const pathCache = useRef<{ key: string; paths: Map<string, Path2D> }>({ key: '', paths: new Map() })
 
   /* React attache ses écouteurs de molette en mode passif, où `preventDefault` est ignoré :
@@ -240,22 +240,11 @@ export function OrganizerMap({
 
     const size = Math.min(width, height)
     const landing = landingAt()
-    const pull = pullRef.current
     const toScreen = (point: OrganizerMapPoint): [number, number] => {
       // L'atterrissage tire les points depuis le centre : ils se posent au lieu de surgir.
       const eased = 1 - Math.pow(1 - landing, 3)
-      let cx = 0.5 + (point.x - 0.5) * eased
-      let cy = 0.5 + (point.y - 0.5) * eased
-      if (pull) {
-        // Les voisins suivent de moins en moins loin : la matière a l'air élastique, mais
-        // rien ne bouge vraiment — tout reprend sa place au relâchement.
-        const distance = Math.hypot(point.x - pull.point.x, point.y - pull.point.y)
-        if (distance < PULL_RADIUS) {
-          const share = (1 - distance / PULL_RADIUS) ** 2
-          cx += pull.dx * share
-          cy += pull.dy * share
-        }
-      }
+      const cx = 0.5 + (point.x - 0.5) * eased
+      const cy = 0.5 + (point.y - 0.5) * eased
       return [
         (cx * size + (width - size) / 2) * view.scale + view.x,
         (cy * size + (height - size) / 2) * view.scale + view.y
@@ -277,7 +266,9 @@ export function OrganizerMap({
       /* Les chemins ne dépendent que de l'échelle et de la traction : déplacer la carte est
          une translation pure. Les rebâtir à chaque image coûtait cent trente mille courbes
          pour rien — on les garde et on translate le canevas, à rendu identique. */
-      const signature = `${view.scale}:${pull ? pull.point.id : ''}:${pull?.dx ?? 0}:${pull?.dy ?? 0}`
+      /* `landing` anime les coordonnées à l'ouverture : l'oublier ici gardait des chemins
+         périmés, ou les reconstruisait sans fin. Il se stabilise à 1, la clé aussi. */
+      const signature = `${view.scale}:${landing.toFixed(3)}`
       if (pathCache.current.key !== signature) {
         const built = new Map<string, Path2D>()
         for (const [from, to] of links) {
@@ -386,14 +377,18 @@ export function OrganizerMap({
       }
       drawn.push({ x, y, size })
       const faded = !includedGroups.has(island.group)
+      /* Blanc et en minuscules, contour noir épais : coloré par groupe, le texte se noyait
+         dans une toile déjà colorée. Le blanc tranche sur tout, la couleur reste au réseau. */
       context.font = `600 ${size.toFixed(1)}px system-ui, sans-serif`
-      context.globalAlpha = faded ? 0.3 : 0.95
-      // Halo sombre : le texte doit rester lisible par-dessus n'importe quelle densité.
-      context.lineWidth = size / 5
-      context.strokeStyle = 'rgba(0, 0, 0, 0.75)'
-      context.strokeText(name, x, y)
-      context.fillStyle = colourFor({ group: island.group } as OrganizerMapPoint, 'group', groupIndex)
-      context.fillText(name, x, y)
+      context.letterSpacing = '-0.02em'
+      context.globalAlpha = faded ? 0.28 : 1
+      context.lineJoin = 'round'
+      context.lineWidth = size / 3.2
+      context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
+      context.strokeText(name.toLocaleLowerCase(), x, y)
+      context.fillStyle = '#ffffff'
+      context.fillText(name.toLocaleLowerCase(), x, y)
+      context.letterSpacing = '0px'
     }
     context.globalAlpha = 1
 
@@ -518,18 +513,11 @@ export function OrganizerMap({
         { x: event.clientX - (rect?.left ?? 0), y: event.clientY - (rect?.top ?? 0) }
       ]
     } else {
-      /* Appuyer sur un point le saisit ; appuyer dans le vide déplace la carte. Un point
-         saisi ne se range pas ailleurs — il s'étire et revient. Le laisser se replacer
-         librement ferait mentir la carte, dont toute la valeur est que la distance affichée
-         soit la proximité de sens. */
-      const grabbed = pointAt(event.clientX, event.clientY)
-      if (grabbed) {
-        pullRef.current = { point: grabbed, dx: 0, dy: 0 }
-        pullOriginRef.current = null
-        pullStartRef.current = { x: event.clientX, y: event.clientY }
-      } else {
-        draggingRef.current = { x: event.clientX - view.x, y: event.clientY - view.y, moved: false }
-      }
+      /* La carte est statique : les points ne se tirent plus. Un appui sur un point retient
+         seulement de quoi savoir, au relâchement, s'il s'agissait d'un clic ou d'un
+         déplacement de la carte. */
+      clickedRef.current = pointAt(event.clientX, event.clientY)
+      draggingRef.current = { x: event.clientX - view.x, y: event.clientY - view.y, moved: false }
     }
   }
 
@@ -543,29 +531,6 @@ export function OrganizerMap({
       draw()
       return
     }
-    const pulling = pullRef.current
-    // La traction ne commence qu'au premier vrai mouvement : sinon un clic net déplacerait.
-    if (pulling && !pullOriginRef.current && pullStartRef.current) {
-      const start = pullStartRef.current
-      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 3) {
-        pullOriginRef.current = start
-      }
-    }
-    const origin = pullOriginRef.current
-    if (pulling && origin) {
-      const canvas = canvasRef.current
-      const size = canvas ? Math.min(rect?.width ?? 0, rect?.height ?? 0) : 1
-      const scale = (size || 1) * view.scale
-      // Amorti : au-delà d'une certaine traction le point résiste, comme une matière tendue.
-      const raw = { x: (event.clientX - origin.x) / scale, y: (event.clientY - origin.y) / scale }
-      const reach = Math.hypot(raw.x, raw.y)
-      const damped = reach > 0 ? Math.tanh(reach * 6) / 6 / reach : 0
-      pulling.dx = raw.x * damped
-      pulling.dy = raw.y * damped
-      drawRef.current()
-      return
-    }
-
     const dragging = draggingRef.current
     if (dragging) {
       dragging.moved = true
@@ -592,31 +557,11 @@ export function OrganizerMap({
       if (path.length > 3) onLasso(idsInside(path))
       draw()
     }
-    const grabbed = pullRef.current
-    if (grabbed && !pullOriginRef.current) {
-      // Relâché sans avoir tiré : c'est un clic, pas une traction.
-      onOpen(grabbed.point)
+    // Relâché sans avoir déplacé la carte : c'était un clic sur un point.
+    if (clickedRef.current && draggingRef.current && !draggingRef.current.moved) {
+      onOpen(clickedRef.current)
     }
-    if (pullRef.current) {
-      // Retour élastique : la matière reprend sa forme, personne n'a rien déplacé.
-      const released = pullRef.current
-      pullOriginRef.current = null
-      const started = performance.now()
-      const springBack = (): void => {
-        const progress = Math.min(1, (performance.now() - started) / 380)
-        // Rebond amorti plutôt qu'un retour plat : c'est ce qui rend le geste agréable.
-        const eased = 1 - Math.pow(2, -9 * progress) * Math.cos(progress * 14)
-        released.dx *= 1 - eased
-        released.dy *= 1 - eased
-        drawRef.current()
-        if (progress < 1) requestAnimationFrame(springBack)
-        else {
-          pullRef.current = null
-          drawRef.current()
-        }
-      }
-      requestAnimationFrame(springBack)
-    }
+    clickedRef.current = null
     draggingRef.current = null
   }
 
@@ -673,8 +618,7 @@ export function OrganizerMap({
           setHovered(null)
           onHover(null)
           draggingRef.current = null
-          pullRef.current = null
-          pullOriginRef.current = null
+          clickedRef.current = null
         }}
         onContextMenu={(event) => event.preventDefault()}
       />
