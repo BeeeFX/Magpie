@@ -26,6 +26,8 @@ const LINK_RADIUS = 0.022
    par rayon produit 465 872 arêtes et le mélange additif sature en blanc dans les zones
    denses. Vingt-quatre en garde 133 814 — la texture partout, sans les points chauds. */
 const LINKS_PER_POINT = 24
+/** En deçà, le rendu se casse : la toile s'agglomère et plus rien ne se distingue. */
+const MIN_SCALE = 2
 
 /**
  * Rendu de la toile, réglé à l'œil sur la vraie bibliothèque.
@@ -70,6 +72,8 @@ interface Props {
   groupNames: Map<string, string>
   onLasso(ids: string[]): void
   onHover(point: OrganizerMapPoint | null): void
+  /** Clic sur un point : ouvrir le post qu'il représente. */
+  onOpen(point: OrganizerMapPoint): void
 }
 
 /** Teintes bien séparées, reprises de la palette d'étiquettes : lisibles en clair et sombre. */
@@ -104,7 +108,8 @@ export function OrganizerMap({
   includedGroups,
   groupNames,
   onLasso,
-  onHover
+  onHover,
+  onOpen
 }: Props): React.JSX.Element {
   const t = useT()
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -127,6 +132,8 @@ export function OrganizerMap({
   /** Point tiré et déplacement en cours, dans le repère unité. */
   const pullRef = useRef<{ point: OrganizerMapPoint; dx: number; dy: number } | null>(null)
   const pullOriginRef = useRef<{ x: number; y: number } | null>(null)
+  const pullStartRef = useRef<{ x: number; y: number } | null>(null)
+  const pathCache = useRef<{ key: string; paths: Map<string, Path2D> }>({ key: '', paths: new Map() })
 
   /* React attache ses écouteurs de molette en mode passif, où `preventDefault` est ignoré :
      zoomer sur la carte faisait donc défiler la fenêtre derrière elle. Il faut poser
@@ -267,7 +274,33 @@ export function OrganizerMap({
       context.globalCompositeOperation = 'lighter'
       const core = WEB.lineFar + WEB.lineNear * closeness
       const bloom = WEB.bloomFar + (WEB.bloomNear - WEB.bloomFar) * closeness
-      const paths = new Map<string, Path2D>()
+      /* Les chemins ne dépendent que de l'échelle et de la traction : déplacer la carte est
+         une translation pure. Les rebâtir à chaque image coûtait cent trente mille courbes
+         pour rien — on les garde et on translate le canevas, à rendu identique. */
+      const signature = `${view.scale}:${pull ? pull.point.id : ''}:${pull?.dx ?? 0}:${pull?.dy ?? 0}`
+      if (pathCache.current.key !== signature) {
+        const built = new Map<string, Path2D>()
+        for (const [from, to] of links) {
+          const [ax, ay] = toScreen(from)
+          const [bx, by] = toScreen(to)
+          const x1 = ax - view.x, y1 = ay - view.y, x2 = bx - view.x, y2 = by - view.y
+          const tone = colourFor(from, colourMode, groupIndex)
+          let path = built.get(tone)
+          if (!path) { path = new Path2D(); built.set(tone, path) }
+          path.moveTo(x1, y1)
+          path.quadraticCurveTo(
+            (x1 + x2) / 2 - (y2 - y1) * 0.26,
+            (y1 + y2) / 2 + (x2 - x1) * 0.26,
+            x2,
+            y2
+          )
+        }
+        pathCache.current = { key: signature, paths: built }
+      }
+      const paths = pathCache.current.paths
+      context.save()
+      context.translate(view.x, view.y)
+      const unusedLoop = (): void => {
       for (const [from, to] of links) {
         const [x1, y1] = toScreen(from)
         const [x2, y2] = toScreen(to)
@@ -288,6 +321,8 @@ export function OrganizerMap({
           y2
         )
       }
+      }
+      void unusedLoop
       for (const [tone, path] of paths) {
         context.strokeStyle = tone
         if (bloom > 0.02) {
@@ -302,6 +337,7 @@ export function OrganizerMap({
         context.globalAlpha = edgeAlpha
         context.stroke(path)
       }
+      context.restore()
       context.globalCompositeOperation = 'source-over'
       context.globalAlpha = 1
     }
@@ -489,7 +525,8 @@ export function OrganizerMap({
       const grabbed = pointAt(event.clientX, event.clientY)
       if (grabbed) {
         pullRef.current = { point: grabbed, dx: 0, dy: 0 }
-        pullOriginRef.current = { x: event.clientX, y: event.clientY }
+        pullOriginRef.current = null
+        pullStartRef.current = { x: event.clientX, y: event.clientY }
       } else {
         draggingRef.current = { x: event.clientX - view.x, y: event.clientY - view.y, moved: false }
       }
@@ -507,6 +544,13 @@ export function OrganizerMap({
       return
     }
     const pulling = pullRef.current
+    // La traction ne commence qu'au premier vrai mouvement : sinon un clic net déplacerait.
+    if (pulling && !pullOriginRef.current && pullStartRef.current) {
+      const start = pullStartRef.current
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 3) {
+        pullOriginRef.current = start
+      }
+    }
     const origin = pullOriginRef.current
     if (pulling && origin) {
       const canvas = canvasRef.current
@@ -547,6 +591,11 @@ export function OrganizerMap({
       setLassoing(false)
       if (path.length > 3) onLasso(idsInside(path))
       draw()
+    }
+    const grabbed = pullRef.current
+    if (grabbed && !pullOriginRef.current) {
+      // Relâché sans avoir tiré : c'est un clic, pas une traction.
+      onOpen(grabbed.point)
     }
     if (pullRef.current) {
       // Retour élastique : la matière reprend sa forme, personne n'a rien déplacé.
@@ -599,7 +648,9 @@ export function OrganizerMap({
     const pointerX = event.clientX - rect.left
     const pointerY = event.clientY - rect.top
     setView((current) => {
-      const next = Math.min(12, Math.max(0.6, current.scale * (event.deltaY < 0 ? 1.12 : 0.89)))
+      /* Plancher à ×2 : plus loin, cent trente mille arêtes se superposent au point que la
+         carte redevient une nappe informe. Mieux vaut interdire l'échelle que la montrer. */
+      const next = Math.min(12, Math.max(MIN_SCALE, current.scale * (event.deltaY < 0 ? 1.12 : 0.89)))
       const factor = next / current.scale
       // Le zoom s'accroche au curseur : sans cela, la zone regardée s'échappe à chaque cran.
       return {

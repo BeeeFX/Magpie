@@ -78,6 +78,8 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [rememberChoices, setRememberChoices] = useState(false)
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [previewPosts, setPreviewPosts] = useState<Post[]>([])
+  /** Post ouvert depuis la carte : sa vignette et son texte, sans quitter l'écran. */
+  const [mapPost, setMapPost] = useState<Post | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(false)
   const [colourMode, setColourMode] = useState<ColourMode>('group')
@@ -536,7 +538,33 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                       }
                       onLasso={setLassoed}
                       onHover={() => {}}
+                      onOpen={(point) => void magpie.getPostsByIds([point.id]).then((posts) => {
+                        if (posts[0]) setMapPost(posts[0])
+                      })}
                     />
+                    {mapPost ? (
+                      <div className="map-post" role="dialog" aria-label={displayName(mapPost)}>
+                        {mapPost.media[0]?.thumbUrl ? (
+                          <img src={mapPost.media[0].thumbUrl} alt="" />
+                        ) : null}
+                        <div className="map-post__body">
+                          <strong>{displayName(mapPost)}</strong>
+                          <p>{mapPost.text?.slice(0, 220) || ''}</p>
+                          <div className="map-post__actions">
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => void magpie.openExternal(mapPost.url)}
+                            >
+                              {t('organizer.openOriginal')}
+                            </button>
+                            <button type="button" className="btn" onClick={() => setMapPost(null)}>
+                              {t('detail.close')}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                     {lassoed.length > 0 ? (
                       <div className="organizer-lasso" role="status">
                         <span>{t('organizer.mapSelected', { count: lassoed.length })}</span>

@@ -2311,6 +2311,55 @@ h1, h2, h3 {
   color: var(--text);
 }
 
+/* Aperçu d'un post ouvert depuis la carte : posé dans un coin, il ne masque pas la zone
+   qu'on vient de cliquer. */
+.map-post {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 6;
+  display: flex;
+  gap: 12px;
+  max-width: 380px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-lg);
+}
+
+.map-post img {
+  width: 84px;
+  height: 84px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+
+.map-post__body {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+
+.map-post__body strong {
+  font-size: 12.5px;
+}
+
+.map-post__body p {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.map-post__actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 2px;
+}
+
 /* --- Carte sémantique ------------------------------------------------------ */
 
 .organizer-views {
