@@ -20,7 +20,6 @@ import { registerIpc } from './ipc'
 import {
   countPendingThumbnails,
   countPosts,
-  playbackMediaSource,
   recentAiCandidateIds,
   repairMissingSyncDates
 } from './db/queries'
@@ -35,7 +34,7 @@ import type { PreloadState, SyncPhase } from '@shared/types'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
-import { parseRemoteMediaUrl } from './media/remote'
+import { parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
 import { streamMedia } from './adapters/http'
 
 const isDev = !app.isPackaged
@@ -273,9 +272,11 @@ function registerMediaProtocol(): void {
     if (url.host === 'remote') {
       const remoteRequest = parseRemoteMediaUrl(request.url)
       if (!remoteRequest) return new Response('Bad request', { status: 400 })
-      const { postId, mediaIndex: idx, kind, quality } = remoteRequest
+      const { kind } = remoteRequest
 
-      const media = playbackMediaSource(postId, idx, kind, quality)
+      // Le lecteur peut rejouer cette URL longtemps après l'avoir obtenue — reprise après
+      // pause, déplacement dans la timeline. Le lien est donc revérifié à chaque requête.
+      const media = await resolveFreshMedia(remoteRequest)
       if (!media?.source || !/^https?:\/\//i.test(media.source)) {
         return new Response('Media unavailable', { status: 404 })
       }

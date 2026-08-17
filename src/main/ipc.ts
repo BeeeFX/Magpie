@@ -53,7 +53,7 @@ import { seedIfEmpty } from './fixtures/seed'
 import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
 import { getCacheUsage, resetCacheUsage, VIDEO_NAME_PATTERN } from './media/cache'
-import { createRemoteMediaUrl } from './media/remote'
+import { createRemoteMediaUrl, resolveFreshMedia } from './media/remote'
 import { streamMedia } from './adapters/http'
 import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
@@ -552,7 +552,9 @@ export function registerIpc({
         throw new Error('Qualité invalide')
       }
 
-      const media = playbackMediaSource(postId, idx, kind, quality)
+      // Renouvelle le lien avant de le rendre au lecteur : mieux vaut une seconde
+      // d'attente qu'une erreur sur une vidéo parfaitement disponible.
+      const media = await resolveFreshMedia({ postId, mediaIndex: idx, kind, quality })
       if (!media) throw new Error('Média indisponible')
       if (
         kind === 'video' &&

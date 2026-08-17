@@ -59,6 +59,23 @@ export const instagramAdapter: PlatformAdapter = {
     return info.user?.username ? `@${info.user.username}` : null
   },
 
+  /**
+   * `/api/v1/media/{pk}/info/` rend le même nœud média que le fil, mais avec des liens
+   * fraîchement signés. Sa réponse place le média directement dans `items`, là où le fil
+   * l'enveloppe dans `.media` — d'où la remise en forme avant normalisation, qui évite de
+   * dupliquer toute la logique de lecture du payload.
+   */
+  async refreshPost(nativeId: string): Promise<Pick<NormalizedPage, 'posts' | 'media'>> {
+    const response = await getJson<{ items?: unknown[] }>(
+      'instagram',
+      `${ORIGIN}/api/v1/media/${encodeURIComponent(nativeId)}/info/`,
+      { headers: await headers(), referer: `${ORIGIN}/` }
+    )
+    const items = (response.items ?? []).map((item) => ({ media: item }))
+    // `startRank` à zéro : l'upsert conserve le rang déjà enregistré, on ne renumérote rien.
+    return normalizeSavedFeed({ items } as IgSavedResponse, 0)
+  },
+
   async fetchPage(source: ContentSource, cursor: string | null, startRank: number): Promise<NormalizedPage> {
     const path = source === 'liked' ? 'liked/' : 'saved/posts/'
     const url = new URL(`${ORIGIN}/api/v1/feed/${path}`)

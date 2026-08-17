@@ -2,6 +2,7 @@ import type { VideoQuality } from '../src/shared/types'
 import { parseByteRange } from '../src/main/media/range'
 import { createRemoteMediaUrl, parseRemoteMediaUrl } from '../src/main/media/remote'
 import { resolvePreferredQuality } from '../src/shared/quality'
+import { isMediaUrlExpired, mediaUrlExpiry } from '../src/main/media/freshness'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Échec : ${message}`)
@@ -65,5 +66,37 @@ assert(
   near('source', ['1080p', '480p', '720p']) === '1080p',
   'l’ordre de la liste reçue n’influence pas le choix'
 )
+
+/*
+ * Péremption des liens signés. Instagram inscrit la date d'expiration dans l'URL ; la lire
+ * permet de renouveler avant d'essayer, plutôt que d'afficher une erreur sur une vidéo
+ * dont la page, elle, s'ouvre parfaitement. La valeur ci-dessous vient d'un vrai lien.
+ */
+console.log('\nPéremption des liens média')
+const REAL = 'https://scontent-lhr6-1.cdninstagram.com/o1/v/t2/f2/m86/x.mp4?_nc_cat=102&oe=6A842FFB'
+assert(mediaUrlExpiry(REAL) === 0x6a842ffb * 1000, 'la date d’expiration est lue dans l’URL')
+assert(
+  isMediaUrlExpired(REAL, 0, 0x6a842ffb * 1000 + 1),
+  'un lien dont la date est passée est déclaré périmé'
+)
+assert(
+  !isMediaUrlExpired(REAL, 0, 0x6a842ffb * 1000 - 3_600_000),
+  'une heure plus tôt, il est encore valide'
+)
+assert(
+  isMediaUrlExpired(REAL, 120_000, 0x6a842ffb * 1000 - 60_000),
+  'la marge évite de démarrer une lecture sur un lien qui expire dans la minute'
+)
+assert(
+  mediaUrlExpiry('https://video.twimg.com/ext_tw_video/1/vid/avc1/1280x720/x.mp4?tag=12') === null,
+  'une URL sans signature n’a pas de date'
+)
+assert(
+  !isMediaUrlExpired('https://video.twimg.com/x.mp4?tag=12'),
+  'et n’est donc jamais considérée périmée'
+)
+assert(mediaUrlExpiry('pas une url') === null, 'une URL illisible ne fait pas échouer la lecture')
+assert(mediaUrlExpiry('https://e.test/x.mp4?oe=zzz') === null, 'une valeur non hexadécimale est ignorée')
+assert(mediaUrlExpiry('https://e.test/x.mp4?oe=1') === null, 'une valeur aberrante est ignorée')
 
 console.log('\nTout est vert.')

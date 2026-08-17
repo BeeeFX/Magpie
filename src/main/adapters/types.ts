@@ -29,4 +29,14 @@ export interface PlatformAdapter {
    * elle sert de substitut à la date de sauvegarde là où la plateforme ne l'expose pas.
    */
   fetchPage(source: ContentSource, cursor: string | null, startRank: number): Promise<NormalizedPage>
+  /**
+   * Redemande un seul post à la plateforme, pour renouveler ses liens média.
+   *
+   * Instagram signe ses URLs de CDN avec une expiration de quelques jours : celles qu'on a
+   * enregistrées à la synchronisation ne se lisent plus ensuite. Rejouer une
+   * synchronisation complète pour un clic sur une vidéo serait disproportionné — et ne
+   * tiendrait pas davantage dans le temps. Facultatif : les plateformes dont les liens ne
+   * périment pas n'ont rien à implémenter.
+   */
+  refreshPost?(nativeId: string): Promise<Pick<NormalizedPage, 'posts' | 'media'>>
 }
