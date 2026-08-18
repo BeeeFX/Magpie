@@ -302,6 +302,21 @@ CREATE TABLE IF NOT EXISTS post_embeddings (
   updated_at INTEGER NOT NULL
 );
 
+-- Vecteurs de sens de l'image d'un post, calculés localement par deux encodeurs qui ne
+-- regardent pas la même chose : DINOv2 la structure et le style, SigLIP le sujet. Mesurés
+-- meilleurs ensemble que chacun seul (cf. scripts/bench-vision-mix).
+--
+-- Le hash porte sur le chemin de la vignette et la version des modèles : une vignette
+-- réécrite — l'éviction du cache en produit — est réencodée, le reste jamais.
+CREATE TABLE IF NOT EXISTS post_image_embeddings (
+  post_id    TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  hash       TEXT NOT NULL,
+  structure  BLOB NOT NULL,
+  meaning    BLOB NOT NULL,
+  frames     INTEGER NOT NULL DEFAULT 1,
+  updated_at INTEGER NOT NULL
+);
+
 -- Préférences apprises lors du premier tri local. Plusieurs clés peuvent pointer vers
 -- la même collection : c'est ainsi qu'une fusion « 3D + Blender » reste valable pour les
 -- prochains posts, même si la collection est ensuite renommée.

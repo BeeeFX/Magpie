@@ -639,6 +639,81 @@ export function savePostEmbeddings(embeddings: PostEmbedding[]): void {
   })()
 }
 
+export interface PostImageEmbedding {
+  postId: string
+  hash: string
+  /** DINOv2 : la structure et le style. */
+  structure: Buffer
+  /** SigLIP : le sujet. */
+  meaning: Buffer
+  /** Nombre d'images moyennées — trois pour une vidéo dont le clip est en cache. */
+  frames: number
+}
+
+/**
+ * Vecteurs d'image déjà calculés, indexés par post.
+ *
+ * Même économie que pour le texte : le hash porte sur la vignette et la version des
+ * modèles, donc une deuxième analyse ne réencode que ce qui a changé.
+ */
+export function postImageEmbeddings(): Map<string, PostImageEmbedding> {
+  const rows = getDb()
+    .prepare('SELECT post_id, hash, structure, meaning, frames FROM post_image_embeddings')
+    .all() as {
+    post_id: string
+    hash: string
+    structure: Buffer
+    meaning: Buffer
+    frames: number
+  }[]
+  return new Map(
+    rows.map((row) => [
+      row.post_id,
+      {
+        postId: row.post_id,
+        hash: row.hash,
+        structure: row.structure,
+        meaning: row.meaning,
+        frames: row.frames
+      }
+    ])
+  )
+}
+
+export function savePostImageEmbeddings(embeddings: PostImageEmbedding[]): void {
+  if (embeddings.length === 0) return
+  const statement = getDb().prepare(`
+    INSERT INTO post_image_embeddings (post_id, hash, structure, meaning, frames, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(post_id) DO UPDATE SET
+      hash = excluded.hash,
+      structure = excluded.structure,
+      meaning = excluded.meaning,
+      frames = excluded.frames,
+      updated_at = excluded.updated_at
+  `)
+  const now = Date.now()
+  getDb().transaction(() => {
+    for (const item of embeddings) {
+      statement.run(item.postId, item.hash, item.structure, item.meaning, item.frames, now)
+    }
+  })()
+}
+
+/** Combien de posts illustrés attendent encore d'être lus. Sert à annoncer l'étape. */
+export function countPendingImageEmbeddings(): number {
+  return (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) AS n FROM posts p
+          WHERE p.is_archived = 0
+            AND EXISTS (SELECT 1 FROM media m WHERE m.post_id = p.id AND m.thumb_path IS NOT NULL)
+            AND NOT EXISTS (SELECT 1 FROM post_image_embeddings e WHERE e.post_id = p.id)`
+      )
+      .get() as { n: number }
+  ).n
+}
+
 export function aiCandidates(postIds?: string[], limit = 500): AiCandidate[] {
   const db = getDb()
   const params: unknown[] = []

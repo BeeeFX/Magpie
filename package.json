@@ -29,6 +29,7 @@
     "dist": "electron-vite build && electron-builder",
     "dist:win": "electron-vite build && electron-builder --win",
     "postinstall": "electron-builder install-app-deps",
+    "check:vision": "tsx --tsconfig tsconfig.node.json scripts/check-vision.ts",
     "check:map": "tsx --tsconfig tsconfig.node.json scripts/check-map.ts"
   },
   "dependencies": {
