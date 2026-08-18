@@ -104,6 +104,9 @@ const PREVIEW_TASKS = {
     itemsPerSecond: Math.max(0, Math.round(6 + Math.sin(index / 5) * 4))
   })),
   cacheFull: false,
+  cacheThumbnailsCapped: false,
+  cacheThumbnailBytes: 0,
+  cacheThumbnailBudget: 0,
   cacheBytes: 1.1 * 1024 ** 3,
   cacheLimitBytes: 5 * 1024 ** 3,
   tasks: [

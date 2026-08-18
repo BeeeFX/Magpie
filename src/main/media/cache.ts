@@ -65,44 +65,83 @@ export const VIDEO_NAME_PATTERN = /^[0-9a-f]{40}\.mp4$/
 
 class CacheQuotaReached extends Error {}
 
-let knownCacheBytes: number | null = null
-let cacheScan: Promise<number> | null = null
+/**
+ * Part du disque alloué réservée aux vignettes.
+ *
+ * Sans elle, un cache partagé se remplit de clips — mille fois plus lourds — et la place à
+ * faire pour une vignette se prend forcément sur les vignettes, seules évinçables. Mesuré
+ * sur une vraie bibliothèque : 634 clips occupaient 4,72 Go d'un plafond de 5, contre
+ * 0,28 Go pour treize mille vignettes. Chaque débordement effaçait donc la totalité des
+ * vignettes — et remettait leur compteur de tentatives à zéro, si bien que l'étape
+ * « télécharger les images des tuiles » recommençait indéfiniment, sans jamais rien signaler.
+ *
+ * Un quart suffit très largement : une vignette pèse une vingtaine de kilo-octets, donc ce
+ * quart en tient plus de cinquante mille sur un plafond de 5 Go, là où la bibliothèque de
+ * référence en compte seize mille.
+ */
+const THUMBNAIL_SHARE = 0.25
+
+let knownThumbBytes: number | null = null
+let knownOtherBytes: number | null = null
+let cacheScan: Promise<{ thumbs: number; other: number }> | null = null
 
 /** Un seul inventaire du cache par lancement, au lieu d'un scan de milliers de fichiers
- * avant chaque clip. Les écritures suivantes maintiennent le compteur en mémoire. */
-async function cacheBytes(): Promise<number> {
-  if (knownCacheBytes !== null) return knownCacheBytes
+ * avant chaque clip. Les écritures suivantes maintiennent les compteurs en mémoire. */
+async function cacheParts(): Promise<{ thumbs: number; other: number }> {
+  if (knownThumbBytes !== null && knownOtherBytes !== null) {
+    return { thumbs: knownThumbBytes, other: knownOtherBytes }
+  }
   if (cacheScan) return cacheScan
 
   cacheScan = (async () => {
     const dir = mediaDir()
     const entries = await readdir(dir)
     let cursor = 0
-    let total = 0
+    let thumbs = 0
+    let other = 0
     const worker = async (): Promise<void> => {
       while (cursor < entries.length) {
         const entry = entries[cursor++]
         try {
-          total += (await stat(join(dir, entry))).size
+          const size = (await stat(join(dir, entry))).size
+          if (THUMB_NAME_PATTERN.test(entry)) thumbs += size
+          else other += size
         } catch {
           // Un autre travailleur peut avoir remplacé un fichier entre les deux appels.
         }
       }
     }
     await Promise.all(Array.from({ length: Math.min(16, entries.length) }, worker))
-    knownCacheBytes = total
+    knownThumbBytes = thumbs
+    knownOtherBytes = other
     cacheScan = null
-    return total
+    return { thumbs, other }
   })()
   return cacheScan
+}
+
+async function cacheBytes(): Promise<number> {
+  const parts = await cacheParts()
+  return parts.thumbs + parts.other
 }
 
 export function getCacheUsage(): Promise<number> {
   return cacheBytes()
 }
 
-function recordCacheDelta(delta: number): void {
-  if (knownCacheBytes !== null) knownCacheBytes = Math.max(0, knownCacheBytes + delta)
+function recordCacheDelta(delta: number, kind: 'thumb' | 'other'): void {
+  if (kind === 'thumb') {
+    if (knownThumbBytes !== null) knownThumbBytes = Math.max(0, knownThumbBytes + delta)
+  } else if (knownOtherBytes !== null) {
+    knownOtherBytes = Math.max(0, knownOtherBytes + delta)
+  }
+}
+
+/** Les deux enveloppes, déduites du plafond réglé par l'utilisateur. */
+function budgets(): { limit: number; thumbs: number; other: number } {
+  const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
+  const thumbs = limit * THUMBNAIL_SHARE
+  return { limit, thumbs, other: limit - thumbs }
 }
 
 async function fileSize(path: string): Promise<number> {
@@ -113,14 +152,34 @@ async function fileSize(path: string): Promise<number> {
   }
 }
 
+/** Place restante pour un clip : son enveloppe à lui, jamais celle des vignettes. */
 async function ensureQuota(bytes: number): Promise<void> {
-  const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
-  if ((await cacheBytes()) + bytes > limit) throw new CacheQuotaReached()
+  const { other: budget } = budgets()
+  if ((await cacheParts()).other + bytes > budget) throw new CacheQuotaReached()
+}
+
+/**
+ * Fait de la place pour une vignette — dans l'enveloppe des vignettes.
+ *
+ * L'ancienne version visait le plafond global : quand les clips le remplissaient à eux
+ * seuls, la cible était hors d'atteinte et la boucle vidait la totalité des vignettes sans
+ * jamais l'atteindre, ni signaler quoi que ce soit. Une vignette ne chasse plus qu'une
+ * vignette, et seulement quand les vignettes débordent de leur propre part.
+ */
+/* Vraie que dès qu'une vignette a dû en chasser une autre : les vignettes remplissent alors
+   leur part, et l'étape qui les télécharge ne peut plus finir — chaque nouvelle en efface une
+   ancienne, qui repassera en file. Il faut le dire, pas tourner en rond. */
+let thumbnailsEvicted = false
+
+export function takeThumbnailPressure(): boolean {
+  const pressed = thumbnailsEvicted
+  thumbnailsEvicted = false
+  return pressed
 }
 
 async function makeThumbnailRoom(bytes: number, protectedName?: string): Promise<void> {
-  const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
-  let usage = await cacheBytes()
+  const limit = budgets().thumbs
+  let usage = (await cacheParts()).thumbs
   if (usage + bytes <= limit) return
 
   const candidates = await Promise.all(
@@ -140,9 +199,10 @@ async function makeThumbnailRoom(bytes: number, protectedName?: string): Promise
     await rm(join(mediaDir(), item.name), { force: true })
     removed.push(item.name)
     usage -= item.size
-    recordCacheDelta(-item.size)
+    recordCacheDelta(-item.size, 'thumb')
     if (usage + bytes <= limit * 0.92) break
   }
+  if (removed.length > 0) thumbnailsEvicted = true
   forgetThumbnailPaths(removed)
   if (usage + bytes > limit) throw new CacheQuotaReached()
 }
@@ -158,14 +218,27 @@ export async function touchCachedThumbnails(postIds: string[]): Promise<void> {
 }
 
 async function remainingQuota(): Promise<number> {
-  const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
-  return Math.max(0, limit - (await cacheBytes()))
+  const { other: budget } = budgets()
+  return Math.max(0, budget - (await cacheParts()).other)
 }
 
 /** Appelé après une purge ou un déplacement de bibliothèque. */
 export function resetCacheUsage(bytes: number | null = null): void {
-  knownCacheBytes = bytes
+  knownThumbBytes = bytes === null ? null : 0
+  knownOtherBytes = bytes
   cacheScan = null
+}
+
+/** Ce que chaque enveloppe contient, pour le dire à l'utilisateur plutôt qu'un total muet. */
+export async function getCacheBreakdown(): Promise<{
+  thumbs: number
+  other: number
+  thumbBudget: number
+  otherBudget: number
+}> {
+  const parts = await cacheParts()
+  const { thumbs, other } = budgets()
+  return { thumbs: parts.thumbs, other: parts.other, thumbBudget: thumbs, otherBudget: other }
 }
 
 async function cacheAdaptiveVideo(source: string, target: string, signal?: AbortSignal): Promise<void> {
@@ -206,11 +279,10 @@ async function cacheAdaptiveVideo(source: string, target: string, signal?: Abort
     if (signal?.aborted) abort()
   })
   const nextSize = await fileSize(target)
-  recordCacheDelta(nextSize - previousSize)
-  const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
-  if ((await cacheBytes()) > limit) {
+  recordCacheDelta(nextSize - previousSize, 'other')
+  if ((await cacheParts()).other > budgets().other) {
     rmSync(target, { force: true })
-    recordCacheDelta(-nextSize)
+    recordCacheDelta(-nextSize, 'other')
     throw new CacheQuotaReached()
   }
 }
@@ -253,7 +325,7 @@ export async function buildThumbnail(
     .resize({ width: MAX_WIDTH, withoutEnlargement: true })
     .webp({ quality: QUALITY })
     .toFile(target)
-  recordCacheDelta(info.size - previousSize)
+  recordCacheDelta(info.size - previousSize, 'thumb')
 
   // La couleur dominante n'a pas besoin de redécoder l'original, parfois immense. La
   // vignette déjà réduite contient la même information visuelle pour une fraction du CPU.
@@ -293,7 +365,7 @@ export async function cacheVideo(
         if (available <= 0) throw new CacheQuotaReached()
         try {
           const bytes = await downloadMediaToFile(platform, source, target, available, 180000, signal)
-          recordCacheDelta(bytes)
+          recordCacheDelta(bytes, 'other')
         } catch (error) {
           if (error instanceof MediaLimitExceeded) throw new CacheQuotaReached()
           throw error
@@ -303,7 +375,7 @@ export async function cacheVideo(
       const bytes = await fileSize(source)
       await ensureQuota(bytes)
       await copyFile(source, target)
-      recordCacheDelta(bytes)
+      recordCacheDelta(bytes, 'other')
     } else {
       throw new Error('Aucune source exploitable pour ce clip')
     }
@@ -322,6 +394,8 @@ export interface CacheProgress {
  *  s'interrompre et le dire, pas s'acharner en évinçant ce qu'il vient d'écrire. */
 export interface CacheOutcome extends CacheProgress {
   hasMore: boolean
+  /** Les vignettes se chassent entre elles : leur part est pleine, l'étape ne finira pas. */
+  thumbnailsCapped: boolean
   quotaReached: boolean
 }
 
@@ -403,7 +477,9 @@ export async function processPendingMedia({
   let quotaReached = false
   const changedPostIds = new Set<string>()
 
-  if (total === 0) return { done: 0, total: 0, hasMore: false, quotaReached: false }
+  if (total === 0) {
+    return { done: 0, total: 0, hasMore: false, quotaReached: false, thumbnailsCapped: false }
+  }
 
   let cursor = 0
   const worker = async (): Promise<void> => {
@@ -447,5 +523,5 @@ export async function processPendingMedia({
 
   await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker))
   if (changedPostIds.size > 0) onProgress?.({ done, total, postIds: [...changedPostIds] })
-  return { done, total, hasMore, quotaReached }
+  return { done, total, hasMore, quotaReached, thumbnailsCapped: takeThumbnailPressure() }
 }

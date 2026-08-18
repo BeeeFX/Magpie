@@ -1631,6 +1631,18 @@ h1, h2, h3 {
   line-height: 1.45;
 }
 
+/* Même traitement que dans le panneau des téléchargements : c'est le même avertissement,
+   posé là où l'étape qu'il concerne est sous les yeux. */
+.steps__warning {
+  margin: 0 0 4px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--warn, #e0a030) 14%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .downloads__actions {
   display: grid;
   gap: 6px;

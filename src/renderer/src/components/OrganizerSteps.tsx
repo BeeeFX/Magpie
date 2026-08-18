@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { BackgroundTaskKind } from '@shared/types'
+import type { BackgroundState, BackgroundTaskKind } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { CLIP_BYTES, THUMBNAIL_BYTES } from '../estimates'
 import { formatBytes, formatDuration } from '../format'
@@ -57,14 +57,35 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   /* L'avancement vient du registre de tâches, seul endroit qui sache où en est un
      téléchargement. Sans lui l'étape disait « en cours » sans jamais dire jusqu'où. */
   const [live, setLive] = useState<{ kind: string; done: number; total: number } | null>(null)
+  /* Une étape qui n'avance pas doit dire pourquoi là où on la regarde. L'avertissement vivait
+     dans le panneau des téléchargements, qu'il faut penser à ouvrir : on restait devant un
+     compteur figé sans rien pour l'expliquer. */
+  const [cache, setCache] = useState<{
+    full: boolean
+    thumbsCapped: boolean
+    thumbBytes: number
+    thumbBudget: number
+    bytes: number
+    limit: number
+  } | null>(null)
 
   useEffect(() => {
-    return magpieEvents.onBackgroundState((snapshot) => {
+    const read = (snapshot: BackgroundState): void => {
       const task = snapshot.tasks.find((entry) =>
         ['thumbnails', 'clips', 'transcribe', 'sync'].includes(entry.kind)
       )
       setLive(task ? { kind: task.kind, done: task.done, total: task.total } : null)
-    })
+      setCache({
+        full: snapshot.cacheFull,
+        thumbsCapped: snapshot.cacheThumbnailsCapped,
+        thumbBytes: snapshot.cacheThumbnailBytes,
+        thumbBudget: snapshot.cacheThumbnailBudget,
+        bytes: snapshot.cacheBytes,
+        limit: snapshot.cacheLimitBytes
+      })
+    }
+    void magpie.getBackgroundState().then(read).catch(() => {})
+    return magpieEvents.onBackgroundState(read)
   }, [])
 
   useEffect(() => {
@@ -221,6 +242,23 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   return (
     <div className="steps">
       <p className="steps__lead">{t('steps.lead')}</p>
+
+      {cache?.thumbsCapped ? (
+        <p className="steps__warning" role="alert">
+          {t('downloads.thumbsCapped', {
+            used: formatBytes(cache.thumbBytes),
+            limit: formatBytes(cache.thumbBudget)
+          })}
+        </p>
+      ) : null}
+      {cache?.full ? (
+        <p className="steps__warning" role="alert">
+          {t('downloads.cacheFull', {
+            used: formatBytes(cache.bytes),
+            limit: formatBytes(cache.limit)
+          })}
+        </p>
+      ) : null}
 
       <ul className="steps__list">
         {rows.map((row) => {

@@ -5,7 +5,7 @@ import type {
   LoadProfile,
   ThroughputSample
 } from '@shared/types'
-import { getCacheUsage } from './media/cache'
+import { getCacheBreakdown } from './media/cache'
 import { readSettings } from './settings'
 
 /**
@@ -35,6 +35,9 @@ const entries = new Map<string, Entry>()
 const listeners = new Set<Listener>()
 let paused = false
 let cacheFull = false
+let cacheThumbnailsCapped = false
+let cacheThumbnailBytes = 0
+let cacheThumbnailBudget = 0
 let cacheBytes = 0
 let cacheLimitBytes = 0
 
@@ -69,6 +72,9 @@ function snapshot(): BackgroundState {
   return {
     paused,
     cacheFull,
+    cacheThumbnailsCapped,
+    cacheThumbnailBytes,
+    cacheThumbnailBudget,
     cacheBytes,
     cacheLimitBytes,
     bytesPerSecond,
@@ -256,13 +262,35 @@ export const backgroundTasks = {
   },
 
   /**
+   * Les vignettes ne tiennent plus dans la part qui leur est réservée : chaque nouvelle en
+   * efface une ancienne, qui retourne aussitôt en file. L'étape ne peut pas finir, et le
+   * seul remède est de relever le plafond — le dire vaut mieux que de télécharger en boucle.
+   */
+  setThumbnailsCapped(capped: boolean): void {
+    if (cacheThumbnailsCapped === capped) return
+    cacheThumbnailsCapped = capped
+    publish()
+  },
+
+  /**
    * Relit l'occupation réelle du disque. À appeler après tout ce qui la change de
    * l'extérieur — une purge, une limite relevée — sans quoi l'avertissement resterait
    * affiché alors que la place est revenue.
    */
   async refreshCache(full = false): Promise<void> {
     const limit = readSettings().cacheLimitGb * 1024 * 1024 * 1024
-    const bytes = await getCacheUsage()
+    const parts = await getCacheBreakdown()
+    const bytes = parts.thumbs + parts.other
+    const changed =
+      cacheThumbnailBytes !== parts.thumbs || cacheThumbnailBudget !== parts.thumbBudget
+    cacheThumbnailBytes = parts.thumbs
+    cacheThumbnailBudget = parts.thumbBudget
+    /* Relever le plafond agrandit la part des vignettes : l'avertissement doit tomber de
+       lui-même, sans quoi il resterait affiché alors que la place est revenue. */
+    if (cacheThumbnailsCapped && parts.thumbs < parts.thumbBudget * 0.98) {
+      cacheThumbnailsCapped = false
+    }
     this.setCacheState(full && bytes >= limit, bytes, limit)
+    if (changed) publish()
   }
 }

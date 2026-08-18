@@ -548,6 +548,10 @@ export interface BackgroundState {
   /** Quota atteint : poursuivre ne ferait qu'évincer ce qu'on vient d'écrire, alors les
    *  téléchargements s'arrêtent et l'interface propose de libérer ou d'agrandir. */
   cacheFull: boolean
+  /** La part réservée aux vignettes est pleine : elles se remplacent sans jamais aboutir. */
+  cacheThumbnailsCapped: boolean
+  cacheThumbnailBytes: number
+  cacheThumbnailBudget: number
   cacheBytes: number
   cacheLimitBytes: number
   /** Débit cumulé, toutes tâches confondues. */

@@ -640,6 +640,14 @@ async function drainMediaQueue(): Promise<void> {
         for (const id of requested) requestedThumbnailPostIds.add(id)
       }
 
+      /* Insister ne ferait que réécrire ce qu'on vient d'effacer : on arrête la passe et on
+         rend la décision à l'utilisateur, qui seul peut relever le plafond. */
+      if (result.thumbnailsCapped) {
+        backgroundTasks.setThumbnailsCapped(true)
+        await backgroundTasks.refreshCache()
+        if (sweeping && !sweepingClips) stopPreload(sweeping.kind)
+      }
+
       if (result.quotaReached) {
         // Continuer évincerait ce qu'on vient d'écrire pour écrire la suite : on s'arrête
         // et on rend la décision à l'utilisateur.

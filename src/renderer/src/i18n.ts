@@ -397,6 +397,8 @@ const fr = {
   'downloads.eta': 'environ {eta}',
   'downloads.cacheFull':
     'Espace de cache saturé ({used} sur {limit}). Les téléchargements sont suspendus : videz le cache ou augmentez la limite dans les réglages.',
+  'downloads.thumbsCapped':
+    'Les images des tuiles ne tiennent plus dans la place qui leur est réservée ({used} sur {limit}). Chaque nouvelle image en efface une ancienne : l’étape ne peut pas se terminer. Augmentez la limite du cache dans les réglages.',
   'downloads.kind.sync': 'Synchronisation',
   'downloads.kind.thumbnails': 'Images des tuiles',
   'downloads.kind.clips': 'Copies vidéo',
@@ -911,6 +913,8 @@ const en: Record<TranslationKey, string> = {
   'downloads.eta': 'about {eta}',
   'downloads.cacheFull':
     'Cache is full ({used} of {limit}). Downloads are paused: clear the cache or raise the limit in settings.',
+  'downloads.thumbsCapped':
+    'Tile images no longer fit in the space reserved for them ({used} of {limit}). Every new image evicts an older one, so the step cannot finish. Raise the cache limit in settings.',
   'downloads.kind.sync': 'Syncing',
   'downloads.kind.thumbnails': 'Tile images',
   'downloads.kind.clips': 'Video copies',

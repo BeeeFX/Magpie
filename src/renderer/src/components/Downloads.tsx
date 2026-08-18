@@ -29,6 +29,10 @@ export function Downloads(): React.JSX.Element {
   const tasks = state?.tasks ?? []
   const busy = tasks.length > 0
   const warning = state?.cacheFull === true
+  const thumbsCapped = state?.cacheThumbnailsCapped === true
+  /* Le badge du bouton porte les deux : sans lui, l'avertissement n'existe qu'une fois le
+     panneau ouvert, et rien n'invite à l'ouvrir. */
+  const alerting = warning || thumbsCapped
   const paused = state?.paused === true
 
   const overall = tasks.reduce(
@@ -54,14 +58,14 @@ export function Downloads(): React.JSX.Element {
       label={
         <span
           className={`downloads__trigger ${busy ? 'is-busy' : ''} ${paused ? 'is-paused' : ''} ${
-            warning ? 'is-warning' : ''
+            alerting ? 'is-warning' : ''
           }`}
         >
           <IconDownload size={15} />
           {busy && percent !== null && !paused ? (
             <span className="downloads__percent">{percent}%</span>
           ) : null}
-          {warning ? <span className="downloads__alert" aria-hidden="true" /> : null}
+          {alerting ? <span className="downloads__alert" aria-hidden="true" /> : null}
         </span>
       }
     >
@@ -86,6 +90,17 @@ export function Downloads(): React.JSX.Element {
               {t('downloads.cacheFull', {
                 used: formatBytes(state?.cacheBytes ?? 0),
                 limit: formatBytes(state?.cacheLimitBytes ?? 0)
+              })}
+            </p>
+          ) : null}
+
+          {/* Distinct du cache plein : là, il reste de la place — mais pas pour les
+              vignettes, qui se remplacent entre elles sans jamais rattraper leur retard. */}
+          {thumbsCapped ? (
+            <p className="downloads__warning" role="alert">
+              {t('downloads.thumbsCapped', {
+                used: formatBytes(state?.cacheThumbnailBytes ?? 0),
+                limit: formatBytes(state?.cacheThumbnailBudget ?? 0)
               })}
             </p>
           ) : null}
