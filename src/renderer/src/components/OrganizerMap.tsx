@@ -96,10 +96,13 @@ interface Props {
 /** Le fil qui enjambe deux couleurs. Sombre et sourd : il fait la texture, pas le propos. */
 const NEUTRAL_EDGE = '#4a4a58'
 
+/* Vingt-quatre teintes pour vingt-quatre catégories possibles : à vingt-deux, les deux
+   dernières reprenaient la couleur des deux premières, et deux collections sans rapport
+   s'affichaient exactement de la même couleur sur la carte. */
 const PALETTE = [
   '#ff5c5c', '#ff9f43', '#ffd93d', '#4ade80', '#38bdf8', '#a78bfa', '#f472b6', '#2dd4bf',
   '#c9a227', '#818cf8', '#fb7185', '#34d399', '#e879f9', '#a3e635', '#60a5fa', '#fde047',
-  '#c084fc', '#22d3ee', '#f87171', '#86efac', '#f0abfc', '#94a3b8'
+  '#c084fc', '#22d3ee', '#f87171', '#86efac', '#f0abfc', '#94a3b8', '#fca5a5', '#5eead4'
 ]
 
 /** La teinte d'un groupe. Un îlot en a une quel que soit le mode de couleur : il *est* un

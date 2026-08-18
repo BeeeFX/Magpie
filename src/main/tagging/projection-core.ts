@@ -17,10 +17,6 @@ import { UMAP } from 'umap-js'
  * appliqué par-dessus des positions qui ne bougent pas.
  */
 
-/** Au-delà, UMAP coûte beaucoup pour un gain nul : le bruit des dernières dimensions ne
- *  structure rien. Réduire d'abord accélère la suite d'un ordre de grandeur. */
-const PCA_DIMS = 48
-
 export interface ProjectedPoint {
   id: string
   x: number
@@ -126,13 +122,66 @@ function mulberry32(seed: number): () => number {
   }
 }
 
+/** Réglages de la projection. Exposés pour pouvoir les mesurer, pas pour les régler à l'œil. */
+export interface ProjectionTuning {
+  /** Ramener chaque vecteur à la longueur 1 avant de projeter. */
+  unit: boolean
+  neighbours: number
+  minDist: number
+  spread: number
+  pcaDims: number
+}
+
+/**
+ * Réglages mesurés, pas choisis à l'œil.
+ *
+ * Banc : 9 751 posts réels, vingt-quatre thèmes découpés dans le sens lui-même — ce que les
+ * collections devraient être — et une seule question : ces thèmes forment-ils des taches à
+ * l'écran ? On mesure la distance moyenne entre deux posts d'un même thème, rapportée à deux
+ * posts au hasard. Zéro pour cent voudrait dire « éparpillé comme au hasard ».
+ *
+ *   PCA  48, 30 voisins — 29 %, 15 s   ← l'ancien réglage
+ *   PCA  96, 15 voisins — 30 %, 14 s
+ *   PCA 192, 15 voisins — 33 %, 22 s
+ *   PCA 256, 15 voisins — 44 %, 27 s   ← retenu
+ *   sans PCA, 15 voisins — 38 %, 47 s
+ *   PCA 192, 10 voisins — 22 %, 25 s
+ *
+ * L'ancienne réduction à 48 dimensions était le vrai frein : elle jetait la structure qu'on
+ * cherchait à voir. Douze secondes de plus valent bien un tiers de lisibilité gagné.
+ */
+export const TUNING: ProjectionTuning = {
+  /* Les vecteurs de sens se comparent en cosinus, UMAP mesure en euclidien : les ramener à
+     la longueur 1 rend les deux d'accord. Mesuré neutre — le modèle les rend déjà quasi
+     unitaires — mais gratuit, et ça restera vrai si le modèle change. */
+  unit: true,
+  /* Quinze plutôt que trente : moins de voisins resserre le voisinage proche, celui qu'on
+     regarde. Dix, en revanche, effondre le tout à 22 % — le nuage se fragmente en poussière
+     et la structure d'ensemble disparaît. */
+  neighbours: 15,
+  minDist: 0.015,
+  spread: 1.6,
+  pcaDims: 256
+}
+
 export function projectSync(
   vectors: Map<string, Float32Array>,
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  tuning: ProjectionTuning = TUNING
 ): ProjectedPoint[] {
   const ids = [...vectors.keys()]
   if (ids.length === 0) return []
-  const raw = ids.map((id) => vectors.get(id) as Float32Array)
+  const raw = ids.map((id) => {
+    const vector = vectors.get(id) as Float32Array
+    if (!tuning.unit) return vector
+    let norm = 0
+    for (let i = 0; i < vector.length; i += 1) norm += vector[i] * vector[i]
+    norm = Math.sqrt(norm)
+    if (norm < 1e-9) return vector
+    const unit = new Float32Array(vector.length)
+    for (let i = 0; i < vector.length; i += 1) unit[i] = vector[i] / norm
+    return unit
+  })
 
   if (ids.length < 8) {
     // Trop peu de voisins pour qu'UMAP ait un sens : deux axes principaux suffisent.
@@ -141,15 +190,15 @@ export function projectSync(
     return normalise(flat).map((point, index) => ({ id: ids[index], ...point }))
   }
 
-  const reduced = reduce(raw, PCA_DIMS)
+  const reduced = reduce(raw, tuning.pcaDims)
   const umap = new UMAP({
     nComponents: 2,
     /* Plus de voisins pour que la structure d'ensemble ressorte, et une distance minimale
        très faible pour que les amas se resserrent : sur neuf mille posts, les réglages par
        défaut donnaient une seule tache continue où l'on ne distinguait aucun îlot. */
-    nNeighbors: Math.min(30, ids.length - 1),
-    minDist: 0.015,
-    spread: 1.6,
+    nNeighbors: Math.min(tuning.neighbours, ids.length - 1),
+    minDist: tuning.minDist,
+    spread: tuning.spread,
     // Graine fixe : la carte doit être la même d'une ouverture à l'autre.
     random: mulberry32(0x5eed)
   })
