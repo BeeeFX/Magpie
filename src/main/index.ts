@@ -649,10 +649,14 @@ async function drainMediaQueue(): Promise<void> {
       }
 
       if (result.quotaReached) {
-        // Continuer évincerait ce qu'on vient d'écrire pour écrire la suite : on s'arrête
-        // et on rend la décision à l'utilisateur.
+        /* Le quota ne peut plus venir que des clips : les vignettes ont leur part réservée et
+           n'en sortent jamais. On arrête donc les clips, et eux seuls.
+           Mettre tout en pause — ce que faisait la version précédente — arrêtait aussi les
+           vignettes, qui avaient pourtant de la place, et laissait l'écran de préparation
+           attendre indéfiniment deux étapes qui ne repartiraient jamais. */
         await backgroundTasks.refreshCache(true)
-        backgroundTasks.setPaused(true)
+        const clips = preloads.get('preload:clips')
+        if (clips) stopPreload(clips.kind)
       }
 
       for (const [id, job] of preloads) publishPreload(id, job)
