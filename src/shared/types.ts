@@ -346,7 +346,7 @@ export interface MagpieApi {
   exportPrompt(): Promise<string>
   openExportFolder(): Promise<void>
   transcriptState(): Promise<{ pending: number; running: boolean }>
-  imageReadingState(): Promise<{ pending: number; running: boolean }>
+  imageReadingState(): Promise<{ pending: number; running: boolean; failure?: string | null }>
   startImageReading(): Promise<BackgroundState>
   stopImageReading(): Promise<BackgroundState>
   startTranscription(): Promise<BackgroundState>

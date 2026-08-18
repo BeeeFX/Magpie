@@ -71,6 +71,7 @@ import {
   transcribeAll
 } from './tagging/transcribe'
 import {
+  imageReadingFailure,
   isReadingImages,
   pendingImageCount,
   readAllImages,
@@ -373,7 +374,8 @@ export function registerIpc({
 
   ipcMain.handle('images:state', () => ({
     pending: pendingImageCount(),
-    running: isReadingImages()
+    running: isReadingImages(),
+    failure: imageReadingFailure()
   }))
   ipcMain.handle('images:start', () => {
     void readAllImages()

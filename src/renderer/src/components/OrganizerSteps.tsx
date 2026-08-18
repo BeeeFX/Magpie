@@ -210,6 +210,11 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
         } else if (id === 'images') {
           await magpie.startImageReading()
           outcome = await waitFor('images')
+          /* L'etape peut echouer sans que la tache apparaisse jamais — c'est ce qui s'est
+             produit quand sa table manquait. Le registre ne dit alors rien ; on interroge
+             donc le module lui-meme avant de declarer l'etape reussie. */
+          const after = await magpie.imageReadingState()
+          if (after.failure) throw new Error(after.failure)
         } else if (id === 'transcribe') {
           await magpie.startTranscription()
           outcome = await waitFor('transcribe')
