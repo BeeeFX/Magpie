@@ -25,7 +25,7 @@ import {
   type OrganizationItem
 } from '../db/queries'
 import { centreVectors, embedItems, embedTexts } from './embeddings'
-import { blend } from './vision'
+import { blend, RECIPES } from './vision'
 import { propagateByImage } from './propagate'
 import { project, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
@@ -594,6 +594,8 @@ let currentProposal: Promise<AiCollectionPlan> | null = null
 /** Vecteurs recentrés de la dernière analyse. La carte les réutilise plutôt que de réencoder
  *  toute la bibliothèque pour afficher les mêmes points. */
 let lastSemanticVectors: Map<string, Float32Array> | null = null
+/** Recette de la derniere analyse : en changer doit refaire la carte, pas la reprendre. */
+let lastRecipe: string | null = null
 /** Dernier plan produit. La carte le réutilise au lieu de relancer toute l'analyse. */
 let lastPlan: AiCollectionPlan | null = null
 /** Dernière projection. Rouvrir l'organisateur ne doit pas refaire neuf secondes de calcul. */
@@ -748,7 +750,12 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
          Les thèmes sont des phrases : les comparer à un vecteur qui contient deux blocs
          d'image n'aurait pas de sens, ils ne vivent pas dans ce repère. La projection, elle,
          gagne à tout voir — c'est là que se joue « ce qui se ressemble est côte à côte ». */
-      const placed = blend(vectors, postImageEmbeddings())
+      const recipe = readSettings().organizerRecipe
+      const placed = blend(vectors, postImageEmbeddings(), RECIPES[recipe])
+      /* Changer de recette change les positions : garder la projection precedente
+         montrerait l'ancienne carte sous un nouveau nom. */
+      if (lastRecipe !== recipe) lastProjection = null
+      lastRecipe = recipe
       if (lastSemanticVectors?.size !== placed.size) lastProjection = null
       lastSemanticVectors = placed
     }

@@ -87,6 +87,15 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(false)
   const [colourMode, setColourMode] = useState<ColourMode>('group')
+  /** Recette de rapprochement, relue au montage puis pilotée ici. */
+  const [recipe, setRecipe] = useState<string>('equilibre')
+
+  useEffect(() => {
+    void magpie
+      .getSettings()
+      .then((settings) => setRecipe(settings.organizerRecipe))
+      .catch(() => {})
+  }, [])
   const [mapData, setMapData] = useState<OrganizerMapData | null>(null)
   const [lassoed, setLassoed] = useState<string[]>([])
   const [lastApplication, setLastApplication] = useState<OrganizerApplicationSummary | null>(null)
@@ -512,6 +521,30 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
               {/* Pas d'onglets Carte / Liste : la carte est la vue, et les catégories se
                   listent dessous pour renommer et cocher. Deux onglets pour deux moitiés du
                   même écran faisaient chercher où était passé le reste. */}
+              {/* Rapprocher les posts se fait de plusieurs façons, et aucune mesure ne dit
+                  laquelle *vous* préférez : la nôtre repose sur « deux posts du même auteur
+                  devraient être voisins », qui n'est qu'un substitut. Changer de recette
+                  relance l'analyse et refait la carte. */}
+              <div className="organizer-views">
+                <div className="segmented segmented--quiet">
+                  {(['texte', 'equilibre', 'image', 'sujet', 'style'] as const).map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={recipe === id ? 'is-active' : ''}
+                      title={t(`organizer.recipe${id[0].toUpperCase()}${id.slice(1)}Hint` as Parameters<typeof t>[0])}
+                      onClick={() => {
+                        if (recipe === id) return
+                        setRecipe(id)
+                        void magpie.setSettings({ organizerRecipe: id }).then(() => void analyse())
+                      }}
+                    >
+                      {t(`organizer.recipe${id[0].toUpperCase()}${id.slice(1)}` as Parameters<typeof t>[0])}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="organizer-views">
                 <div className="segmented segmented--quiet">
                   {(['group', 'platform', 'kind', 'source'] as const).map((mode) => (

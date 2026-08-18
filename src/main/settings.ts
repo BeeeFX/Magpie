@@ -15,6 +15,7 @@ const DEFAULTS: Settings = {
   mediaStorageMode: 'stream',
   playbackQuality: 'auto',
   cacheLimitGb: 5,
+  organizerRecipe: 'equilibre',
   trayEnabled: true,
   syncOnLaunch: true,
   syncSchedule: 'manual',
@@ -73,6 +74,11 @@ function sanitize(raw: unknown): Settings {
       value.playbackQuality === 'source'
         ? value.playbackQuality
         : DEFAULTS.playbackQuality,
+    organizerRecipe: ['texte', 'equilibre', 'image', 'sujet', 'style'].includes(
+      value.organizerRecipe as string
+    )
+      ? (value.organizerRecipe as Settings['organizerRecipe'])
+      : DEFAULTS.organizerRecipe,
     cacheLimitGb:
       typeof value.cacheLimitGb === 'number' && value.cacheLimitGb >= 1 && value.cacheLimitGb <= 500
         ? value.cacheLimitGb

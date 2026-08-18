@@ -77,6 +77,7 @@ const PREVIEW_DEFAULTS: Settings = {
   mediaStorageMode: 'stream',
   playbackQuality: 'auto',
   cacheLimitGb: 5,
+  organizerRecipe: 'equilibre' as const,
   trayEnabled: true,
   syncOnLaunch: true,
   syncSchedule: 'manual',

@@ -218,6 +218,33 @@ export async function readImages(options: {
  */
 export const BLEND = { text: 0.6, structure: 0.1, meaning: 0.3 }
 
+/**
+ * Plusieurs façons de rapprocher les posts, pour les comparer à l'usage.
+ *
+ * `equilibre` est celle que la mesure a retenue : 16,8 % de precision@10 contre 12,3 pour le
+ * texte seul. Mais cette mesure repose sur « deux posts du même auteur devraient être
+ * voisins », qui est un substitut — pas ce qu'on cherche vraiment. Les autres recettes
+ * existent parce que l'œil peut trancher ce qu'aucune de nos étiquettes ne mesure.
+ *
+ * Ce ne sont pas que des poids : `texte` retire complètement l'image, ce qui redonne le
+ * comportement d'avant 0.18, et `sujet` retire le style pour ne garder que ce que l'image
+ * représente.
+ */
+export const RECIPES = {
+  /** Ce qui existait avant que Magpie regarde les images. Le point de comparaison. */
+  texte: { text: 1, structure: 0, meaning: 0 },
+  /** Réglée à la mesure. Le défaut. */
+  equilibre: { text: 0.6, structure: 0.1, meaning: 0.3 },
+  /** Ce que l'image représente prend la main ; le texte n'est plus qu'un appoint. */
+  image: { text: 0.25, structure: 0.15, meaning: 0.6 },
+  /** Le sujet seul, sans le style : deux dessins au même trait mais sans rapport s'écartent. */
+  sujet: { text: 0.4, structure: 0, meaning: 0.6 },
+  /** Le style prend la main : regroupe ce qui *se ressemble*, plutôt que ce qui parle du même. */
+  style: { text: 0.45, structure: 0.4, meaning: 0.15 }
+} as const
+
+export type RecipeId = keyof typeof RECIPES
+
 function centred(vectors: Float32Array[]): Float32Array[] {
   if (vectors.length === 0) return []
   const dims = vectors[0].length
@@ -241,7 +268,8 @@ function centred(vectors: Float32Array[]): Float32Array[] {
  */
 export function blend(
   text: Map<string, Float32Array>,
-  images: Map<string, PostImageEmbedding>
+  images: Map<string, PostImageEmbedding>,
+  weights: { text: number; structure: number; meaning: number } = BLEND
 ): Map<string, Float32Array> {
   const ids = [...text.keys()]
   if (ids.length === 0) return new Map()
@@ -263,13 +291,14 @@ export function blend(
      en `w²`. Appliquer 0,6 / 0,1 / 0,3 directement revenait à peser 0,36 / 0,01 / 0,09 —
      mesuré à 15,9 % au lieu de 16,8. */
   const share = {
-    text: Math.sqrt(BLEND.text),
-    structure: Math.sqrt(BLEND.structure),
-    meaning: Math.sqrt(BLEND.meaning)
+    text: Math.sqrt(weights.text),
+    structure: Math.sqrt(weights.structure),
+    meaning: Math.sqrt(weights.meaning)
   }
   ids.forEach((id, index) => {
-    const structure = structureAt.get(id)
-    const meaning = meaningAt.get(id)
+    // Une recette peut annuler un bloc : il ne doit alors pas peser, même à zéro près.
+    const structure = weights.structure > 0 ? structureAt.get(id) : undefined
+    const meaning = weights.meaning > 0 ? meaningAt.get(id) : undefined
     const vector = new Float32Array(width + STRUCTURE_DIMS + MEANING_DIMS)
     // Sans image, le texte reprend tout le poids plutôt que de laisser deux blocs à zéro.
     const textWeight = structure && meaning ? share.text : 1
