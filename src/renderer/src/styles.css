@@ -1633,6 +1633,14 @@ h1, h2, h3 {
 
 /* Même traitement que dans le panneau des téléchargements : c'est le même avertissement,
    posé là où l'étape qu'il concerne est sous les yeux. */
+.steps__total {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .steps__warning {
   margin: 0 0 4px;
   padding: 9px 11px;

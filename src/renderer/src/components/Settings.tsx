@@ -36,11 +36,7 @@ const AI_DEFAULT_MODEL: Record<AiProvider, string> = {
 // tant que l'organisateur local couvre correctement le besoin.
 const LLM_SETTINGS_VISIBLE = false
 
-interface Props {
-  onOpenAiOrganizer(): void
-}
-
-export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null {
+export function Settings(): React.JSX.Element | null {
   const t = useT()
   const open = useStore((s) => s.settingsOpen)
   const setOpen = useStore((s) => s.setSettingsOpen)
@@ -290,11 +286,9 @@ export function Settings({ onOpenAiOrganizer }: Props): React.JSX.Element | null
               <h3>{t('settings.localOrganizer')}</h3>
               <p>{t('settings.localOrganizerHint')}</p>
             </div>
-            <div className="setting__actions">
-              <button type="button" className="btn btn--primary" onClick={onOpenAiOrganizer}>
-                {t('settings.aiOrganize')}
-              </button>
-            </div>
+            {/* Le bouton d'organisation vivait aussi ici. Deux portes vers le même écran, dont
+                une enfouie dans les réglages : celle de la barre du haut suffit, et les
+                réglages ne gardent que ce qui se règle. */}
             <div className="setting setting--compact">
               <div className="setting__label">
                 <strong>{t('settings.autoOrganize')}</strong>

@@ -34,10 +34,8 @@ export function App(): React.JSX.Element {
   const mediaRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const aiOrganizerOpen = useStore((s) => s.organizerOpen)
   const setAiOrganizerOpen = useStore((s) => s.setOrganizerOpen)
-  const openAiOrganizer = useCallback(() => {
-    setSettingsOpen(false)
-    setAiOrganizerOpen(true)
-  }, [setSettingsOpen])
+  /* L'organiseur s'ouvre depuis la barre du haut, qui pousse l'état dans le store elle-même.
+     Ce raccourci ne servait qu'au bouton des réglages, retiré. */
   const closeAiOrganizer = useCallback(() => setAiOrganizerOpen(false), [])
 
   useEffect(() => {
@@ -164,7 +162,7 @@ export function App(): React.JSX.Element {
           avec son état local — dont l'indicateur de fermeture, qui rendait le panneau
           invisible à la réouverture. Le démontage garantit un état propre à chaque fois. */}
       {detailIndex !== null ? <Detail /> : null}
-      <Settings onOpenAiOrganizer={openAiOrganizer} />
+      <Settings />
       <AiOrganizer open={aiOrganizerOpen} onClose={closeAiOrganizer} />
       <ExportPanel />
     </div>

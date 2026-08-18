@@ -37,6 +37,15 @@ const IMAGE_MS_EACH = 63
 /** Cadence observée sur un seize cœurs. Grossière à dessein : elle situe, elle ne promet pas. */
 const TRANSCRIPT_MS_EACH = 2_400
 
+/* Débit de repli quand rien n'a encore été observé : dix mégaoctets par seconde, l'ordre de
+   grandeur d'une connexion domestique correcte. Dès qu'un téléchargement tourne, c'est le
+   débit réel qui prend le relais. */
+const ASSUMED_BYTES_PER_SECOND = 10 * 1024 * 1024
+/** La synchronisation pagine à trois secondes par page pour ne pas se faire bloquer. */
+const SYNC_MS = 25_000
+/** Le regroupement lui-même : projection comprise, mesuré sur neuf mille posts. */
+const GROUP_MS = 40_000
+
 export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   const t = useT()
   const cacheQuality = useStore((state) => state.videoCacheQuality)
@@ -60,7 +69,14 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   /* L'avancement vient du registre de tâches, seul endroit qui sache où en est un
      téléchargement. Sans lui l'étape disait « en cours » sans jamais dire jusqu'où. */
-  const [live, setLive] = useState<{ kind: string; done: number; total: number } | null>(null)
+  const [live, setLive] = useState<{
+    kind: string
+    done: number
+    total: number
+    etaMs: number | null
+  } | null>(null)
+  /** Débit observé, en octets par seconde, pour estimer ce qui reste à télécharger. */
+  const [throughput, setThroughput] = useState(0)
   /* Une étape qui n'avance pas doit dire pourquoi là où on la regarde. L'avertissement vivait
      dans le panneau des téléchargements, qu'il faut penser à ouvrir : on restait devant un
      compteur figé sans rien pour l'expliquer. */
@@ -78,7 +94,18 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
       const task = snapshot.tasks.find((entry) =>
         ['thumbnails', 'clips', 'images', 'transcribe', 'sync'].includes(entry.kind)
       )
-      setLive(task ? { kind: task.kind, done: task.done, total: task.total } : null)
+      setLive(
+        task
+          ? { kind: task.kind, done: task.done, total: task.total, etaMs: task.etaMs ?? null }
+          : null
+      )
+      /* Le débit vient de ce qu'on a réellement observé, pas d'une constante : une estimation
+         de téléchargement dépend de la connexion, et l'inventer serait mentir. */
+      const recent = snapshot.history.slice(-30)
+      if (recent.length > 0) {
+        const rate = recent.reduce((sum, sample) => sum + sample.bytesPerSecond, 0) / recent.length
+        if (rate > 0) setThroughput(rate)
+      }
       setCache({
         full: snapshot.cacheFull,
         thumbsCapped: snapshot.cacheThumbnailsCapped,
@@ -208,6 +235,22 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
     ...Object.values(sync.byPlatform).map((entry) => (entry.phase === 'running' ? entry.page : 0))
   )
 
+  /* Ce que chaque étape coûtera, en millisecondes. Sert deux fois : sur chaque ligne, et
+     additionné sous le bouton pour que le total soit lisible avant de se lancer. */
+  const rate = throughput > 0 ? throughput : ASSUMED_BYTES_PER_SECOND
+  const durations: Record<StepId, number> = {
+    sync: SYNC_MS,
+    thumbnails: ((counts?.thumbnails ?? 0) * THUMBNAIL_BYTES * 1000) / rate,
+    clips: ((counts?.clips ?? 0) * CLIP_BYTES[cacheQuality] * 1000) / rate,
+    images: (counts?.images ?? 0) * IMAGE_MS_EACH,
+    transcribe: (counts?.transcripts ?? 0) * TRANSCRIPT_MS_EACH,
+    group: GROUP_MS
+  }
+  const planned = STEP_ORDER.filter((id) => id === 'group' || chosen.includes(id)).reduce(
+    (sum, id) => sum + durations[id],
+    0
+  )
+
   const rows: {
     id: StepId
     icon: React.JSX.Element
@@ -221,10 +264,10 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
       cost:
         (counts?.thumbnails ?? 0) === 0
           ? t('downloads.allDone')
-          : t('downloads.amount', {
+          : `${t('downloads.amount', {
               count: counts?.thumbnails ?? 0,
               size: formatBytes((counts?.thumbnails ?? 0) * THUMBNAIL_BYTES)
-            })
+            })} · ${formatDuration(durations.thumbnails)}`
     },
     {
       id: 'clips',
@@ -232,10 +275,10 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
       cost:
         (counts?.clips ?? 0) === 0
           ? t('downloads.allDone')
-          : t('downloads.amount', {
+          : `${t('downloads.amount', {
               count: counts?.clips ?? 0,
               size: formatBytes((counts?.clips ?? 0) * CLIP_BYTES[cacheQuality])
-            })
+            })} · ${formatDuration(durations.clips)}`
     },
     {
       id: 'images',
@@ -338,7 +381,15 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
                             })
                           : null
                         : measured
-                          ? t('downloads.progress', { done: measured.done, total: measured.total })
+                          ? /* Le temps restant vient du registre, qui l'estime sur la cadence
+                               observée depuis le début de *cette* tâche — pas sur une constante.
+                               Il n'apparaît qu'une fois assez d'avancement mesuré : sur les
+                               premiers éléments il serait fantaisiste, et une durée fausse est
+                               pire que pas de durée. */
+                            `${t('downloads.progress', {
+                              done: measured.done,
+                              total: measured.total
+                            })}${measured.etaMs ? ` · ${t('downloads.eta', { eta: formatDuration(measured.etaMs) })}` : ''}`
                           : null}
                     </>
                   ) : status === 'skipped' ? (
@@ -362,6 +413,11 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
       <button type="button" className="btn btn--primary btn--wide" disabled={running} onClick={() => void run()}>
         {t(running ? 'steps.running' : 'steps.start')}
       </button>
+      {/* Le total avant de se lancer : cinq durées éparpillées sur cinq lignes ne se
+          additionnent pas de tête, et c'est pourtant la seule question qu'on se pose. */}
+      {!running && counts ? (
+        <p className="steps__total">{t('steps.total', { time: formatDuration(planned) })}</p>
+      ) : null}
     </div>
   )
 }
