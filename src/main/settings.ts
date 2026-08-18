@@ -74,7 +74,16 @@ function sanitize(raw: unknown): Settings {
       value.playbackQuality === 'source'
         ? value.playbackQuality
         : DEFAULTS.playbackQuality,
-    organizerRecipe: ['texte', 'equilibre', 'image', 'sujet', 'style'].includes(
+    organizerRecipe: [
+      'texte',
+      'equilibre',
+      'image',
+      'sujet',
+      'style',
+      'sujetSeul',
+      'structureSeule',
+      'structureHaute'
+    ].includes(
       value.organizerRecipe as string
     )
       ? (value.organizerRecipe as Settings['organizerRecipe'])

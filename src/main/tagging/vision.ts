@@ -240,7 +240,13 @@ export const RECIPES = {
   /** Le sujet seul, sans le style : deux dessins au même trait mais sans rapport s'écartent. */
   sujet: { text: 0.4, structure: 0, meaning: 0.6 },
   /** Le style prend la main : regroupe ce qui *se ressemble*, plutôt que ce qui parle du même. */
-  style: { text: 0.45, structure: 0.4, meaning: 0.15 }
+  style: { text: 0.45, structure: 0.4, meaning: 0.15 },
+  /** Rien que ce que l'image représente. Le texte ne compte plus du tout. */
+  sujetSeul: { text: 0, structure: 0, meaning: 1 },
+  /** Rien que l'allure : composition, palette, trait. Le sujet ne compte plus. */
+  structureSeule: { text: 0, structure: 1, meaning: 0 },
+  /** L'allure domine largement, sans que les deux autres disparaissent. */
+  structureHaute: { text: 0.2, structure: 0.6, meaning: 0.2 }
 } as const
 
 export type RecipeId = keyof typeof RECIPES
@@ -300,8 +306,14 @@ export function blend(
     const structure = weights.structure > 0 ? structureAt.get(id) : undefined
     const meaning = weights.meaning > 0 ? meaningAt.get(id) : undefined
     const vector = new Float32Array(width + STRUCTURE_DIMS + MEANING_DIMS)
-    // Sans image, le texte reprend tout le poids plutôt que de laisser deux blocs à zéro.
-    const textWeight = structure && meaning ? share.text : 1
+    /* Le texte reprend tout le poids quand le post n'a *aucun* bloc d'image — sans quoi il
+       resterait seul avec une fraction de lui-même et se rapprocherait des autres posts sans
+       image, ce qui est l'agglutination par le vide qu'on corrige.
+       Exiger les *deux* blocs, ce que faisait la version précédente, se retournait dès qu'une
+       recette en annulait un : « sujet » supprime la structure, et le texte repassait alors
+       à pleine force au lieu des 0,4 demandés. La recette ne faisait pas ce qu'elle disait. */
+    const illustrated = Boolean(structure || meaning)
+    const textWeight = illustrated ? share.text : 1
     for (let i = 0; i < width; i += 1) vector[i] = textBlock[index][i] * textWeight
     if (structure) {
       for (let i = 0; i < STRUCTURE_DIMS; i += 1) {

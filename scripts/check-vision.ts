@@ -33,19 +33,27 @@ const all = db
 db.close()
 const rows = all.filter((r) => r.thumb && r.author)
 
+/* La taille du fichier, comparée au nombre de posts : c'est le seul garde-fou qui marche.
+   Comparer la longueur du tableau *après* découpage ne pouvait rien détecter — il fait
+   toujours `rows.length`, puisqu'on le construit à partir de `rows`. La bibliothèque ayant
+   gagné treize posts entre le banc et la vérification, tout se décalait d'un cran et le
+   contrôle annonçait 0 % au lieu de dire que son cache était périmé. */
 const load = (name: string, dims: number): Float32Array[] => {
   const buf = readFileSync(join(CACHE, `${name}.bin`))
   const flat = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
+  const counted = flat.length / dims
+  if (counted !== rows.length) {
+    console.log(
+      `Cache périmé : ${counted} vecteurs pour ${rows.length} posts.` +
+        ' Relancez scripts/bench-blend.mts avant ce contrôle.'
+    )
+    process.exit(0)
+  }
   return rows.map((_, i) => flat.slice(i * dims, (i + 1) * dims))
 }
 const text = load('text-no-author', 384)
 const structure = load('dinov2', STRUCTURE_DIMS)
 const meaning = load('siglip', MEANING_DIMS)
-if (structure.length !== rows.length) {
-  console.log(`Cache désaccordé (${structure.length} vecteurs pour ${rows.length} posts).`)
-  process.exit(0)
-}
-
 const asBuffer = (v: Float32Array): Buffer => Buffer.from(v.buffer, v.byteOffset, v.byteLength)
 const textMap = new Map(rows.map((r, i) => [r.id, text[i]]))
 const imageMap = new Map<string, PostImageEmbedding>(

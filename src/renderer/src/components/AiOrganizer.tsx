@@ -527,7 +527,18 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                   relance l'analyse et refait la carte. */}
               <div className="organizer-views">
                 <div className="segmented segmented--quiet">
-                  {(['texte', 'equilibre', 'image', 'sujet', 'style'] as const).map((id) => (
+                  {(
+                    [
+                      'texte',
+                      'equilibre',
+                      'image',
+                      'sujet',
+                      'style',
+                      'sujetSeul',
+                      'structureSeule',
+                      'structureHaute'
+                    ] as const
+                  ).map((id) => (
                     <button
                       key={id}
                       type="button"
