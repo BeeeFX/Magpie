@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import type { OrganizerMap as MapData, OrganizerMapPoint } from '@shared/types'
-import { OrganizerMap } from './components/OrganizerMap'
+import { OrganizerMap, type ColourMode } from './components/OrganizerMap'
 import './styles.css'
 import sandbox from '../../../map-sandbox.json'
 
@@ -11,6 +11,10 @@ import sandbox from '../../../map-sandbox.json'
  * composant, hors d'Electron. Sur des points inventés la carte est toujours rapide : les
  * amas sont ronds et clairsemés, et c'est justement la densité réelle qui coûte. C'est ici
  * qu'on a vu les 494 ms par image, et ici qu'on vérifie qu'elles sont tombées.
+ *
+ * `?colour=source` — ou `platform`, `kind` — pour les autres modes de couleur. Le mode
+ * « source » avait sa propre panne, invisible en `group` : les étiquettes fabriquaient un
+ * faux point pour se colorer, et lire sa provenance plantait l'écran.
  */
 const points: OrganizerMapPoint[] = sandbox.points.map((point, index) => ({
   id: String(index),
@@ -40,13 +44,20 @@ const data: MapData = {
   } as unknown as MapData['plan']
 }
 
+const asked = new URLSearchParams(location.search).get('colour')
+const colourMode: ColourMode = (['group', 'platform', 'kind', 'source'] as const).includes(
+  asked as ColourMode
+)
+  ? (asked as ColourMode)
+  : 'group'
+
 const included = new Set(sandbox.groups.map((group) => String(group.id)))
 const names = new Map(sandbox.groups.map((group) => [String(group.id), group.name]))
 
 createRoot(document.getElementById('root')!).render(
   <OrganizerMap
     data={data}
-    colourMode="group"
+    colourMode={colourMode}
     includedGroups={included}
     groupNames={names}
     onLasso={() => {}}

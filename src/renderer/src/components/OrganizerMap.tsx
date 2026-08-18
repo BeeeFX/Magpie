@@ -93,11 +93,21 @@ interface Props {
 /** Teintes bien séparées, reprises de la palette d'étiquettes : lisibles en clair et sombre. */
 /* Palette saturée, reprise de la maquette : celle des étiquettes de l'interface est sourde à
    dessein, et sur fond noir elle rendait les amas indistincts. */
+/** Le fil qui enjambe deux couleurs. Sombre et sourd : il fait la texture, pas le propos. */
+const NEUTRAL_EDGE = '#4a4a58'
+
 const PALETTE = [
   '#ff5c5c', '#ff9f43', '#ffd93d', '#4ade80', '#38bdf8', '#a78bfa', '#f472b6', '#2dd4bf',
   '#c9a227', '#818cf8', '#fb7185', '#34d399', '#e879f9', '#a3e635', '#60a5fa', '#fde047',
   '#c084fc', '#22d3ee', '#f87171', '#86efac', '#f0abfc', '#94a3b8'
 ]
+
+/** La teinte d'un groupe. Un îlot en a une quel que soit le mode de couleur : il *est* un
+ *  groupe, et son étiquette doit rester rattachée au même amas. */
+function colourOfGroup(group: string | null, groupIndex: Map<string, number>): string {
+  const index = group ? groupIndex.get(group) : undefined
+  return index === undefined ? '#7b7b85' : PALETTE[index % PALETTE.length]
+}
 
 function colourFor(
   point: OrganizerMapPoint,
@@ -115,8 +125,7 @@ function colourFor(
           : '#5aa85a'
   }
   if (mode === 'source') return point.sources.includes('liked') ? '#e0574f' : '#4a90d9'
-  const index = point.group ? groupIndex.get(point.group) : undefined
-  return index === undefined ? '#7b7b85' : PALETTE[index % PALETTE.length]
+  return colourOfGroup(point.group, groupIndex)
 }
 
 export function OrganizerMap({
@@ -140,6 +149,12 @@ export function OrganizerMap({
   /** Cadrage initial : centrer la carte demande de connaître la taille du canevas. */
   const framedRef = useRef(false)
   const [hovered, setHovered] = useState<OrganizerMapPoint | null>(null)
+  /** Amas éclairé : celui du point survolé, ou celui dont on survole le nom. */
+  const [litGroup, setLitGroup] = useState<string | null>(null)
+  /** Où les noms ont été posés au dernier dessin, pour pouvoir les survoler. */
+  const labelBoxes = useRef<{ group: string; x: number; y: number; half: number; size: number }[]>(
+    []
+  )
   const lassoRef = useRef<{ x: number; y: number }[]>([])
   /* Le tracé en cours vit dans une référence, pas dans l'état : un mouvement de pointeur peut
      suivre l'appui dans la même image, avant que React n'ait rendu, et le geste était alors
@@ -155,16 +170,27 @@ export function OrganizerMap({
   const zoomRef = useRef<(event: WheelEvent) => void>(() => {})
   /** Point tiré et déplacement en cours, dans le repère unité. */
   const clickedRef = useRef<OrganizerMapPoint | null>(null)
-  const pathCache = useRef<{ key: string; paths: Map<string, Path2D> }>({ key: '', paths: new Map() })
-  /** La toile et les points déjà peints, et la zone de la carte qu'ils couvrent. */
+  const pathCache = useRef<{
+    key: string
+    paths: Map<string, { path: Path2D; tone: string; group: string | null }>
+  }>({ key: '', paths: new Map() })
+  /** La toile et les points déjà peints, l'échelle à laquelle ils l'ont été, et la zone de
+   *  la carte qu'ils couvrent — en coordonnées de cette échelle. */
   const webCache = useRef<{
     key: string
     canvas: HTMLCanvasElement | null
+    scale: number
     left: number
     top: number
     width: number
     height: number
-  }>({ key: '', canvas: null, left: 0, top: 0, width: 0, height: 0 })
+  }>({ key: '', canvas: null, scale: 0, left: 0, top: 0, width: 0, height: 0 })
+  /* Un cran de molette change l'échelle, donc les chemins *et* la peinture : 320 ms, et les
+     crans s'enchaînent plus vite que ça. Pendant le geste on étire l'image déjà peinte —
+     l'agrandissement d'une toile est une toile agrandie — et on ne repeint net qu'une fois
+     la molette arrêtée. */
+  const [zooming, setZooming] = useState(false)
+  const zoomTimer = useRef(0)
 
   /* React attache ses écouteurs de molette en mode passif, où `preventDefault` est ignoré :
      zoomer sur la carte faisait donc défiler la fenêtre derrière elle. Il faut poser
@@ -177,7 +203,10 @@ export function OrganizerMap({
       zoomRef.current(event)
     }
     canvas.addEventListener('wheel', handler, { passive: false })
-    return () => canvas.removeEventListener('wheel', handler)
+    return () => {
+      canvas.removeEventListener('wheel', handler)
+      window.clearTimeout(zoomTimer.current)
+    }
   }, [])
 
   const groupIndex = useMemo(
@@ -241,23 +270,52 @@ export function OrganizerMap({
   /* Sans étiquettes, neuf mille points colorés ne sont qu'une tache : on voit qu'il y a des
      amas, jamais lesquels. C'est ce qui sépare une jolie image d'une carte. */
   const islands = useMemo(() => {
-    const sums = new Map<string, { x: number; y: number; count: number }>()
+    /* L'étiquette se pose sur la masse du groupe, pas sur la moyenne de ses points.
+       Une catégorie éparpillée — « architecture » répartie en trois endroits — a une moyenne
+       qui ne tombe sur aucun d'eux : le nom flottait dans le vide, à côté d'une carte pleine.
+       On prend donc la case la plus fournie du groupe, puis le centre des points qu'elle et
+       ses voisines contiennent : le nom se pose là où l'amas se voit. */
+    const CELL = 0.04
+    const members = new Map<string, OrganizerMapPoint[]>()
     for (const point of data.points) {
       if (!point.group) continue
-      const entry = sums.get(point.group) ?? { x: 0, y: 0, count: 0 }
-      entry.x += point.x
-      entry.y += point.y
-      entry.count += 1
-      sums.set(point.group, entry)
+      const list = members.get(point.group)
+      if (list) list.push(point)
+      else members.set(point.group, [point])
     }
-    return [...sums.entries()]
-      .filter(([, entry]) => entry.count >= 12)
-      .map(([group, entry]) => ({
-        group,
-        x: entry.x / entry.count,
-        y: entry.y / entry.count,
-        count: entry.count
-      }))
+    return [...members.entries()]
+      .filter(([, list]) => list.length >= 12)
+      .map(([group, list]) => {
+        const cells = new Map<string, OrganizerMapPoint[]>()
+        for (const point of list) {
+          const key = `${Math.floor(point.x / CELL)}:${Math.floor(point.y / CELL)}`
+          const cell = cells.get(key)
+          if (cell) cell.push(point)
+          else cells.set(key, [point])
+        }
+        let bestKey = ''
+        let bestCount = -1
+        for (const [key, cell] of cells) {
+          if (cell.length > bestCount) {
+            bestCount = cell.length
+            bestKey = key
+          }
+        }
+        const [cx, cy] = bestKey.split(':').map(Number)
+        let x = 0
+        let y = 0
+        let near = 0
+        for (let dx = -1; dx <= 1; dx += 1) {
+          for (let dy = -1; dy <= 1; dy += 1) {
+            for (const point of cells.get(`${cx + dx}:${cy + dy}`) ?? []) {
+              x += point.x
+              y += point.y
+              near += 1
+            }
+          }
+        }
+        return { group, x: x / near, y: y / near, count: list.length, near }
+      })
       .sort((left, right) => right.count - left.count)
   }, [data.points])
 
@@ -328,7 +386,7 @@ export function OrganizerMap({
         area.bottom.toFixed(0)
       ].join(':')
       if (pathCache.current.key !== key) {
-        const built = new Map<string, Path2D>()
+        const built = new Map<string, { path: Path2D; tone: string; group: string | null }>()
         // La courbe s'écarte de la corde : de la marge, sinon les arcs sautent aux bords.
         const slack = core * WEB.bloomWidth + LINK_RADIUS * size * view.scale * 0.3
         for (const [from, to] of links) {
@@ -342,12 +400,32 @@ export function OrganizerMap({
           ) {
             continue
           }
-          const tone = colourFor(from, colourMode, groupIndex)
-          let path = built.get(tone)
-          if (!path) {
-            path = new Path2D()
-            built.set(tone, path)
+          /* Un fil ne prend une couleur que s'il relie deux posts de la même couleur.
+             Colorer chaque fil d'après son seul point de départ mettait de la couleur partout :
+             les catégories de l'organiseur ne sont pas des zones — elles suivent le sens, pas
+             la place — si bien que les voisins immédiats appartiennent souvent à deux
+             catégories différentes, et la toile virait à l'arc-en-ciel piqueté. Le fil qui
+             enjambe deux catégories passe au gris : il reste, la texture aussi, mais la
+             couleur ne dit plus qu'une chose — ces deux-là vont ensemble. Les amas
+             redeviennent des taches lisibles, et c'est ce que la maquette montrait, où les
+             groupes étaient découpés dans l'espace et donc toujours d'accord avec leurs
+             voisins. Vrai dans tous les modes : deux posts de la même plateforme, du même
+             type ou de la même provenance gardent leur teinte. */
+          const tone =
+            colourFor(from, colourMode, groupIndex) === colourFor(to, colourMode, groupIndex)
+              ? colourFor(from, colourMode, groupIndex)
+              : NEUTRAL_EDGE
+          const shared = tone === NEUTRAL_EDGE ? null : from.group
+          /* Un chemin par couple groupe/teinte. La teinte seule suffirait à peindre, mais pas
+             à éclairer un amas au survol : dans les modes autres que « par groupe », vingt
+             amas partagent la même couleur. */
+          const bucket = `${shared ?? ''}|${tone}`
+          let entry = built.get(bucket)
+          if (!entry) {
+            entry = { path: new Path2D(), tone, group: shared }
+            built.set(bucket, entry)
           }
+          const path = entry.path
           path.moveTo(x1, y1)
           path.quadraticCurveTo(
             (x1 + x2) / 2 - (y2 - y1) * 0.26,
@@ -359,7 +437,7 @@ export function OrganizerMap({
         pathCache.current = { key, paths: built }
       }
       target.globalCompositeOperation = 'lighter'
-      for (const [tone, path] of pathCache.current.paths) {
+      for (const { path, tone } of pathCache.current.paths.values()) {
         target.strokeStyle = tone
         if (bloom > 0.02) {
           target.lineWidth = core * WEB.bloomWidth
@@ -375,6 +453,29 @@ export function OrganizerMap({
       }
       target.globalCompositeOperation = 'source-over'
       target.globalAlpha = 1
+    }
+
+    /* Survoler éclaire l'amas désigné au lieu d'éteindre les autres : la toile complète doit
+       rester lisible en permanence, c'est tout son intérêt. Repeint par-dessus l'image en
+       cache — repeindre le tampon entier pour un survol coûterait 220 ms par mouvement. */
+    const lightUp = (group: string): void => {
+      if (edgeAlpha <= 0.002 || pathCache.current.key === '') return
+      context.save()
+      context.translate(view.x, view.y)
+      context.globalCompositeOperation = 'lighter'
+      for (const entry of pathCache.current.paths.values()) {
+        if (entry.group !== group) continue
+        context.strokeStyle = entry.tone
+        context.lineWidth = core * Math.max(1.5, WEB.bloomWidth / 2.3)
+        context.globalAlpha = Math.min(0.5, edgeAlpha * 2.5)
+        context.stroke(entry.path)
+        context.lineWidth = core
+        context.globalAlpha = Math.min(0.75, edgeAlpha * 4.5)
+        context.stroke(entry.path)
+      }
+      context.globalCompositeOperation = 'source-over'
+      context.globalAlpha = 1
+      context.restore()
     }
 
     /* Les points restent petits et translucides : c'est la lueur qui leur donne leur présence.
@@ -474,14 +575,20 @@ export function OrganizerMap({
       bottom: Math.min(content.bottom, -view.y + height)
     }
     const painted = webCache.current
-    const covers =
+    const key = `${colourMode}|${ratio}|${[...includedGroups].sort().join(',')}`
+    /* L'espace de la carte grandit proportionnellement à l'échelle : une zone peinte à `S0`
+       couvre, à l'échelle `S`, la même zone multipliée par `S / S0`. */
+    const stretch = painted.scale > 0 ? view.scale / painted.scale : 0
+    const usable =
       painted.canvas !== null &&
-      painted.key === `${view.scale}|${colourMode}|${ratio}|${[...includedGroups].sort().join(',')}` &&
+      painted.key === key &&
       (needed.right <= needed.left ||
-        (painted.left <= needed.left &&
-          painted.top <= needed.top &&
-          painted.left + painted.width >= needed.right &&
-          painted.top + painted.height >= needed.bottom))
+        (painted.left * stretch <= needed.left &&
+          painted.top * stretch <= needed.top &&
+          (painted.left + painted.width) * stretch >= needed.right &&
+          (painted.top + painted.height) * stretch >= needed.bottom))
+    // Étirer ne vaut que le temps du geste : à l'arrêt, la toile doit être nette.
+    const covers = usable && (painted.scale === view.scale || zooming)
 
     if (landing < 1) {
       /* Pendant l'atterrissage, les coordonnées bougent à chaque image : peindre dans un
@@ -520,8 +627,9 @@ export function OrganizerMap({
         paintWeb(paint, area)
         paintDots(paint, area)
         webCache.current = {
-          key: `${view.scale}|${colourMode}|${ratio}|${[...includedGroups].sort().join(',')}`,
+          key,
           canvas: buffer,
+          scale: view.scale,
           left: area.left,
           top: area.top,
           width: bufferWidth,
@@ -534,16 +642,19 @@ export function OrganizerMap({
            sous Windows — un décalage entier en points d'interface tombe entre deux pixels de
            l'écran, et la recopie rééchantillonne : la toile deviendrait floue au déplacement,
            alors qu'elle est nette au premier tracé. */
+        const zoom = web.scale > 0 ? view.scale / web.scale : 1
         const snap = (value: number): number => Math.round(value * ratio) / ratio
         context.drawImage(
           web.canvas,
-          snap(web.left + view.x),
-          snap(web.top + view.y),
-          web.width,
-          web.height
+          snap(web.left * zoom + view.x),
+          snap(web.top * zoom + view.y),
+          web.width * zoom,
+          web.height * zoom
         )
       }
     }
+
+    if (litGroup) lightUp(litGroup)
 
     /* Chaque amas doit porter son nom, y compris quand deux étiquettes se gênent : la plus
        petite s'écarte de son amas avec un trait de rappel, au lieu de disparaître.
@@ -555,7 +666,7 @@ export function OrganizerMap({
     context.textAlign = 'center'
     context.textBaseline = 'middle'
     context.lineJoin = 'round'
-    const drawn: { x: number; y: number; half: number; size: number }[] = []
+    const drawn: { group: string; x: number; y: number; half: number; size: number }[] = []
     for (const island of islands) {
       const name = groupNames.get(island.group)?.trim().toLocaleLowerCase()
       if (!name) continue
@@ -579,8 +690,8 @@ export function OrganizerMap({
         candidate + size / 2 < height - 4 &&
         !drawn.some(
           (other) =>
-            Math.abs(other.x - centreX) < other.half + half &&
-            Math.abs(other.y - candidate) < other.size + size
+            Math.abs(other.x - centreX) < (other.half + half) * 0.9 &&
+            Math.abs(other.y - candidate) < (other.size + size) * 0.62
         )
       let y = centreY
       for (let step = 1; !fits(y); step += 1) {
@@ -592,18 +703,18 @@ export function OrganizerMap({
         y = step % 2 === 1 ? centreY - away : centreY + away
       }
       if (Number.isNaN(y)) continue
-      drawn.push({ x: centreX, y, half, size })
+      drawn.push({ group: island.group, x: centreX, y, half, size })
       const faded = !includedGroups.has(island.group)
       context.globalAlpha = faded ? 0.28 : 1
       if (y !== centreY) {
-        // Le trait de rappel dit de quel amas le nom déplacé parle.
-        context.strokeStyle = colourFor(
-          { group: island.group } as OrganizerMapPoint,
-          colourMode,
-          groupIndex
-        )
-        context.lineWidth = 1
-        context.globalAlpha = faded ? 0.15 : 0.45
+        /* Le trait de rappel dit de quel amas le nom déplacé parle, et prend la teinte du
+           groupe quel que soit le mode de couleur. Le faire passer par `colourFor` obligeait
+           à fabriquer un faux point, sans plateforme, ni type, ni provenance : en mode
+           « Signet / Likes », lire `sources` sur ce leurre plantait l'écran. */
+        context.strokeStyle = colourOfGroup(island.group, groupIndex)
+        // Un pixel à 45 % se perdait dans la toile : le trait doit se suivre à l'œil.
+        context.lineWidth = 2
+        context.globalAlpha = faded ? 0.3 : 0.85
         context.beginPath()
         context.moveTo(centreX, centreY + (y < centreY ? -reach : reach))
         context.lineTo(centreX, y + (y < centreY ? size / 2 : -size / 2))
@@ -621,6 +732,7 @@ export function OrganizerMap({
       context.fillText(name, centreX, y)
       context.letterSpacing = '0px'
     }
+    labelBoxes.current = drawn
     context.globalAlpha = 1
 
     if (hovered) {
@@ -651,7 +763,19 @@ export function OrganizerMap({
       context.setLineDash([])
     }
     context.globalAlpha = 1
-  }, [colourMode, data.points, groupIndex, groupNames, hovered, includedGroups, islands, links, view])
+  }, [
+    colourMode,
+    data.points,
+    groupIndex,
+    groupNames,
+    hovered,
+    includedGroups,
+    islands,
+    links,
+    litGroup,
+    view,
+    zooming
+  ])
 
   /* La boucle d'animation lit `draw` par référence.
      En la faisant dépendre de `draw`, elle se démontait et se remontait à chaque rendu — un
@@ -790,6 +914,21 @@ export function OrganizerMap({
     }
   }, [])
 
+  /** Le nom d'amas sous le curseur, s'il y en a un. */
+  const labelAt = useCallback((clientX: number, clientY: number): string | null => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const rect = canvas.getBoundingClientRect()
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+    for (const box of labelBoxes.current) {
+      if (Math.abs(box.x - x) < box.half + 6 && Math.abs(box.y - y) < box.size * 0.8) {
+        return box.group
+      }
+    }
+    return null
+  }, [])
+
   const onPointerDown = (event: React.PointerEvent): void => {
     try {
       ;(event.target as Element).setPointerCapture?.(event.pointerId)
@@ -835,6 +974,10 @@ export function OrganizerMap({
       setHovered(found)
       onHover(found)
     }
+    /* Survoler un nom éclaire son amas, comme un point : c'est souvent le nom qu'on vise,
+       et il est bien plus facile à viser qu'une pastille d'un demi-pixel. */
+    const lit = found?.group ?? labelAt(event.clientX, event.clientY)
+    if (lit !== litGroup) setLitGroup(lit)
     cursorRef.current = { x: event.clientX, y: event.clientY }
     if (found) placeTip(event.clientX, event.clientY)
   }
@@ -881,6 +1024,9 @@ export function OrganizerMap({
   zoomRef.current = (event: WheelEvent): void => {
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return
+    setZooming(true)
+    window.clearTimeout(zoomTimer.current)
+    zoomTimer.current = window.setTimeout(() => setZooming(false), 140)
     const pointerX = event.clientX - rect.left
     const pointerY = event.clientY - rect.top
     setView((current) => {
@@ -912,6 +1058,7 @@ export function OrganizerMap({
         onPointerUp={onPointerUp}
         onPointerLeave={() => {
           setHovered(null)
+          setLitGroup(null)
           onHover(null)
           draggingRef.current = null
           clickedRef.current = null
