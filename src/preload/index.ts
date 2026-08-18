@@ -73,6 +73,10 @@ const api: MagpieApi = {
   openExportFolder: (): Promise<void> => ipcRenderer.invoke('export:open'),
   transcriptState: (): Promise<{ pending: number; running: boolean }> =>
     ipcRenderer.invoke('transcribe:state'),
+  imageReadingState: (): Promise<{ pending: number; running: boolean }> =>
+    ipcRenderer.invoke('images:state'),
+  startImageReading: (): Promise<BackgroundState> => ipcRenderer.invoke('images:start'),
+  stopImageReading: (): Promise<BackgroundState> => ipcRenderer.invoke('images:stop'),
   startTranscription: (): Promise<BackgroundState> => ipcRenderer.invoke('transcribe:start'),
   stopTranscription: (): Promise<BackgroundState> => ipcRenderer.invoke('transcribe:stop'),
   organizerMap: (): Promise<OrganizerMap> => ipcRenderer.invoke('organizer:map'),

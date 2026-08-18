@@ -700,6 +700,19 @@ export function savePostImageEmbeddings(embeddings: PostImageEmbedding[]): void 
   })()
 }
 
+/** Les clips réellement présents sur le disque : les seuls dont on peut tirer des images. */
+export function cachedVideoPaths(): { postId: string; videoPath: string }[] {
+  return (
+    getDb()
+      .prepare(
+        `SELECT m.post_id, m.video_path FROM media m JOIN posts p ON p.id = m.post_id
+          WHERE m.video_path IS NOT NULL AND p.is_archived = 0
+          GROUP BY m.post_id`
+      )
+      .all() as { post_id: string; video_path: string }[]
+  ).map((row) => ({ postId: row.post_id, videoPath: row.video_path }))
+}
+
 /** Combien de posts illustrés attendent encore d'être lus. Sert à annoncer l'étape. */
 export function countPendingImageEmbeddings(): number {
   return (

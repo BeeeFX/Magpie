@@ -18,12 +18,15 @@ import {
   recordOrganizerApplication,
   saveLocalVideoFeatures,
   organizationItems,
+  postImageEmbeddings,
   addToCollection,
   type LocalVideoFeature,
   type OrganizerRuleRow,
   type OrganizationItem
 } from '../db/queries'
 import { centreVectors, embedItems, embedTexts } from './embeddings'
+import { blend } from './vision'
+import { propagateByImage } from './propagate'
 import { project, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
@@ -741,8 +744,13 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
         items: new Map([...vectors.keys()].map((id) => [id, centred.get(id) as Float32Array])),
         topics: new Map(topicIds.map((id) => [id, centred.get(`topic:${id}`) as Float32Array]))
       }
-      if (lastSemanticVectors?.size !== semantic.items.size) lastProjection = null
-      lastSemanticVectors = semantic.items
+      /* La carte voit les trois signaux ; le rapprochement aux thèmes n'en voit qu'un.
+         Les thèmes sont des phrases : les comparer à un vecteur qui contient deux blocs
+         d'image n'aurait pas de sens, ils ne vivent pas dans ce repère. La projection, elle,
+         gagne à tout voir — c'est là que se joue « ce qui se ressemble est côte à côte ». */
+      const placed = blend(vectors, postImageEmbeddings())
+      if (lastSemanticVectors?.size !== placed.size) lastProjection = null
+      lastSemanticVectors = placed
     }
   } catch (error) {
     console.warn('[magpie] Embeddings indisponibles, tri par mots-clés seul :', error)
@@ -750,8 +758,19 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
 
   setProgress({ stage: 'grouping', done: 0, total: items.length, running: true })
   const plan = await buildLocalCollectionPlan(items, visuals, language(), breathe, semantic)
+  /* Ce que les mots n'ont pas su classer, les voisins d'image le savent souvent : un post
+     sans légende montre pourtant la même chose que ceux qui l'entourent. La propagation
+     n'ajoute jamais qu'à ce qui manquait. */
+  const filled = propagateByImage(
+    plan,
+    postImageEmbeddings(),
+    items.map((item) => item.id)
+  )
+  if (filled.adopted > 0) {
+    console.log(`[magpie] ${filled.adopted} posts classés par leurs voisins d'image`)
+  }
   setProgress({ stage: 'grouping', done: items.length, total: items.length, running: true })
-  lastPlan = withoutRemovedPosts(plan, organizerCollectionResolver(), collectionRemovals())
+  lastPlan = withoutRemovedPosts(filled.plan, organizerCollectionResolver(), collectionRemovals())
   return lastPlan
 }
 

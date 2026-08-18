@@ -70,6 +70,12 @@ import {
   stopTranscribing,
   transcribeAll
 } from './tagging/transcribe'
+import {
+  isReadingImages,
+  pendingImageCount,
+  readAllImages,
+  stopReadingImages
+} from './tagging/read-images'
 
 /** L'export suit la langue de l'interface : c'est elle qui décide du prompt écrit. */
 function exportLanguage(): 'fr' | 'en' {
@@ -363,6 +369,19 @@ export function registerIpc({
   ipcMain.handle('export:open', async () => {
     await mkdir(exportDir(), { recursive: true })
     await shell.openPath(exportDir())
+  })
+
+  ipcMain.handle('images:state', () => ({
+    pending: pendingImageCount(),
+    running: isReadingImages()
+  }))
+  ipcMain.handle('images:start', () => {
+    void readAllImages()
+    return backgroundTasks.current()
+  })
+  ipcMain.handle('images:stop', () => {
+    stopReadingImages()
+    return backgroundTasks.current()
   })
 
   ipcMain.handle('transcribe:state', () => ({

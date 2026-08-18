@@ -5,7 +5,7 @@ import { CLIP_BYTES, THUMBNAIL_BYTES } from '../estimates'
 import { formatBytes, formatDuration } from '../format'
 import { STEP_ORDER, type StepId, type StepState } from '../steps'
 import { useStore, useT } from '../store'
-import { IconCheck, IconImage, IconMic, IconSync, IconTag, IconVideo } from './Icons'
+import { IconCheck, IconEye, IconImage, IconMic, IconSync, IconTag, IconVideo } from './Icons'
 
 /**
  * La préparation, enchaînée et visible.
@@ -27,8 +27,12 @@ interface Props {
 interface Counts {
   thumbnails: number
   clips: number
+  images: number
   transcripts: number
 }
+
+/** Deux encodeurs par image, mesurés à 63 ms sur la bibliothèque de référence. */
+const IMAGE_MS_EACH = 63
 
 /** Cadence observée sur un seize cœurs. Grossière à dessein : elle situe, elle ne promet pas. */
 const TRANSCRIPT_MS_EACH = 2_400
@@ -72,7 +76,7 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   useEffect(() => {
     const read = (snapshot: BackgroundState): void => {
       const task = snapshot.tasks.find((entry) =>
-        ['thumbnails', 'clips', 'transcribe', 'sync'].includes(entry.kind)
+        ['thumbnails', 'clips', 'images', 'transcribe', 'sync'].includes(entry.kind)
       )
       setLive(task ? { kind: task.kind, done: task.done, total: task.total } : null)
       setCache({
@@ -89,11 +93,16 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    void Promise.all([magpie.pendingCounts(null), magpie.transcriptState()])
-      .then(([pending, transcripts]) =>
+    void Promise.all([
+      magpie.pendingCounts(null),
+      magpie.transcriptState(),
+      magpie.imageReadingState()
+    ])
+      .then(([pending, transcripts, images]) =>
         setCounts({
           thumbnails: pending.thumbnails,
           clips: pending.clips,
+          images: images.pending,
           transcripts: transcripts.pending
         })
       )
@@ -171,6 +180,9 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
         } else if (id === 'clips') {
           await magpie.startPreload({ what: 'clips' })
           outcome = await waitFor('clips')
+        } else if (id === 'images') {
+          await magpie.startImageReading()
+          outcome = await waitFor('images')
         } else if (id === 'transcribe') {
           await magpie.startTranscription()
           outcome = await waitFor('transcribe')
@@ -223,6 +235,17 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
           : t('downloads.amount', {
               count: counts?.clips ?? 0,
               size: formatBytes((counts?.clips ?? 0) * CLIP_BYTES[cacheQuality])
+            })
+    },
+    {
+      id: 'images',
+      icon: <IconEye size={15} />,
+      cost:
+        (counts?.images ?? 0) === 0
+          ? t('downloads.allDone')
+          : t('steps.imagesCost', {
+              count: counts?.images ?? 0,
+              time: formatDuration((counts?.images ?? 0) * IMAGE_MS_EACH)
             })
     },
     {

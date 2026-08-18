@@ -287,6 +287,7 @@ export const useStore = create<State>()(
         sync: 'todo',
         thumbnails: 'todo',
         clips: 'todo',
+        images: 'todo',
         transcribe: 'todo',
         group: 'todo'
       },

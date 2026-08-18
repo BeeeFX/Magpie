@@ -278,6 +278,16 @@ export function IconImage({ size = 16 }: IconProps): React.JSX.Element {
   )
 }
 
+/** Un œil : l'étape qui regarde les images plutôt que de les télécharger. */
+export function IconEye({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)}>
+      <path d="M1.8 10s3-5.2 8.2-5.2S18.2 10 18.2 10s-3 5.2-8.2 5.2S1.8 10 1.8 10z" />
+      <circle cx="10" cy="10" r="2.6" />
+    </svg>
+  )
+}
+
 /** Haut-parleur. `waves` à faux donne la version muette, sans les ondes. */
 export function IconVolume({
   size = 16,

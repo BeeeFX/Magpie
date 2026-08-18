@@ -66,10 +66,18 @@ let loading: Promise<Extractor> | null = null
  * signal le plus fiable, et c'est précisément ce que les Reels sans légende n'ont pas.
  */
 export function embeddingText(item: OrganizationItem): string {
+  /* Les liens ne disent rien du sujet et occupent la place : sur cette bibliothèque, une
+     légende sur dix se réduit à un `t.co` et un handle. Les retirer ne fait perdre aucun
+     sens et laisse le modèle lire le reste. */
+  const text = item.text?.replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim()
+  /* Le handle porte souvent déjà son arobase — 7 444 sur 9 751 ici, tous côté X. On en
+     ajoutait un second, si bien que le même signal s'écrivait `@@nom` sur une plateforme et
+     `@nom` sur l'autre : deux jetons différents pour la même chose. */
+  const handle = item.authorHandle?.replace(/^@+/, '')
   const parts = [
-    item.text?.trim(),
+    text,
     item.tags.length > 0 ? item.tags.join(', ') : null,
-    item.authorHandle ? `@${item.authorHandle}` : null
+    handle ? `@${handle}` : null
   ].filter(Boolean)
   return parts.join('\n').slice(0, MAX_CHARS)
 }

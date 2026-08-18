@@ -336,6 +336,9 @@ export interface MagpieApi {
   exportPrompt(): Promise<string>
   openExportFolder(): Promise<void>
   transcriptState(): Promise<{ pending: number; running: boolean }>
+  imageReadingState(): Promise<{ pending: number; running: boolean }>
+  startImageReading(): Promise<BackgroundState>
+  stopImageReading(): Promise<BackgroundState>
   startTranscription(): Promise<BackgroundState>
   stopTranscription(): Promise<BackgroundState>
   organizerMap(): Promise<OrganizerMap>
@@ -507,7 +510,13 @@ export interface AiCollectionApplyResult {
  * leur propre événement et leur propre coin d'interface. Les réunir derrière un seul état
  * permet de n'avoir qu'un indicateur à regarder — et de tout suspendre d'un geste.
  */
-export type BackgroundTaskKind = 'sync' | 'thumbnails' | 'clips' | 'organizer' | 'transcribe'
+export type BackgroundTaskKind =
+  | 'sync'
+  | 'thumbnails'
+  | 'clips'
+  | 'organizer'
+  | 'transcribe'
+  | 'images'
 
 export interface BackgroundTask {
   /** Octets par seconde observés sur cette tâche, ou null si elle ne transfère rien. */
