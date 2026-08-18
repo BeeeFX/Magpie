@@ -146,7 +146,13 @@ export async function readImages(options: {
   framesFor?: (postId: string) => string[] | null
   onProgress?: (progress: VisionProgress) => void
   shouldStop?: () => boolean
-}): Promise<{ done: number; total: number; stopped: boolean }> {
+}): Promise<{
+  done: number
+  total: number
+  stopped: boolean
+  failed?: number
+  firstError?: string | null
+}> {
   const known = postImageEmbeddings()
   const items = organizationItems().filter((item) => item.thumbPath)
   /* Les chemins décidés une fois : la couverture, ou les images tirées du clip quand il est
@@ -164,6 +170,8 @@ export async function readImages(options: {
 
   const batch: PostImageEmbedding[] = []
   let done = 0
+  let failed = 0
+  let firstError: string | null = null
   for (const item of pending) {
     if (options.shouldStop?.()) {
       savePostImageEmbeddings(batch)
@@ -180,8 +188,13 @@ export async function readImages(options: {
         meaning: toBuffer(meaning),
         frames: paths.length
       })
-    } catch {
-      // Un post illisible ne doit pas arrêter la passe ; il repassera à la prochaine.
+    } catch (error) {
+      /* Un post illisible ne doit pas arreter la passe. Mais avaler l'erreur en silence
+         rendait le defaut invisible : quand *tous* echouent — modele qui ne charge pas,
+         dossier introuvable — la passe tournait plusieurs minutes, n'ecrivait rien, et
+         s'annoncait terminee. On retient donc la premiere cause et on les compte. */
+      failed += 1
+      if (!firstError) firstError = error instanceof Error ? error.message : String(error)
     }
     done += 1
     /* Écriture par paquets : une transaction par post rendait la passe deux fois plus
@@ -193,7 +206,13 @@ export async function readImages(options: {
     if (done % 16 === 0 || done === total) options.onProgress?.({ done, total })
   }
   savePostImageEmbeddings(batch)
-  return { done, total, stopped: false }
+  /* Rien d'ecrit alors qu'on a tout parcouru : ce n'est pas une passe reussie, c'est une
+     panne. Elle doit remonter, pas s'afficher comme terminee. */
+  if (failed === total && total > 0) {
+    throw new Error(`aucune image n'a pu etre lue (${failed} echecs) : ${firstError ?? 'cause inconnue'}`)
+  }
+  if (failed > 0) console.warn(`[magpie] ${failed} images illisibles sur ${total} : ${firstError}`)
+  return { done, total, stopped: false, failed, firstError }
 }
 
 /**
