@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { OrganizerMap as MapData, OrganizerMapPoint } from '@shared/types'
 import { useT } from '../store'
 
@@ -6,17 +6,20 @@ import { useT } from '../store'
  * La carte sémantique.
  *
  * Un point par post, placé par la projection des vecteurs : la distance à l'écran *est* la
- * proximité de sens, donc les îles sont réelles. Le rebond — inertie, zoom élastique,
- * frémissement au survol, atterrissage en cascade — est de l'interaction posée par-dessus des
- * positions qui ne bougent jamais. Une simulation à ressorts aurait fait l'inverse : de jolies
- * îles qui ne montrent que la physique.
+ * proximité de sens, donc les îles sont réelles. Une simulation à ressorts aurait fait
+ * l'inverse : de jolies îles qui ne montrent que la physique.
+ *
+ * La carte est immobile. Seul l'atterrissage — les points qui se posent depuis le centre à
+ * l'ouverture — bouge, et il s'éteint au bout de 700 ms ; le reste, zoom et déplacement, est
+ * du cadrage. Rien ne frémit sous le curseur, ce qui rend le clic sur un point sûr.
  *
  * Rendu en canvas. Neuf mille points en DOM ou en SVG ne tiennent pas les 60 images par
- * seconde ; en canvas, c'est confortable.
+ * seconde ; en canvas, c'est confortable — à condition de ne pas repeindre la toile à chaque
+ * image, cf. le tampon plus bas.
  */
 
 const HOVER_DOT = 7
-/** Grille de recherche du point sous le curseur : un balayage linéaire de 9 738 points à
+/** Grille de recherche du point sous le curseur : un balayage linéaire de neuf mille points à
  *  chaque mouvement de souris coûterait plus cher que le dessin lui-même. */
 const BUCKET = 0.02
 /** Rayon de voisinage pour les liens, dans le repère unité de la carte. */
@@ -24,10 +27,19 @@ const LINK_RADIUS = 0.022
 /** Au-delà, la toile devient une bouillie : on garde les plus proches. */
 /* Vingt-quatre voisins : mesuré sur la bibliothèque de référence, sans plafond le voisinage
    par rayon produit 465 872 arêtes et le mélange additif sature en blanc dans les zones
-   denses. Vingt-quatre en garde 133 814 — la texture partout, sans les points chauds. */
+   denses. Vingt-quatre en garde 133 810 — la texture partout, sans les points chauds. */
 const LINKS_PER_POINT = 24
 /** En deçà, le rendu se casse : la toile s'agglomère et plus rien ne se distingue. */
 const MIN_SCALE = 2
+/** Marge peinte autour du cadre, recoupée à l'emprise de la carte : tant que le déplacement
+ *  reste dedans, on recopie l'image déjà peinte au lieu de retracer la toile. Assez large
+ *  pour absorber un geste franc, assez étroite pour que le tampon reste raisonnable. */
+const WEB_MARGIN = 320
+/** Plafond de zoom, comme la maquette : au-delà on ne lit plus que quelques points isolés. */
+const MAX_SCALE = 24
+/** Plafond du tampon, en pixels physiques. Sur un grand écran à 200 %, le cadre plus sa marge
+ *  dépasserait les cent mégaoctets : on rogne alors la marge, pas la mémoire. */
+const WEB_BUDGET = 24_000_000
 
 /**
  * Rendu de la toile, réglé à l'œil sur la vraie bibliothèque.
@@ -73,6 +85,9 @@ interface Props {
   onHover(point: OrganizerMapPoint | null): void
   /** Clic sur un point : ouvrir le post qu'il représente. */
   onOpen(point: OrganizerMapPoint): void
+  /** Auteur et texte du point survolé, quand le parent a fini de les chercher. L'infobulle
+   *  s'ouvre sans les attendre : la vignette et le nom de l'amas suffisent à situer. */
+  detail: { title: string; text: string } | null
 }
 
 /** Teintes bien séparées, reprises de la palette d'étiquettes : lisibles en clair et sombre. */
@@ -111,12 +126,19 @@ export function OrganizerMap({
   groupNames,
   onLasso,
   onHover,
-  onOpen
+  onOpen,
+  detail
 }: Props): React.JSX.Element {
   const t = useT()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
-  const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
+  const tipRef = useRef<HTMLDivElement>(null)
+  /* La carte s'ouvre au plancher, comme la maquette. À ×1 — sous son propre plancher, donc
+     impossible à retrouver après un cran de molette — la toile est transparente : on ouvrait
+     sur un nuage de points muet en attendant que l'utilisateur pense à zoomer. */
+  const [view, setView] = useState({ scale: MIN_SCALE, x: 0, y: 0 })
+  /** Cadrage initial : centrer la carte demande de connaître la taille du canevas. */
+  const framedRef = useRef(false)
   const [hovered, setHovered] = useState<OrganizerMapPoint | null>(null)
   const lassoRef = useRef<{ x: number; y: number }[]>([])
   /* Le tracé en cours vit dans une référence, pas dans l'état : un mouvement de pointeur peut
@@ -134,6 +156,15 @@ export function OrganizerMap({
   /** Point tiré et déplacement en cours, dans le repère unité. */
   const clickedRef = useRef<OrganizerMapPoint | null>(null)
   const pathCache = useRef<{ key: string; paths: Map<string, Path2D> }>({ key: '', paths: new Map() })
+  /** La toile et les points déjà peints, et la zone de la carte qu'ils couvrent. */
+  const webCache = useRef<{
+    key: string
+    canvas: HTMLCanvasElement | null
+    left: number
+    top: number
+    width: number
+    height: number
+  }>({ key: '', canvas: null, left: 0, top: 0, width: 0, height: 0 })
 
   /* React attache ses écouteurs de molette en mode passif, où `preventDefault` est ignoré :
      zoomer sur la carte faisait donc défiler la fenêtre derrière elle. Il faut poser
@@ -171,7 +202,15 @@ export function OrganizerMap({
      calculent dans le repère 2D plutôt qu'en dimension 384 — la projection a justement pour
      rôle de préserver le voisinage, donc la proximité à l'écran suffit, et c'est mille fois
      moins cher. */
+  /* Les vingt-quatre plus proches de chaque point, puis dédoublonnage — l'ordre compte.
+     Écarter d'abord les identifiants inférieurs, comme le faisait la version précédente,
+     ne retient pas les mêmes arêtes : un point dont tous les proches sont « avant » lui
+     allait en chercher vingt-quatre plus loin, et le total montait à 210 794 au lieu des
+     133 810 sur lesquels le rendu est réglé. Mesuré sur la vraie bibliothèque, à ×3 centré :
+     494 ms par image contre 219. */
   const links = useMemo(() => {
+    const rank = new Map(data.points.map((point, index) => [point.id, index]))
+    const seen = new Set<string>()
     const pairs: [OrganizerMapPoint, OrganizerMapPoint][] = []
     for (const point of data.points) {
       const near: { other: OrganizerMapPoint; distance: number }[] = []
@@ -180,14 +219,21 @@ export function OrganizerMap({
       for (let dx = -1; dx <= 1; dx += 1) {
         for (let dy = -1; dy <= 1; dy += 1) {
           for (const other of buckets.get(`${cellX + dx}:${cellY + dy}`) ?? []) {
-            if (other.id <= point.id) continue
+            if (other.id === point.id) continue
             const distance = Math.hypot(other.x - point.x, other.y - point.y)
             if (distance < LINK_RADIUS) near.push({ other, distance })
           }
         }
       }
       near.sort((left, right) => left.distance - right.distance)
-      for (const entry of near.slice(0, LINKS_PER_POINT)) pairs.push([point, entry.other])
+      for (const entry of near.slice(0, LINKS_PER_POINT)) {
+        const here = rank.get(point.id) ?? 0
+        const there = rank.get(entry.other.id) ?? 0
+        const key = here < there ? `${here}:${there}` : `${there}:${here}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        pairs.push([point, entry.other])
+      }
     }
     return pairs
   }, [buckets, data.points])
@@ -240,44 +286,68 @@ export function OrganizerMap({
 
     const size = Math.min(width, height)
     const landing = landingAt()
-    const toScreen = (point: OrganizerMapPoint): [number, number] => {
+    const closeness = Math.min(1, (view.scale - 1) / WEB.nearAt)
+    const edgeAlpha =
+      (WEB.edgeFar + WEB.edgeNear * closeness) /
+      Math.sqrt(Math.max(1, links.length / WEB.reference))
+    const core = WEB.lineFar + WEB.lineNear * closeness
+    const bloom = WEB.bloomFar + (WEB.bloomNear - WEB.bloomFar) * closeness
+    const dotRadius = WEB.dotSizeFar + WEB.dotSizeNear * closeness
+    const glow = WEB.dotGlowFar + WEB.dotGlowNear * closeness
+
+    /* Position sans le déplacement : c'est la seule chose qui change quand on fait glisser
+       la carte, et la garder à part permet de peindre une fois puis de translater. */
+    const at = (point: { x: number; y: number }): [number, number] => {
       // L'atterrissage tire les points depuis le centre : ils se posent au lieu de surgir.
       const eased = 1 - Math.pow(1 - landing, 3)
       const cx = 0.5 + (point.x - 0.5) * eased
       const cy = 0.5 + (point.y - 0.5) * eased
       return [
-        (cx * size + (width - size) / 2) * view.scale + view.x,
-        (cy * size + (height - size) / 2) * view.scale + view.y
+        (cx * size + (width - size) / 2) * view.scale,
+        (cy * size + (height - size) / 2) * view.scale
       ]
     }
 
-    const closeness = Math.min(1, (view.scale - 1) / WEB.nearAt)
-
-    /* La toile, en deux passes par couleur : un tracé large et très faible qui fait la lueur,
-       puis le fil net. Un chemin par couleur et non par arête — cent trente mille appels à
-       `stroke` était le vrai coût, pas les courbes. */
-    const edgeAlpha =
-      (WEB.edgeFar + WEB.edgeNear * closeness) /
-      Math.sqrt(Math.max(1, links.length / WEB.reference))
-    if (edgeAlpha > 0.002) {
-      context.globalCompositeOperation = 'lighter'
-      const core = WEB.lineFar + WEB.lineNear * closeness
-      const bloom = WEB.bloomFar + (WEB.bloomNear - WEB.bloomFar) * closeness
-      /* Les chemins ne dépendent que de l'échelle et de la traction : déplacer la carte est
-         une translation pure. Les rebâtir à chaque image coûtait cent trente mille courbes
-         pour rien — on les garde et on translate le canevas, à rendu identique. */
-      /* `landing` anime les coordonnées à l'ouverture : l'oublier ici gardait des chemins
-         périmés, ou les reconstruisait sans fin. Il se stabilise à 1, la clé aussi. */
-      const signature = `${view.scale}:${landing.toFixed(3)}`
-      if (pathCache.current.key !== signature) {
+    /* La toile, en trois passes par couleur : deux tracés larges et très faibles qui font la
+       lueur, puis le fil net. Un chemin par couleur et non par arête — cent trente mille
+       appels à `stroke` était le vrai coût, pas les courbes. */
+    const paintWeb = (
+      target: CanvasRenderingContext2D,
+      area: { left: number; top: number; right: number; bottom: number }
+    ): void => {
+      if (edgeAlpha <= 0.002) return
+      /* La zone peinte fait partie de la clé : à fort zoom, l'écarter laissait construire
+         cent trente mille courbes dont trois cents seulement tombaient dans le cadre. */
+      const key = [
+        view.scale,
+        landing.toFixed(3),
+        colourMode,
+        area.left.toFixed(0),
+        area.top.toFixed(0),
+        area.right.toFixed(0),
+        area.bottom.toFixed(0)
+      ].join(':')
+      if (pathCache.current.key !== key) {
         const built = new Map<string, Path2D>()
+        // La courbe s'écarte de la corde : de la marge, sinon les arcs sautent aux bords.
+        const slack = core * WEB.bloomWidth + LINK_RADIUS * size * view.scale * 0.3
         for (const [from, to] of links) {
-          const [ax, ay] = toScreen(from)
-          const [bx, by] = toScreen(to)
-          const x1 = ax - view.x, y1 = ay - view.y, x2 = bx - view.x, y2 = by - view.y
+          const [x1, y1] = at(from)
+          const [x2, y2] = at(to)
+          if (
+            (x1 < area.left - slack && x2 < area.left - slack) ||
+            (x1 > area.right + slack && x2 > area.right + slack) ||
+            (y1 < area.top - slack && y2 < area.top - slack) ||
+            (y1 > area.bottom + slack && y2 > area.bottom + slack)
+          ) {
+            continue
+          }
           const tone = colourFor(from, colourMode, groupIndex)
           let path = built.get(tone)
-          if (!path) { path = new Path2D(); built.set(tone, path) }
+          if (!path) {
+            path = new Path2D()
+            built.set(tone, path)
+          }
           path.moveTo(x1, y1)
           path.quadraticCurveTo(
             (x1 + x2) / 2 - (y2 - y1) * 0.26,
@@ -286,114 +356,277 @@ export function OrganizerMap({
             y2
           )
         }
-        pathCache.current = { key: signature, paths: built }
+        pathCache.current = { key, paths: built }
       }
-      const paths = pathCache.current.paths
+      target.globalCompositeOperation = 'lighter'
+      for (const [tone, path] of pathCache.current.paths) {
+        target.strokeStyle = tone
+        if (bloom > 0.02) {
+          target.lineWidth = core * WEB.bloomWidth
+          target.globalAlpha = edgeAlpha * bloom * 0.5
+          target.stroke(path)
+          target.lineWidth = core * Math.max(1.5, WEB.bloomWidth / 2.3)
+          target.globalAlpha = edgeAlpha * bloom * 0.6
+          target.stroke(path)
+        }
+        target.lineWidth = core
+        target.globalAlpha = edgeAlpha
+        target.stroke(path)
+      }
+      target.globalCompositeOperation = 'source-over'
+      target.globalAlpha = 1
+    }
+
+    /* Les points restent petits et translucides : c'est la lueur qui leur donne leur présence.
+       Pleins, ils recouvraient exactement la toile qu'on veut lire.
+       Rassemblés par teinte : un `fill` par couleur au lieu de neuf mille sept cent quarante-
+       deux, pour la même image. */
+    const paintDots = (
+      target: CanvasRenderingContext2D,
+      area: { left: number; top: number; right: number; bottom: number }
+    ): void => {
+      const fade = 0.3 + 0.7 * landing
+      const full = new Map<string, Path2D>()
+      const dim = new Map<string, Path2D>()
+      const halosFull = new Map<string, Path2D>()
+      const halosDim = new Map<string, Path2D>()
+      const halo = dotRadius * (2.4 + 1.4 * closeness)
+      for (const point of data.points) {
+        const [x, y] = at(point)
+        if (x < area.left - 8 || y < area.top - 8 || x > area.right + 8 || y > area.bottom + 8) {
+          continue
+        }
+        const dimmed = point.group !== null && !includedGroups.has(point.group)
+        const tone = colourFor(point, colourMode, groupIndex)
+        const bodies = dimmed ? dim : full
+        let body = bodies.get(tone)
+        if (!body) {
+          body = new Path2D()
+          bodies.set(tone, body)
+        }
+        body.moveTo(x + dotRadius, y)
+        body.arc(x, y, dotRadius, 0, Math.PI * 2)
+        if (glow > 0.01) {
+          const rings = dimmed ? halosDim : halosFull
+          let ring = rings.get(tone)
+          if (!ring) {
+            ring = new Path2D()
+            rings.set(tone, ring)
+          }
+          ring.moveTo(x + halo, y)
+          ring.arc(x, y, halo, 0, Math.PI * 2)
+        }
+      }
+      // Les exclus gardent leur couleur mais s'effacent : on les voit sans les lire.
+      const shadeOf = (dimmed: boolean): number =>
+        (WEB.dotFar + WEB.dotNear * closeness) * (dimmed ? 0.2 : 1) * fade
+      target.globalCompositeOperation = 'lighter'
+      for (const [rings, dimmed] of [
+        [halosFull, false],
+        [halosDim, true]
+      ] as const) {
+        target.globalAlpha = shadeOf(dimmed) * glow
+        for (const [tone, path] of rings) {
+          target.fillStyle = tone
+          target.fill(path)
+        }
+      }
+      target.globalCompositeOperation = 'source-over'
+      for (const [bodies, dimmed] of [
+        [full, false],
+        [dim, true]
+      ] as const) {
+        target.globalAlpha = shadeOf(dimmed)
+        for (const [tone, path] of bodies) {
+          target.fillStyle = tone
+          target.fill(path)
+        }
+      }
+      target.globalAlpha = 1
+    }
+
+    /* Garder les chemins ne suffisait pas, et c'est ce qui laissait la carte à deux images par
+       seconde : les reconstruire coûtait 100 ms une fois, mais les *tracer* en coûtait 219 à
+       chaque image — trois passes sur cent trente mille courbes en mélange additif, que le
+       cache de chemins ne dispense pas de repeindre.
+       Toile et points sont donc peints une fois dans un canevas de côté, et le déplacement
+       n'en recopie qu'une image : 4 ms au lieu de 494. Le rendu n'est pas au bit près —
+       l'accumulation additive s'arrondit une fois de plus dans le tampon — mais l'écart mesuré
+       est de 126 pixels sur 15 188 allumés, d'au plus 14 niveaux sur 255 : invisible. */
+    const span = size * view.scale
+    const originX = ((width - size) / 2) * view.scale
+    const originY = ((height - size) / 2) * view.scale
+    // Débord du dessin autour des points : halo des fils et lueur des pastilles.
+    const spill = Math.max(core * WEB.bloomWidth, dotRadius * (2.4 + 1.4 * closeness)) + 4
+    const content = {
+      left: originX - spill,
+      top: originY - spill,
+      right: originX + span + spill,
+      bottom: originY + span + spill
+    }
+    /* Ce qu'il faut avoir peint pour que le cadre soit juste : la carte, limitée au cadre.
+       Au-delà il n'y a rien à peindre, et c'est ce qui rend les recuissons rares une fois
+       dézoomé — la carte entière tient alors dans le tampon. */
+    const needed = {
+      left: Math.max(content.left, -view.x),
+      top: Math.max(content.top, -view.y),
+      right: Math.min(content.right, -view.x + width),
+      bottom: Math.min(content.bottom, -view.y + height)
+    }
+    const painted = webCache.current
+    const covers =
+      painted.canvas !== null &&
+      painted.key === `${view.scale}|${colourMode}|${ratio}|${[...includedGroups].sort().join(',')}` &&
+      (needed.right <= needed.left ||
+        (painted.left <= needed.left &&
+          painted.top <= needed.top &&
+          painted.left + painted.width >= needed.right &&
+          painted.top + painted.height >= needed.bottom))
+
+    if (landing < 1) {
+      /* Pendant l'atterrissage, les coordonnées bougent à chaque image : peindre dans un
+         tampon qu'on jetterait aussitôt n'ajouterait qu'une recopie. */
+      webCache.current.key = ''
+      const area = { left: -view.x, top: -view.y, right: -view.x + width, bottom: -view.y + height }
       context.save()
       context.translate(view.x, view.y)
-      const unusedLoop = (): void => {
-      for (const [from, to] of links) {
-        const [x1, y1] = toScreen(from)
-        const [x2, y2] = toScreen(to)
-        // Écarter seulement si les deux bouts sortent du même côté : ne tester que le premier
-        // effaçait la moitié de la toile dès qu'on zoomait.
-        if (
-          (x1 < -40 && x2 < -40) || (x1 > width + 40 && x2 > width + 40) ||
-          (y1 < -40 && y2 < -40) || (y1 > height + 40 && y2 > height + 40)
-        ) continue
-        const tone = colourFor(from, colourMode, groupIndex)
-        let path = paths.get(tone)
-        if (!path) { path = new Path2D(); paths.set(tone, path) }
-        path.moveTo(x1, y1)
-        path.quadraticCurveTo(
-          (x1 + x2) / 2 - (y2 - y1) * 0.26,
-          (y1 + y2) / 2 + (x2 - x1) * 0.26,
-          x2,
-          y2
+      paintWeb(context, area)
+      paintDots(context, area)
+      context.restore()
+    } else {
+      if (!covers) {
+        /* On peint le cadre élargi d'une marge, recoupé au contenu : un déplacement court
+           reste dedans, et ce qui déborde de la carte ne coûte rien à laisser de côté. */
+        const budget = WEB_BUDGET / (ratio * ratio)
+        const sum = width + height
+        const room = Math.sqrt(Math.max(0, sum * sum - 4 * (width * height - budget)))
+        const margin = Math.max(0, Math.min(WEB_MARGIN, (room - sum) / 4))
+        const area = {
+          left: Math.max(content.left, -view.x - margin),
+          top: Math.max(content.top, -view.y - margin),
+          right: Math.min(content.right, -view.x + width + margin),
+          bottom: Math.min(content.bottom, -view.y + height + margin)
+        }
+        const bufferWidth = Math.max(1, Math.ceil(area.right - area.left))
+        const bufferHeight = Math.max(1, Math.ceil(area.bottom - area.top))
+        const buffer = painted.canvas ?? document.createElement('canvas')
+        buffer.width = Math.ceil(bufferWidth * ratio)
+        buffer.height = Math.ceil(bufferHeight * ratio)
+        const paint = buffer.getContext('2d')
+        if (!paint) return
+        paint.setTransform(ratio, 0, 0, ratio, 0, 0)
+        paint.clearRect(0, 0, bufferWidth, bufferHeight)
+        paint.translate(-area.left, -area.top)
+        paintWeb(paint, area)
+        paintDots(paint, area)
+        webCache.current = {
+          key: `${view.scale}|${colourMode}|${ratio}|${[...includedGroups].sort().join(',')}`,
+          canvas: buffer,
+          left: area.left,
+          top: area.top,
+          width: bufferWidth,
+          height: bufferHeight
+        }
+      }
+      const web = webCache.current
+      if (web.canvas) {
+        /* Recopie calée sur la grille des pixels physiques. À 125 % ou 150 % — le cas courant
+           sous Windows — un décalage entier en points d'interface tombe entre deux pixels de
+           l'écran, et la recopie rééchantillonne : la toile deviendrait floue au déplacement,
+           alors qu'elle est nette au premier tracé. */
+        const snap = (value: number): number => Math.round(value * ratio) / ratio
+        context.drawImage(
+          web.canvas,
+          snap(web.left + view.x),
+          snap(web.top + view.y),
+          web.width,
+          web.height
         )
       }
-      }
-      void unusedLoop
-      for (const [tone, path] of paths) {
-        context.strokeStyle = tone
-        if (bloom > 0.02) {
-          context.lineWidth = core * WEB.bloomWidth
-          context.globalAlpha = edgeAlpha * bloom * 0.5
-          context.stroke(path)
-          context.lineWidth = core * Math.max(1.5, WEB.bloomWidth / 2.3)
-          context.globalAlpha = edgeAlpha * bloom * 0.6
-          context.stroke(path)
-        }
-        context.lineWidth = core
-        context.globalAlpha = edgeAlpha
-        context.stroke(path)
-      }
-      context.restore()
-      context.globalCompositeOperation = 'source-over'
-      context.globalAlpha = 1
     }
 
-    /* Les points restent petits et translucides : c'est la lueur qui leur donne leur
-       présence. Pleins, ils recouvraient exactement la toile qu'on veut lire. */
-    const dotRadius = WEB.dotSizeFar + WEB.dotSizeNear * closeness
-    for (const point of data.points) {
-      const [x, y] = toScreen(point)
-      if (x < -8 || y < -8 || x > width + 8 || y > height + 8) continue
-      const dimmed = point.group !== null && !includedGroups.has(point.group)
-      const shade =
-        (WEB.dotFar + WEB.dotNear * closeness) * (dimmed ? 0.2 : 1) * (0.3 + 0.7 * landing)
-      const tone = colourFor(point, colourMode, groupIndex)
-      context.fillStyle = tone
-      const glow = WEB.dotGlowFar + WEB.dotGlowNear * closeness
-      if (glow > 0.01) {
-        context.globalCompositeOperation = 'lighter'
-        context.globalAlpha = shade * glow
-        context.beginPath()
-        context.arc(x, y, dotRadius * (2.4 + 1.4 * closeness), 0, Math.PI * 2)
-        context.fill()
-        context.globalCompositeOperation = 'source-over'
-      }
-      context.globalAlpha = shade
-      context.beginPath()
-      context.arc(x, y, dotRadius, 0, Math.PI * 2)
-      context.fill()
-    }
-    context.globalAlpha = 1
-
-    /* Taille proportionnelle à la racine du nombre de posts : un îlot deux fois plus gros
-       n'écrase pas son voisin, il se remarque simplement davantage. */
+    /* Chaque amas doit porter son nom, y compris quand deux étiquettes se gênent : la plus
+       petite s'écarte de son amas avec un trait de rappel, au lieu de disparaître.
+       Les amas anonymes étaient le principal reproche fait à la carte, et les faire céder
+       revenait à en laisser la moitié sans nom dès qu'on dézoomait.
+       Taille et rabattement repris de la maquette : la taille suit la racine du nombre de
+       posts — un îlot deux fois plus gros se remarque sans écraser son voisin — et croît en
+       racine du zoom, sans quoi les noms doublaient de corps à chaque cran. */
     context.textAlign = 'center'
     context.textBaseline = 'middle'
-    const drawn: { x: number; y: number; size: number }[] = []
+    context.lineJoin = 'round'
+    const drawn: { x: number; y: number; half: number; size: number }[] = []
     for (const island of islands) {
-      const name = groupNames.get(island.group)
+      const name = groupNames.get(island.group)?.trim().toLocaleLowerCase()
       if (!name) continue
-      const [x, y] = toScreen({ x: island.x, y: island.y } as OrganizerMapPoint)
-      if (x < 0 || y < 0 || x > width || y > height) continue
-      const size = Math.min(30, 9 + Math.sqrt(island.count) * 1.5) * Math.min(1.6, view.scale)
-      // Deux étiquettes superposées ne se lisent ni l'une ni l'autre : la plus petite cède.
-      if (drawn.some((other) => Math.hypot(other.x - x, other.y - y) < (other.size + size) * 1.1)) {
-        continue
+      const [ux, uy] = at(island)
+      const centreX = ux + view.x
+      const centreY = uy + view.y
+      if (centreX < -80 || centreY < -60 || centreX > width + 80 || centreY > height + 60) continue
+      const size =
+        Math.min(28, 11 + Math.sqrt(island.count) * 0.4) * Math.min(2.1, Math.sqrt(view.scale))
+      /* Demi-largeur estimée sans `measureText` : la mesurer pour vingt-deux étiquettes à
+         chaque image coûtait plus que de la deviner, et une approximation suffit à savoir
+         que deux noms se chevauchent. */
+      const half = (name.length * size) / 3.9
+      const reach = Math.sqrt(island.count) * 1.25 * Math.min(2.6, view.scale)
+      /* On tente le centre, puis on s'écarte au-dessus et en dessous. La maquette ne montait
+         qu'au-dessus : sur un cadre deux fois moins haut que le sien, les noms des gros amas
+         sortaient par le haut — dessinés, invisibles, et le trait de rappel pointait hors
+         champ. Une place hors du cadre n'en est pas une. */
+      const fits = (candidate: number): boolean =>
+        candidate - size / 2 > 4 &&
+        candidate + size / 2 < height - 4 &&
+        !drawn.some(
+          (other) =>
+            Math.abs(other.x - centreX) < other.half + half &&
+            Math.abs(other.y - candidate) < other.size + size
+        )
+      let y = centreY
+      for (let step = 1; !fits(y); step += 1) {
+        if (step > 5) {
+          y = NaN
+          break
+        }
+        const away = reach + 12 + Math.ceil(step / 2) * (size + 7)
+        y = step % 2 === 1 ? centreY - away : centreY + away
       }
-      drawn.push({ x, y, size })
+      if (Number.isNaN(y)) continue
+      drawn.push({ x: centreX, y, half, size })
       const faded = !includedGroups.has(island.group)
+      context.globalAlpha = faded ? 0.28 : 1
+      if (y !== centreY) {
+        // Le trait de rappel dit de quel amas le nom déplacé parle.
+        context.strokeStyle = colourFor(
+          { group: island.group } as OrganizerMapPoint,
+          colourMode,
+          groupIndex
+        )
+        context.lineWidth = 1
+        context.globalAlpha = faded ? 0.15 : 0.45
+        context.beginPath()
+        context.moveTo(centreX, centreY + (y < centreY ? -reach : reach))
+        context.lineTo(centreX, y + (y < centreY ? size / 2 : -size / 2))
+        context.stroke()
+        context.globalAlpha = faded ? 0.28 : 1
+      }
       /* Blanc et en minuscules, contour noir épais : coloré par groupe, le texte se noyait
          dans une toile déjà colorée. Le blanc tranche sur tout, la couleur reste au réseau. */
       context.font = `600 ${size.toFixed(1)}px system-ui, sans-serif`
       context.letterSpacing = '-0.02em'
-      context.globalAlpha = faded ? 0.28 : 1
-      context.lineJoin = 'round'
       context.lineWidth = size / 3.2
       context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
-      context.strokeText(name.toLocaleLowerCase(), x, y)
+      context.strokeText(name, centreX, y)
       context.fillStyle = '#ffffff'
-      context.fillText(name.toLocaleLowerCase(), x, y)
+      context.fillText(name, centreX, y)
       context.letterSpacing = '0px'
     }
     context.globalAlpha = 1
 
     if (hovered) {
-      const [x, y] = toScreen(hovered)
+      const [ux, uy] = at(hovered)
+      const x = ux + view.x
+      const y = uy + view.y
       context.globalAlpha = 1
       context.fillStyle = colourFor(hovered, colourMode, groupIndex)
       context.beginPath()
@@ -449,6 +682,10 @@ export function OrganizerMap({
     draw()
   }, [draw])
 
+  /* Par `draw`, cet effet se redéfaisait à chaque déplacement : l'observateur se démontait
+     et se remontait, et surtout `canvas.width` était réaffecté — ce qui vide la mémoire du
+     canevas — puis la carte redessinée une seconde fois. Un mouvement de souris coûtait 1,7
+     dessin au lieu d'un. Le dessin se lit donc par référence, et l'effet ne dépend de rien. */
   useEffect(() => {
     const canvas = canvasRef.current
     const wrap = wrapRef.current
@@ -459,13 +696,23 @@ export function OrganizerMap({
       canvas.height = wrap.clientHeight * ratio
       canvas.style.width = `${wrap.clientWidth}px`
       canvas.style.height = `${wrap.clientHeight}px`
-      draw()
+      if (!framedRef.current && wrap.clientWidth > 0) {
+        framedRef.current = true
+        const box = Math.min(wrap.clientWidth, wrap.clientHeight)
+        setView((current) => ({
+          ...current,
+          x: wrap.clientWidth / 2 - (0.5 * box + (wrap.clientWidth - box) / 2) * current.scale,
+          y: wrap.clientHeight / 2 - (0.5 * box + (wrap.clientHeight - box) / 2) * current.scale
+        }))
+        return
+      }
+      drawRef.current()
     }
     resize()
     const observer = new ResizeObserver(resize)
     observer.observe(wrap)
     return () => observer.disconnect()
-  }, [draw])
+  }, [])
 
   const pointAt = useCallback(
     (clientX: number, clientY: number): OrganizerMapPoint | null => {
@@ -498,6 +745,50 @@ export function OrganizerMap({
     },
     [buckets, view]
   )
+
+  /* L'infobulle se place à la main plutôt que par l'état : la position change à chaque pixel
+     parcouru, et un rendu React par pixel redessinerait la carte entière. */
+  const cursorRef = useRef({ x: 0, y: 0 })
+  const placeTip = useCallback((clientX: number, clientY: number): void => {
+    const tip = tipRef.current
+    const wrap = wrapRef.current
+    if (!tip || !wrap) return
+    const rect = wrap.getBoundingClientRect()
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+    // Au-dessus et à droite du curseur, rabattue dans le cadre plutôt que débordante.
+    tip.style.left = `${Math.max(8, Math.min(rect.width - tip.offsetWidth - 8, x + 15))}px`
+    tip.style.top = `${Math.max(8, Math.min(rect.height - tip.offsetHeight - 8, y - tip.offsetHeight - 13))}px`
+  }, [])
+
+  /* Replacée une fois le contenu posé : au moment du mouvement, l'infobulle a encore la
+     hauteur du point précédent — celle du cadre vide au premier survol — et se rabattait à
+     côté du curseur. Le texte de l'auteur arrive plus tard encore, et la fait grandir. */
+  useLayoutEffect(() => {
+    if (hovered) placeTip(cursorRef.current.x, cursorRef.current.y)
+  }, [hovered, detail, placeTip])
+
+  /* Sans retenue, un geste franc emporte la carte hors du cadre et il n'y a plus rien à
+     rattraper : ni bouton de recentrage, ni bord pour se repérer.
+     La règle est que le centre du cadre reste posé sur la carte. Retenir un coin de la carte
+     dans le cadre ne suffisait pas : les coins de l'emprise sont vides — la projection n'y met
+     presque aucun point — et on se retrouvait devant du noir en croyant regarder la carte. */
+  const clamped = useCallback((next: { scale: number; x: number; y: number }) => {
+    const canvas = canvasRef.current
+    if (!canvas) return next
+    const ratio = window.devicePixelRatio || 1
+    const width = canvas.width / ratio
+    const height = canvas.height / ratio
+    const box = Math.min(width, height)
+    const span = box * next.scale
+    const left = ((width - box) / 2) * next.scale
+    const top = ((height - box) / 2) * next.scale
+    return {
+      scale: next.scale,
+      x: Math.min(width / 2 - left, Math.max(width / 2 - left - span, next.x)),
+      y: Math.min(height / 2 - top, Math.max(height / 2 - top - span, next.y))
+    }
+  }, [])
 
   const onPointerDown = (event: React.PointerEvent): void => {
     try {
@@ -534,11 +825,9 @@ export function OrganizerMap({
     const dragging = draggingRef.current
     if (dragging) {
       dragging.moved = true
-      setView((current) => ({
-        ...current,
-        x: event.clientX - dragging.x,
-        y: event.clientY - dragging.y
-      }))
+      setView((current) =>
+        clamped({ ...current, x: event.clientX - dragging.x, y: event.clientY - dragging.y })
+      )
       return
     }
     const found = pointAt(event.clientX, event.clientY)
@@ -546,6 +835,8 @@ export function OrganizerMap({
       setHovered(found)
       onHover(found)
     }
+    cursorRef.current = { x: event.clientX, y: event.clientY }
+    if (found) placeTip(event.clientX, event.clientY)
   }
 
   const onPointerUp = (): void => {
@@ -595,16 +886,21 @@ export function OrganizerMap({
     setView((current) => {
       /* Plancher à ×2 : plus loin, cent trente mille arêtes se superposent au point que la
          carte redevient une nappe informe. Mieux vaut interdire l'échelle que la montrer. */
-      const next = Math.min(12, Math.max(MIN_SCALE, current.scale * (event.deltaY < 0 ? 1.12 : 0.89)))
+      const next = Math.min(
+        MAX_SCALE,
+        Math.max(MIN_SCALE, current.scale * (event.deltaY < 0 ? 1.16 : 0.862))
+      )
       const factor = next / current.scale
       // Le zoom s'accroche au curseur : sans cela, la zone regardée s'échappe à chaque cran.
-      return {
+      return clamped({
         scale: next,
         x: pointerX - (pointerX - current.x) * factor,
         y: pointerY - (pointerY - current.y) * factor
-      }
+      })
     })
   }
+
+  const hoveredGroupName = hovered?.group ? groupNames.get(hovered.group)?.trim() : ''
 
   return (
     <div className="organizer-map" ref={wrapRef}>
@@ -622,9 +918,37 @@ export function OrganizerMap({
         }}
         onContextMenu={(event) => event.preventDefault()}
       />
-      {hovered?.thumbUrl ? (
-        <img className="organizer-map__peek" src={hovered.thumbUrl} alt="" aria-hidden="true" />
-      ) : null}
+      {/* L'infobulle de la maquette, qui suit le curseur : la vignette posée dans un coin
+          obligeait à quitter le point des yeux pour lire ce qu'il était. */}
+      <div
+        ref={tipRef}
+        className={`map-tip${hovered ? ' is-on' : ''}`}
+        role="tooltip"
+        aria-hidden={!hovered}
+      >
+        {hovered ? (
+          <>
+            <div className="map-tip__who">
+              <span
+                className="map-tip__swatch"
+                style={{ background: colourFor(hovered, colourMode, groupIndex) }}
+              />
+              {/* Le nom de l'amas tient lieu de titre le temps que l'auteur arrive : ouvrir sur
+                  un vide, puis le remplir, faisait sauter l'infobulle sous le curseur. Une
+                  catégorie qu'on est en train de renommer n'a pas de nom du tout — l'infobulle
+                  s'ouvrait alors sur une pastille de couleur et rien d'autre. */}
+              <span className="map-tip__title">
+                {detail?.title ?? (hoveredGroupName || t('organizer.unassigned'))}
+              </span>
+              {detail && hoveredGroupName ? (
+                <span className="map-tip__group">· {hoveredGroupName}</span>
+              ) : null}
+            </div>
+            {hovered.thumbUrl ? <img src={hovered.thumbUrl} alt="" aria-hidden="true" /> : null}
+            {detail?.text ? <p className="map-tip__text">{detail.text}</p> : null}
+          </>
+        ) : null}
+      </div>
       <p className="organizer-map__hint">{t('organizer.mapHint')}</p>
     </div>
   )

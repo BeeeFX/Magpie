@@ -13,7 +13,7 @@ async function main(): Promise<void> {
       }
     },
     publicDir: resolve('fixtures'),
-    server: { host: '127.0.0.1', port: 5173, strictPort: true }
+    server: { host: '127.0.0.1', port: Number(process.env['PORT'] ?? 5173), strictPort: true }
   })
   await server.listen()
   server.printUrls()

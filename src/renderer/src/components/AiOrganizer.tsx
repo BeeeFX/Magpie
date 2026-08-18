@@ -78,8 +78,12 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [rememberChoices, setRememberChoices] = useState(false)
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [previewPosts, setPreviewPosts] = useState<Post[]>([])
-  /** Post ouvert depuis la carte : sa vignette et son texte, sans quitter l'écran. */
-  const [mapPost, setMapPost] = useState<Post | null>(null)
+  /* Ce que l'infobulle sait du point survolé. Le survol n'en donne que l'identifiant : le
+     reste se cherche, et l'infobulle s'ouvre sans l'attendre. */
+  const [mapDetail, setMapDetail] = useState<{ id: string; title: string; text: string } | null>(
+    null
+  )
+  const mapHoverRef = useRef(0)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState(false)
   const [colourMode, setColourMode] = useState<ColourMode>('group')
@@ -537,34 +541,34 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                         new Set(suggestions.filter((s) => s.included).map((s) => s.id))
                       }
                       onLasso={setLassoed}
-                      onHover={() => {}}
+                      detail={mapDetail}
+                      onHover={(point) => {
+                        /* Une requête par point survolé serait une requête par pixel parcouru :
+                           on ne cherche que ce qui est encore survolé au bout du délai, et une
+                           réponse en retard est jetée. */
+                        const request = ++mapHoverRef.current
+                        if (!point) {
+                          setMapDetail(null)
+                          return
+                        }
+                        if (mapDetail?.id !== point.id) setMapDetail(null)
+                        window.setTimeout(() => {
+                          if (mapHoverRef.current !== request) return
+                          void magpie.getPostsByIds([point.id]).then((posts) => {
+                            const post = posts[0]
+                            if (!post || mapHoverRef.current !== request) return
+                            setMapDetail({
+                              id: point.id,
+                              title: displayName(post),
+                              text: post.text?.slice(0, 220) ?? ''
+                            })
+                          })
+                        }, 90)
+                      }}
                       onOpen={(point) => void magpie.getPostsByIds([point.id]).then((posts) => {
-                        if (posts[0]) setMapPost(posts[0])
+                        if (posts[0]) void magpie.openExternal(posts[0].url)
                       })}
                     />
-                    {mapPost ? (
-                      <div className="map-post" role="dialog" aria-label={displayName(mapPost)}>
-                        {mapPost.media[0]?.thumbUrl ? (
-                          <img src={mapPost.media[0].thumbUrl} alt="" />
-                        ) : null}
-                        <div className="map-post__body">
-                          <strong>{displayName(mapPost)}</strong>
-                          <p>{mapPost.text?.slice(0, 220) || ''}</p>
-                          <div className="map-post__actions">
-                            <button
-                              type="button"
-                              className="btn"
-                              onClick={() => void magpie.openExternal(mapPost.url)}
-                            >
-                              {t('organizer.openOriginal')}
-                            </button>
-                            <button type="button" className="btn" onClick={() => setMapPost(null)}>
-                              {t('detail.close')}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
                     {lassoed.length > 0 ? (
                       <div className="organizer-lasso" role="status">
                         <span>{t('organizer.mapSelected', { count: lassoed.length })}</span>

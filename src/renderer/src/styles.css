@@ -2313,53 +2313,6 @@ h1, h2, h3 {
 
 /* Aperçu d'un post ouvert depuis la carte : posé dans un coin, il ne masque pas la zone
    qu'on vient de cliquer. */
-.map-post {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  z-index: 6;
-  display: flex;
-  gap: 12px;
-  max-width: 380px;
-  padding: 12px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-lg);
-  background: var(--raised);
-  box-shadow: var(--shadow-lg);
-}
-
-.map-post img {
-  width: 84px;
-  height: 84px;
-  flex: none;
-  object-fit: cover;
-  border-radius: var(--radius-md);
-}
-
-.map-post__body {
-  display: grid;
-  gap: 6px;
-  align-content: start;
-  min-width: 0;
-}
-
-.map-post__body strong {
-  font-size: 12.5px;
-}
-
-.map-post__body p {
-  margin: 0;
-  color: var(--faint);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-
-.map-post__actions {
-  display: flex;
-  gap: 7px;
-  margin-top: 2px;
-}
-
 /* --- Carte sémantique ------------------------------------------------------ */
 
 .organizer-views {
@@ -2398,25 +2351,80 @@ h1, h2, h3 {
   cursor: crosshair;
 }
 
-/* La vignette suit le survol sans bousculer les points : elle flotte au-dessus, jamais
-   dans le flux, pour que la carte ne se réagence pas sous le curseur. */
-.organizer-map__peek {
+/* L'infobulle suit le curseur, comme dans la maquette : la vignette posée dans un coin
+   obligeait à quitter le point des yeux pour lire ce qu'il était. Hors du flux et sans
+   événements, pour que la carte ne se réagence pas sous la souris et que le point reste
+   cliquable au travers. */
+.map-tip {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 116px;
-  height: 116px;
-  object-fit: cover;
-  border-radius: var(--radius-md);
+  top: 0;
+  left: 0;
+  z-index: 6;
+  width: 262px;
+  padding: 11px 13px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
   box-shadow: var(--shadow-lg);
   pointer-events: none;
-  animation: peek-in 0.16s var(--ease) both;
+  opacity: 0;
+  transition: opacity 0.09s var(--ease);
 }
 
-@keyframes peek-in {
-  from {
-    opacity: 0;
-    transform: scale(0.94);
+.map-tip.is-on {
+  opacity: 1;
+}
+
+.map-tip__who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.map-tip__swatch {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 3px;
+}
+
+.map-tip__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-tip__group {
+  flex: none;
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.map-tip img {
+  width: 100%;
+  height: 96px;
+  margin-top: 8px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+
+.map-tip__text {
+  margin: 6px 0 0;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-tip {
+    transition: none;
   }
 }
 
@@ -2443,12 +2451,6 @@ h1, h2, h3 {
 .organizer-lasso span {
   flex: 1;
   font-variant-numeric: tabular-nums;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .organizer-map__peek {
-    animation: none;
-  }
 }
 
 .organizer-undo-merge {

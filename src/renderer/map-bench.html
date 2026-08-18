@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Banc — carte</title>
+    <style>
+      /* Le banc n'habille rien : la feuille de l'application fournit l'apparence, on ne
+         force que la taille du cadre pour mesurer sur une grande carte. */
+      html, body, #root { margin: 0; height: 100%; }
+      .organizer-map { height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/map-bench.tsx"></script>
+  </body>
+</html>
