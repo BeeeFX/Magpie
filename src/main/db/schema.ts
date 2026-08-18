@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 14
+export const SCHEMA_VERSION = 15
 
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
@@ -111,6 +111,21 @@ CREATE TRIGGER posts_fts_au AFTER UPDATE ON posts BEGIN
 END;
 
 INSERT INTO posts_fts(posts_fts) VALUES('rebuild');
+`
+
+/* La table des vecteurs d'image, ajoutee avec l'etape « Lire les images ». Elle etait bien
+   dans le schema de creation, mais pas ici : une base existante ne l'a donc jamais recue, et
+   l'analyse s'arretait sur « no such table ». Un schema n'est complet que quand la migration
+   qui va avec existe. */
+export const MIGRATION_15_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS post_image_embeddings (
+  post_id    TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  hash       TEXT NOT NULL,
+  structure  BLOB NOT NULL,
+  meaning    BLOB NOT NULL,
+  frames     INTEGER NOT NULL DEFAULT 1,
+  updated_at INTEGER NOT NULL
+);
 `
 
 export const SCHEMA_SQL = /* sql */ `
