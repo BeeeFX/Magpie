@@ -25,7 +25,7 @@ import {
   type OrganizationItem
 } from '../db/queries'
 import { centreVectors, embedItems, embedTexts } from './embeddings'
-import { blend, RECIPES } from './vision'
+import { blend, encodeTopicPrompts, toVector, topicStandoff } from './vision'
 import { propagateByImage } from './propagate'
 import { project, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
@@ -78,7 +78,56 @@ interface PreparedItem {
 export interface SemanticInput {
   items: Map<string, Float32Array>
   topics: Map<string, Float32Array>
+  /**
+   * Le même rapprochement, mais vu par l'image.
+   *
+   * Absent quand aucune image n'a été lue, ou quand la tour texte de SigLIP n'a pas pu être
+   * chargée : le classement se poursuit alors sur le texte seul, comme avant.
+   */
+  vision?: {
+    /** Les thèmes encodés par SigLIP, dans l'ordre de `TOPICS`. */
+    topics: Float32Array[]
+    /** Le vecteur de sujet de chaque post illustré. */
+    items: Map<string, Float32Array>
+    /** Les identifiants de thème, dans le même ordre que `topics`. */
+    ids: string[]
+    /** Réglages, pour que les bancs puissent les balayer. Par défaut, ceux mesurés ci-dessous. */
+    floor?: number
+    weight?: number
+  }
 }
+
+/**
+ * À partir de quand l'avis de l'image compte, et combien il pèse.
+ *
+ * Le score est un écart-type : à quel point un thème se détache, sur les 27, pour cette
+ * image. Le cosinus brut ne conviendrait pas — son étalement d'une image à l'autre dépasse
+ * l'écart entre bon et mauvais thème.
+ *
+ * Balayé sur la bibliothèque entière, avec et sans l'image (`scripts/bench-vision-topics`).
+ * « Classés » compte les posts illustrés qui rejoignent une catégorie ; « vérité » est la
+ * justesse sur les 1 347 posts dont les mots-clés désignent un thème et un seul — là où le
+ * texte sait de quoi il parle, et donc là où un poids trop haut se verrait :
+ *
+ *   sans l'image        7 093 classés, 1 299 muets classés — 95,3 %
+ *   plancher 2, poids 2 9 157 classés, 2 445 muets classés — 95,3 %   ← retenu
+ *   plancher 2, poids 4 9 140 classés, 2 431 muets classés — 94,4 %
+ *   plancher 2, poids 6 9 133 classés, 2 423 muets classés — 94,9 %
+ *   plancher 2,5        8 057 classés, 1 868 muets classés — 95,5 %
+ *   plancher 3          7 123 classés, 1 268 muets classés — 95,4 %
+ *
+ * Le plancher décide de tout : au-dessus de 2, l'image se tait sur la plupart des posts et
+ * on retombe sur le texte seul. Le poids, lui, ne change pas la couverture — les mêmes posts
+ * sont concernés — mais un poids fort renverse des attributions que le texte tenait bien :
+ * 18 posts cassés pour 5 réparés à poids 4, contre 4 pour 4 à poids 2. On prend donc le plus
+ * faible des deux, qui rend la même couverture sans rien coûter.
+ *
+ * Le gain se lit surtout sur les légendes muettes : 1 299 posts classés sur 2 680 avant,
+ * 2 445 après. C'est le tiers de la bibliothèque qui n'a rien à dire de lui-même et qui
+ * partait au hasard — la vidéo de guitare rangée dans « Cuisine ».
+ */
+const VISION_FLOOR = 2
+const VISION_WEIGHT = 2
 
 /** Poids du rappel sémantique. Une similarité recentrée de 0,3 est déjà un signal net ; le
  *  facteur la met à l'échelle des scores de mots-clés, où un hashtag vaut 6,5. */
@@ -138,6 +187,47 @@ export const TOPIC_DESCRIPTORS: { id: string; text: string }[] = TOPICS.map((top
   id: topic.id,
   text: `${topic.en}, ${topic.fr} — ${topic.keywords.slice(0, 10).join(', ')}`
 }))
+
+/**
+ * Les thèmes tels qu'on les présente à SigLIP.
+ *
+ * La phrase nue, et rien d'autre : ni les mots-clés, ni le libellé français. Mesuré, le
+ * descripteur du classement textuel — nom suivi de dix mots-clés — fait tomber la justesse
+ * de 43,7 % à 24,1 %. SigLIP a appris sur des légendes de photos ; on lui parle donc comme
+ * à une légende.
+ */
+/** Les mots-clés de chaque thème, pour les bancs : ils servent à bâtir une vérité de terrain. */
+export const TOPIC_KEYWORDS: { id: string; keywords: string[] }[] = TOPICS.map((topic) => ({
+  id: topic.id,
+  keywords: topic.keywords
+}))
+
+export const TOPIC_PROMPTS = TOPICS.map((topic) => `a photo of ${topic.en.toLowerCase()}`)
+
+/**
+ * Les thèmes vus par l'image, ou rien.
+ *
+ * Rien est un cas normal, pas une panne : aucune image lue, ou tour texte indisponible —
+ * pas encore téléchargée, hors ligne. Le classement se poursuit alors sur le texte seul,
+ * exactement comme avant. Mais l'échec est *dit* : c'est un `catch` muet à cet endroit qui a
+ * fait passer la lecture des images pour un succès pendant six versions.
+ */
+async function visionTopics(
+  images: Map<string, { meaning: Buffer }>
+): Promise<SemanticInput['vision']> {
+  if (images.size === 0) return undefined
+  try {
+    const topics = await encodeTopicPrompts(TOPIC_PROMPTS)
+    return {
+      topics,
+      ids: TOPICS.map((topic) => topic.id),
+      items: new Map([...images].map(([id, row]) => [id, toVector(row.meaning)]))
+    }
+  } catch (error) {
+    console.warn('[magpie] Thèmes vus par l’image indisponibles, texte seul :', error)
+    return undefined
+  }
+}
 
 const topicKeyword = new Map<string, string>()
 for (const topic of TOPICS) {
@@ -461,6 +551,27 @@ async function createChoices(
         else scores.push({ id: topicId, score: bonus })
       }
     }
+    /* Ce que le post *montre*, en troisième avis. Il s'ajoute comme le rappel sémantique, et
+       pour la même raison : les mots-clés restent le signal le plus sûr, et c'est d'eux que
+       dépend le nommage de la catégorie. Mais un tiers de la bibliothèque n'a aucun texte
+       exploitable, et ces posts-là ne rejoignaient rien — ou pire, rejoignaient n'importe
+       quoi, comme cette vidéo de guitare dont la seule légende est un lien et qui se
+       retrouvait en « Cuisine ». */
+    const vision = semantic?.vision
+    const meaning = vision?.items.get(prepared.item.id)
+    if (vision && meaning) {
+      const floor = vision.floor ?? VISION_FLOOR
+      const weight = vision.weight ?? VISION_WEIGHT
+      const standoff = topicStandoff(meaning, vision.topics)
+      standoff.forEach((value, topicIndex) => {
+        if (value < floor) return
+        const topicId = vision.ids[topicIndex]
+        const bonus = (value - floor) * weight
+        const existing = scores.find((entry) => entry.id === topicId)
+        if (existing) existing.score += bonus
+        else scores.push({ id: topicId, score: bonus })
+      })
+    }
     prepared.choices = scores.sort((left, right) => right.score - left.score)
     if (index % BREATHE_EVERY === BREATHE_EVERY - 1) await breathe()
   }
@@ -595,7 +706,6 @@ let currentProposal: Promise<AiCollectionPlan> | null = null
  *  toute la bibliothèque pour afficher les mêmes points. */
 let lastSemanticVectors: Map<string, Float32Array> | null = null
 /** Recette de la derniere analyse : en changer doit refaire la carte, pas la reprendre. */
-let lastRecipe: string | null = null
 /** Dernier plan produit. La carte le réutilise au lieu de relancer toute l'analyse. */
 let lastPlan: AiCollectionPlan | null = null
 /** Dernière projection. Rouvrir l'organisateur ne doit pas refaire neuf secondes de calcul. */
@@ -724,6 +834,9 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
   /* Le modèle peut manquer — pas encore téléchargé, ou hors ligne au premier lancement. Ce
      n'est pas une erreur : le tri par mots-clés reste entier, il rappelle simplement moins. */
   let semantic: SemanticInput | null = null
+  /* Lu une seule fois : trois lectures servaient trois usages — le classement, la carte et la
+     propagation — et chacune ramenait deux blobs pour chacun des 9 606 posts. */
+  const images = postImageEmbeddings()
   try {
     setProgress({ stage: 'embedding', done: 0, total: items.length, running: true })
     const vectors = await embedItems(items, breathe, (progress) =>
@@ -744,18 +857,14 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
       const centred = centreVectors(together)
       semantic = {
         items: new Map([...vectors.keys()].map((id) => [id, centred.get(id) as Float32Array])),
-        topics: new Map(topicIds.map((id) => [id, centred.get(`topic:${id}`) as Float32Array]))
+        topics: new Map(topicIds.map((id) => [id, centred.get(`topic:${id}`) as Float32Array])),
+        vision: await visionTopics(images)
       }
       /* La carte voit les trois signaux ; le rapprochement aux thèmes n'en voit qu'un.
          Les thèmes sont des phrases : les comparer à un vecteur qui contient deux blocs
          d'image n'aurait pas de sens, ils ne vivent pas dans ce repère. La projection, elle,
          gagne à tout voir — c'est là que se joue « ce qui se ressemble est côte à côte ». */
-      const recipe = readSettings().organizerRecipe
-      const placed = blend(vectors, postImageEmbeddings(), RECIPES[recipe])
-      /* Changer de recette change les positions : garder la projection precedente
-         montrerait l'ancienne carte sous un nouveau nom. */
-      if (lastRecipe !== recipe) lastProjection = null
-      lastRecipe = recipe
+      const placed = blend(vectors, images)
       if (lastSemanticVectors?.size !== placed.size) lastProjection = null
       lastSemanticVectors = placed
     }
@@ -770,7 +879,7 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
      n'ajoute jamais qu'à ce qui manquait. */
   const filled = propagateByImage(
     plan,
-    postImageEmbeddings(),
+    images,
     items.map((item) => item.id)
   )
   if (filled.adopted > 0) {

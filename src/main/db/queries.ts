@@ -656,6 +656,21 @@ export interface PostImageEmbedding {
  * Même économie que pour le texte : le hash porte sur la vignette et la version des
  * modèles, donc une deuxième analyse ne réencode que ce qui a changé.
  */
+/**
+ * Les empreintes seules, sans les vecteurs.
+ *
+ * Sert à décider, avant d'extraire quoi que ce soit, quels clips demandent encore une
+ * lecture. `postImageEmbeddings()` répondrait aussi bien, mais il ramène deux blobs par
+ * post — une quarantaine de mégaoctets sur la bibliothèque de référence — pour deux
+ * colonnes qu'on lit.
+ */
+export function postImageHashes(): Map<string, { hash: string; frames: number }> {
+  const rows = getDb()
+    .prepare('SELECT post_id, hash, frames FROM post_image_embeddings')
+    .all() as { post_id: string; hash: string; frames: number }[]
+  return new Map(rows.map((row) => [row.post_id, { hash: row.hash, frames: row.frames }]))
+}
+
 export function postImageEmbeddings(): Map<string, PostImageEmbedding> {
   const rows = getDb()
     .prepare('SELECT post_id, hash, structure, meaning, frames FROM post_image_embeddings')

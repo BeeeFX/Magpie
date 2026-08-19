@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { mediaDir } from '../db'
+import type { PostFrames } from './frames'
 import {
   organizationItems,
   postImageEmbeddings,
+  postImageHashes,
   savePostImageEmbeddings,
   type PostImageEmbedding
 } from '../db/queries'
@@ -29,6 +31,39 @@ const STRUCTURE_MODEL = 'Xenova/dinov2-small'
 const MEANING_MODEL = 'Xenova/siglip-base-patch16-224'
 /** Entre dans le hash : changer de modèle doit tout réencoder, et rien d'autre ne le doit. */
 const VERSION = `${STRUCTURE_MODEL}|${MEANING_MODEL}|q8|v1`
+
+/** L'empreinte d'une lecture, à partir de ce qui l'identifie. */
+const hashFor = (identity: string): string =>
+  createHash('sha1').update(`${VERSION} ${identity}`).digest('hex').slice(0, 16)
+
+/** Ce qui identifie la lecture d'un post illustré par un clip déjà en cache. */
+const clipIdentity = (videoPath: string, frames: number): string =>
+  `clip:${videoPath}:${frames}`
+
+/**
+ * Les clips dont il faut réellement tirer des images.
+ *
+ * Répondu sans lancer ffmpeg une seule fois, en comparant l'empreinte déjà en base à celle
+ * que cette lecture porterait. C'est ce qui manquait : l'extraction traitait les 4 440 clips
+ * du cache à chaque passe, y compris ceux lus la veille, puis jetait le tout en sortant.
+ * Une bibliothèque déjà lue redemandait donc une vingtaine de minutes de ffmpeg pour
+ * n'écrire aucune ligne — l'étape se donnait « à refaire » indéfiniment.
+ *
+ * Le nombre d'images retenues entre dans l'empreinte, et il n'est connu qu'après extraction.
+ * Mais il est aussi rangé en base à côté du hash : la comparaison reste donc exacte, et
+ * aucune empreinte déjà écrite ne change de valeur.
+ */
+export function framesNeeded(clips: { postId: string; videoPath: string }[]): Set<string> {
+  const known = postImageHashes()
+  const out = new Set<string>()
+  for (const clip of clips) {
+    const stored = known.get(clip.postId)
+    if (!stored || stored.hash !== hashFor(clipIdentity(clip.videoPath, stored.frames))) {
+      out.add(clip.postId)
+    }
+  }
+  return out
+}
 
 export const STRUCTURE_DIMS = 384
 export const MEANING_DIMS = 768
@@ -106,12 +141,19 @@ async function encode(paths: string[]): Promise<{ structure: Float32Array; meani
   const structure = new Float32Array(STRUCTURE_DIMS)
   const meaning = new Float32Array(MEANING_DIMS)
   let counted = 0
+  /* Pourquoi la première image a résisté. Les autres peuvent suffire, donc on continue — mais
+     si aucune ne passe, c'est la seule chose qu'on saura, et il faut donc l'avoir gardée.
+     Ce `catch` était vide : toute la bibliothèque échouait sur « aucune image lisible », un
+     message qui ne dit ni quel fichier ni quelle cause, et qui a envoyé chercher la panne
+     partout sauf là où elle était. */
+  let unreadable: string | null = null
   for (const path of paths) {
     let image
     try {
       image = await RawImage.read(path)
-    } catch {
+    } catch (error) {
       // Vignette évincée entre le relevé et la lecture : les autres suffisent.
+      unreadable ??= `${path} → ${error instanceof Error ? error.message : String(error)}`
       continue
     }
     const inputs = await models.process(image)
@@ -127,7 +169,11 @@ async function encode(paths: string[]): Promise<{ structure: Float32Array; meani
     for (let i = 0; i < MEANING_DIMS; i += 1) meaning[i] += pooled[i]
     counted += 1
   }
-  if (counted === 0) throw new Error('aucune image lisible')
+  /* Distinguer les deux « zéro image » : aucun chemin à lire n'est pas la même panne qu'un
+     chemin qu'on n'a pas su ouvrir, et les confondre coûtait une passe entière à chaque fois. */
+  if (counted === 0) {
+    throw new Error(`aucune image lisible (${unreadable ?? `aucun chemin fourni pour ${paths.length} image(s)`})`)
+  }
   return { structure: unit(structure), meaning: unit(meaning) }
 }
 
@@ -143,7 +189,9 @@ export interface VisionProgress {
  * changé n'est jamais relu. Une bibliothèque déjà lue coûte donc le temps d'une requête.
  */
 export async function readImages(options: {
-  framesFor?: (postId: string) => string[] | null
+  framesFor?: (postId: string) => PostFrames | null
+  /** Le clip en cache d'un post, extraction ou non. Voir `identityOf`. */
+  clipOf?: (postId: string) => string | null
   onProgress?: (progress: VisionProgress) => void
   shouldStop?: () => boolean
 }): Promise<{
@@ -156,14 +204,37 @@ export async function readImages(options: {
   const known = postImageEmbeddings()
   const items = organizationItems().filter((item) => item.thumbPath)
   /* Les chemins décidés une fois : la couverture, ou les images tirées du clip quand il est
-     en cache. Le hash en découle, donc télécharger un clip fait relire le post — et lui
-     seul. */
+     en cache. */
   const framesOf = (id: string, cover: string): string[] =>
-    options.framesFor?.(id) ?? [join(mediaDir(), cover)]
+    options.framesFor?.(id)?.paths ?? [join(mediaDir(), cover)]
+  /*
+   * Ce qui identifie la lecture d'un post — et donc ce qui décide s'il faut la refaire.
+   *
+   * Deux différences avec les chemins qu'on vient de décider, et les deux comptent.
+   * Le clip plutôt que les images qu'on en tire : celles-ci vivent dans un dossier de
+   * travail recréé à chaque session sous un nom tiré au hasard, si bien que l'empreinte
+   * d'un post illustré par une vidéo changeait à tout coup. Aucun des 4 440 posts concernés
+   * ne pouvait donc se retrouver « déjà lu » : la reprise annoncée plus haut ne valait que
+   * pour les images fixes, et chaque passe recommençait les vidéos de zéro.
+   * La vignette en chemin relatif plutôt qu'absolu, ensuite : déplacer la bibliothèque
+   * changeait toutes les empreintes d'un coup, et redemandait la lecture entière.
+   */
+  const identityOf = (id: string, cover: string): string => {
+    const frames = options.framesFor?.(id)
+    if (frames) return clipIdentity(frames.source, frames.paths.length)
+    /* Le clip est en cache, mais aucune image n'en a été tirée : c'est que l'extraction l'a
+       sauté, et elle ne saute que ce qui est déjà lu. Reprendre l'empreinte rangée en base
+       le laisse hors de la liste. Sans ce détour il retomberait sur sa vignette, donc sur
+       une autre empreinte, donc dans les posts à lire — et chaque passe aurait réencodé les
+       clips qu'elle venait justement de s'épargner. */
+    const clip = options.clipOf?.(id)
+    const stored = known.get(id)
+    if (clip && stored) return clipIdentity(clip, stored.frames)
+    return cover
+  }
+  const hashOf = (id: string, cover: string): string => hashFor(identityOf(id, cover))
   const pending = items.filter((item) => {
-    const paths = framesOf(item.id, item.thumbPath as string)
-    const hash = createHash('sha1').update(`${VERSION} ${paths.join(' ')}`).digest('hex').slice(0, 16)
-    return known.get(item.id)?.hash !== hash
+    return known.get(item.id)?.hash !== hashOf(item.id, item.thumbPath as string)
   })
   const total = pending.length
   if (total === 0) return { done: 0, total: 0, stopped: false }
@@ -175,10 +246,15 @@ export async function readImages(options: {
   for (const item of pending) {
     if (options.shouldStop?.()) {
       savePostImageEmbeddings(batch)
-      return { done, total, stopped: true }
+      /* Les échecs repartent avec le reste, même ici. Cette sortie-là les laissait derrière
+         elle : une passe interrompue dont *tout* échouait rendait un compte rendu propre —
+         tant de lus, aucune erreur — alors qu'elle n'avait rien pu écrire. C'est le même
+         silence que celui corrigé plus bas, par la même porte de derrière. */
+      if (failed > 0) console.warn(`[magpie] ${failed} images illisibles sur ${done} lues : ${firstError}`)
+      return { done, total, stopped: true, failed, firstError }
     }
     const paths = framesOf(item.id, item.thumbPath as string)
-    const hash = createHash('sha1').update(`${VERSION} ${paths.join(' ')}`).digest('hex').slice(0, 16)
+    const hash = hashOf(item.id, item.thumbPath as string)
     try {
       const { structure, meaning } = await encode(paths)
       batch.push({
@@ -197,6 +273,13 @@ export async function readImages(options: {
       if (!firstError) firstError = error instanceof Error ? error.message : String(error)
     }
     done += 1
+    /* Vingt échecs d'affilée sans un seul succès : ce n'est plus une vignette abîmée, c'est
+       une panne systématique — modèles qui ne chargent pas, dossier introuvable, chemins
+       faux. Poursuivre sur neuf mille posts ne changera rien au résultat et ne fait que
+       retarder d'un quart d'heure la seule chose utile : la cause. */
+    if (failed >= 20 && failed === done) {
+      throw new Error(`lecture impossible dès le départ (${failed} échecs d'affilée) : ${firstError}`)
+    }
     /* Écriture par paquets : une transaction par post rendait la passe deux fois plus
        lente que le calcul lui-même. */
     if (batch.length >= 64) {
@@ -234,41 +317,106 @@ export async function readImages(options: {
  *
  * Sans ces deux précautions, le mélange fait *moins bien que le texte seul* : 9,2 % contre
  * 12,3. Avec, et aux poids ci-dessous : 16,8 %.
+ *
+ * Ces poids ont longtemps été un réglage parmi huit, exposé dans l'interface faute de savoir
+ * lequel valait le mieux. La question est tranchée : rejouées sur la bibliothèque entière une
+ * fois les images enfin lues, les huit se classent de 17,6 % à 5,6 %, et celles-ci arrivent
+ * premières — devant « sujet » à 15,8 et « image » à 14,0, cette dernière faisant même moins
+ * bien que le texte seul. Les sept autres ont donc été retirées ; `scripts/bench-recipes`
+ * garde leur table et rejoue le classement.
  */
 export const BLEND = { text: 0.6, structure: 0.1, meaning: 0.3 }
 
 /**
- * Plusieurs façons de rapprocher les posts, pour les comparer à l'usage.
+ * Ce que SigLIP sait faire et dont personne ne se servait : comparer une image à des mots.
  *
- * `equilibre` est celle que la mesure a retenue : 16,8 % de precision@10 contre 12,3 pour le
- * texte seul. Mais cette mesure repose sur « deux posts du même auteur devraient être
- * voisins », qui est un substitut — pas ce qu'on cherche vraiment. Les autres recettes
- * existent parce que l'œil peut trancher ce qu'aucune de nos étiquettes ne mesure.
+ * Le classement en thèmes ne voyait que le texte du post, parce que les thèmes sont des
+ * phrases et qu'un vecteur d'image ne vit pas dans le même repère. SigLIP, lui, a été
+ * entraîné pour que les deux vivent dans le *même* : c'est la raison pour laquelle il avait
+ * été retenu plutôt qu'un encodeur d'images seul. Sa tour texte restait inutilisée.
  *
- * Ce ne sont pas que des poids : `texte` retire complètement l'image, ce qui redonne le
- * comportement d'avant 0.18, et `sujet` retire le style pour ne garder que ce que l'image
- * représente.
+ * Mesuré sur 1 347 posts dont le texte donne un thème sans ambiguïté : à partir de la seule
+ * image, elle retrouve ce thème dans 43,7 % des cas et le place dans les trois premiers
+ * 71,2 % du temps — contre 3,7 % au hasard sur 27 thèmes.
+ *
+ * Un coût à connaître : la tour texte est un téléchargement de 111 Mo, en plus des deux
+ * encodeurs d'images. Il n'a lieu qu'une fois, et seulement si des images ont été lues.
  */
-export const RECIPES = {
-  /** Ce qui existait avant que Magpie regarde les images. Le point de comparaison. */
-  texte: { text: 1, structure: 0, meaning: 0 },
-  /** Réglée à la mesure. Le défaut. */
-  equilibre: { text: 0.6, structure: 0.1, meaning: 0.3 },
-  /** Ce que l'image représente prend la main ; le texte n'est plus qu'un appoint. */
-  image: { text: 0.25, structure: 0.15, meaning: 0.6 },
-  /** Le sujet seul, sans le style : deux dessins au même trait mais sans rapport s'écartent. */
-  sujet: { text: 0.4, structure: 0, meaning: 0.6 },
-  /** Le style prend la main : regroupe ce qui *se ressemble*, plutôt que ce qui parle du même. */
-  style: { text: 0.45, structure: 0.4, meaning: 0.15 },
-  /** Rien que ce que l'image représente. Le texte ne compte plus du tout. */
-  sujetSeul: { text: 0, structure: 0, meaning: 1 },
-  /** Rien que l'allure : composition, palette, trait. Le sujet ne compte plus. */
-  structureSeule: { text: 0, structure: 1, meaning: 0 },
-  /** L'allure domine largement, sans que les deux autres disparaissent. */
-  structureHaute: { text: 0.2, structure: 0.6, meaning: 0.2 }
-} as const
+interface TextTower {
+  encode: (prompts: string[]) => Promise<Float32Array[]>
+}
 
-export type RecipeId = keyof typeof RECIPES
+let textTower: TextTower | null = null
+let textTowerLoading: Promise<TextTower> | null = null
+
+async function loadTextTower(): Promise<TextTower> {
+  if (textTower) return textTower
+  if (!textTowerLoading) {
+    textTowerLoading = (async () => {
+      const { AutoTokenizer, SiglipTextModel, env } = await import('@huggingface/transformers')
+      env.cacheDir = join(mediaDir(), '..', 'models')
+      env.allowLocalModels = false
+      const tokenizer = await AutoTokenizer.from_pretrained(MEANING_MODEL)
+      const model = await SiglipTextModel.from_pretrained(MEANING_MODEL, { dtype: 'q8' })
+      const tower: TextTower = {
+        encode: async (prompts: string[]): Promise<Float32Array[]> => {
+          /* SigLIP est entraîné avec un remplissage fixe à 64 jetons. Laisser le
+             remplissage par défaut décale les positions et rend les vecteurs inutilisables :
+             mesuré, la justesse tombe au niveau du hasard. */
+          const inputs = tokenizer(prompts, {
+            padding: 'max_length',
+            max_length: 64,
+            truncation: true
+          })
+          const output = (await model(inputs as never)) as unknown as {
+            pooler_output: { dims: number[]; data: Float32Array }
+          }
+          const [count, width] = output.pooler_output.dims
+          const flat = output.pooler_output.data
+          return Array.from({ length: count }, (_, index) =>
+            unit(Float32Array.from(flat.slice(index * width, (index + 1) * width)))
+          )
+        }
+      }
+      textTower = tower
+      textTowerLoading = null
+      return tower
+    })()
+  }
+  return await textTowerLoading
+}
+
+/**
+ * Les thèmes, vus par SigLIP, dans le repère des images.
+ *
+ * Le libellé compte, et beaucoup : les descripteurs du classement textuel — nom du thème
+ * suivi de dix mots-clés — ne rendent que 24,1 %, là où la phrase nue « a photo of … » en
+ * rend 43,7. SigLIP a appris sur des légendes de photos, pas sur des listes de mots.
+ */
+export async function encodeTopicPrompts(prompts: string[]): Promise<Float32Array[]> {
+  const tower = await loadTextTower()
+  return tower.encode(prompts)
+}
+
+/**
+ * À quel point chaque thème se détache, pour cette image.
+ *
+ * Le cosinus brut ne se compare pas d'un post à l'autre : il vaut 0,040 en moyenne pour le
+ * bon thème, mais son étalement d'une image à l'autre dépasse l'écart entre bon et mauvais
+ * thème. On le standardise donc sur les thèmes du post lui-même — le score répond alors à
+ * « ce thème se détache-t-il, pour cette image », ce qui est comparable partout.
+ */
+export function topicStandoff(meaning: Float32Array, topics: Float32Array[]): number[] {
+  const sims = topics.map((topic) => {
+    let total = 0
+    for (let i = 0; i < topic.length; i += 1) total += topic[i] * meaning[i]
+    return total
+  })
+  const mean = sims.reduce((a, b) => a + b, 0) / sims.length
+  const spread =
+    Math.sqrt(sims.reduce((a, b) => a + (b - mean) ** 2, 0) / sims.length) || 1
+  return sims.map((value) => (value - mean) / spread)
+}
 
 function centred(vectors: Float32Array[]): Float32Array[] {
   if (vectors.length === 0) return []
