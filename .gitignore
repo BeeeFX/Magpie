@@ -16,3 +16,4 @@ magpie.db*
 #   fixtures/preview — écrit par le processus principal à chaque démarrage en dev
 fixtures/media/
 fixtures/preview/
+.recipe-cache/

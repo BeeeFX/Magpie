@@ -150,16 +150,6 @@ export interface Settings {
   aiEndpoint: string
   autoTagEnabled: boolean
   /** Range les nouveaux contenus après chaque synchronisation selon les choix locaux mémorisés. */
-  /** Recette de rapprochement : voir RECIPES. Exposée pour être comparée à l'usage. */
-  organizerRecipe:
-    | 'texte'
-    | 'equilibre'
-    | 'image'
-    | 'sujet'
-    | 'style'
-    | 'sujetSeul'
-    | 'structureSeule'
-    | 'structureHaute'
   autoOrganizeEnabled: boolean
 }
 

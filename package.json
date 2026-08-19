@@ -31,7 +31,8 @@
     "postinstall": "electron-builder install-app-deps",
     "check:vision": "tsx --tsconfig tsconfig.node.json scripts/check-vision.ts",
     "check:map": "tsx --tsconfig tsconfig.node.json scripts/check-map.ts",
-    "bench:vision-topics": "tsx --tsconfig tsconfig.node.json scripts/bench-vision-topics.mts"
+    "bench:vision-topics": "tsx --tsconfig tsconfig.node.json scripts/bench-vision-topics.mts",
+    "bench:recipes": "tsx --tsconfig tsconfig.node.json scripts/bench-recipes.mts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
