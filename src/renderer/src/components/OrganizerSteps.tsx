@@ -46,6 +46,9 @@ const SYNC_MS = 25_000
 /** Le regroupement lui-même : projection comprise, mesuré sur neuf mille posts. */
 const GROUP_MS = 40_000
 
+/** Les étapes dont le retrait dégrade le classement, et pas seulement la vitesse. */
+const GAIN_KEYS = new Set(['images', 'transcribe', 'clips'])
+
 export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   const t = useT()
   const cacheQuality = useStore((state) => state.videoCacheQuality)
@@ -361,6 +364,15 @@ export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
                     {row.id === 'clips' ? ` · ${t(`quality.${cacheQuality}`)}` : ''}
                   </strong>
                   <em>{t(`steps.${row.id}Hint` as Parameters<typeof t>[0])}</em>
+                  {/* Ce que l'étape apporte au classement, et donc ce qu'on perd à la
+                      décocher. L'écran n'annonçait que du temps gagné : décocher paraissait
+                      sans conséquence, alors que ces étapes sont précisément ce qui distingue
+                      un rangement juste d'un rangement au hasard. */}
+                  {!active && GAIN_KEYS.has(row.id) ? (
+                    <em className="steps__loss">
+                      {t(`steps.${row.id}Loss` as Parameters<typeof t>[0])}
+                    </em>
+                  ) : null}
                 </span>
                 {status === 'running' ? (
                   <span

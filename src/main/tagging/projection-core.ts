@@ -140,25 +140,52 @@ export interface ProjectionTuning {
  * l'écran ? On mesure la distance moyenne entre deux posts d'un même thème, rapportée à deux
  * posts au hasard. Zéro pour cent voudrait dire « éparpillé comme au hasard ».
  *
- *   PCA  48, 30 voisins — 29 %, 15 s   ← l'ancien réglage
+ *   PCA  48, 30 voisins — 29 %, 15 s
  *   PCA  96, 15 voisins — 30 %, 14 s
  *   PCA 192, 15 voisins — 33 %, 22 s
- *   PCA 256, 15 voisins — 44 %, 27 s   ← retenu
+ *   PCA 256, 15 voisins — 44 %, 27 s
  *   sans PCA, 15 voisins — 38 %, 47 s
  *   PCA 192, 10 voisins — 22 %, 25 s
  *
  * L'ancienne réduction à 48 dimensions était le vrai frein : elle jetait la structure qu'on
  * cherchait à voir. Douze secondes de plus valent bien un tiers de lisibilité gagné.
+ *
+ * Ce banc-là ne mesurait pourtant pas ce que l'écran montre. Une collection peut rester
+ * « resserrée » tout en se coupant en deux moitiés compactes mais éloignées — et c'est
+ * précisément ce qu'on voyait. `scripts/bench-map-islands` mesure donc la **compacité** : la
+ * part des posts d'une collection qui tiennent dans sa plus grosse tache. À voisinage seul,
+ * PCA 256 constante :
+ *
+ *   15 voisins — compacité 79,7 %, resserrement 61,5 %,  70 s
+ *   25 voisins —           87,2 %,               67,4 %,  77 s
+ *   40 voisins —           89,5 %,               68,8 %,  99 s
+ *   60 voisins —           93,8 %,               76,5 %,  88 s   ← retenu
+ *   80 voisins —           93,4 %,               72,6 %,  92 s
+ *  100 voisins —           86,9 %,               65,5 %,  97 s
+ *
+ * Élargir le voisinage améliore les deux à la fois, jusqu'à 60 où les deux courbes se
+ * retournent. `minDist` et `spread` n'apportent rien (0,05 : 85,9 % ; spread 2,4 : 73,4 %),
+ * et réduire la PCA défait tout (192 dimensions à 80 voisins : 72,8 %).
+ *
+ * Une contrepartie, mesurée elle aussi : la carte se concentre. Cases occupées sur une grille
+ * 20 × 20 — 123 à 15 voisins, 88 à 25, 74 à 40, 70 à 60. L'essentiel de cette perte se joue
+ * tôt, et de 40 à 60 elle est négligeable alors que la compacité gagne encore quatre points.
+ * C'est le sens du réglage : des îlots qu'on peut cerner d'une frontière, au prix d'un nuage
+ * moins étalé.
  */
 export const TUNING: ProjectionTuning = {
   /* Les vecteurs de sens se comparent en cosinus, UMAP mesure en euclidien : les ramener à
      la longueur 1 rend les deux d'accord. Mesuré neutre — le modèle les rend déjà quasi
      unitaires — mais gratuit, et ça restera vrai si le modèle change. */
   unit: true,
-  /* Quinze plutôt que trente : moins de voisins resserre le voisinage proche, celui qu'on
-     regarde. Dix, en revanche, effondre le tout à 22 % — le nuage se fragmente en poussière
-     et la structure d'ensemble disparaît. */
-  neighbours: 15,
+  /* Soixante, et c'est une correction. La note précédente affirmait l'inverse — « quinze
+     plutôt que trente, moins de voisins resserre le voisinage proche » — mais elle s'appuyait
+     sur un banc qui changeait les dimensions PCA *en même temps* que le voisinage : 48
+     dimensions à 30 voisins contre 256 à 15. C'est la PCA qui portait l'écart. À PCA
+     constante, le voisinage large gagne franchement, sur les deux mesures, jusqu'à 60.
+     En dessous, une collection sur cinq se scinde en plusieurs taches ; au-delà, le nuage
+     se lisse et les amas se confondent. */
+  neighbours: 60,
   minDist: 0.015,
   spread: 1.6,
   pcaDims: 256

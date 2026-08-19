@@ -45,7 +45,13 @@ Magpie turns scattered posts into a fast Pinterest-style wall. Connect Instagram
 
 Magpie can compare captions, hashtags, tags, creators and local visual signatures to suggest useful collections. The analysis runs on your computer and works incrementally, including on very large libraries.
 
+Magpie also *looks* at your posts. Two local vision models read every thumbnail — and three frames from each cached video, because the cover of a clip rarely says what the clip is about. A third of a typical library has no usable caption; measured on a 9,600-post library, filing rose from 1,299 to 2,445 of those posts once the images had a say.
+
 Nothing is filed without your approval: rename a category, exclude it, or merge related suggestions before creating the collections.
+
+### A map of what you saved
+
+The organiser draws your library as a map: one dot per post, placed so that distance *is* similarity. Collections appear as islands with drawn boundaries, and you can click a name to isolate one, open a post beside the map instead of in a browser, and reshape a boundary by dragging its points — posts inside it join the collection. Once you have drawn a boundary the map freezes, and posts arriving on later syncs are placed against it, so they file themselves into the region they land in.
 
 ![Magpie local collection organiser](docs/assets/magpie-organizer.png)
 

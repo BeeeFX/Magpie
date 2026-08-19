@@ -19,6 +19,9 @@ import {
   saveLocalVideoFeatures,
   organizationItems,
   postImageEmbeddings,
+  mapPositions,
+  saveMapPositions,
+  hasFrozenMap,
   addToCollection,
   type LocalVideoFeature,
   type OrganizerRuleRow,
@@ -706,6 +709,83 @@ let currentProposal: Promise<AiCollectionPlan> | null = null
  *  toute la bibliothèque pour afficher les mêmes points. */
 let lastSemanticVectors: Map<string, Float32Array> | null = null
 /** Recette de la derniere analyse : en changer doit refaire la carte, pas la reprendre. */
+/**
+ * Place les posts contre une carte déjà figée.
+ *
+ * Ceux qui y sont déjà gardent leur place, au pixel près. Les nouveaux se posent à la moyenne
+ * pondérée de leurs plus proches voisins **dans l'espace des vecteurs**, ce qui est au fond ce
+ * que fait `umap.transform` — sauf que celui-ci exige le modèle en mémoire, et umap-js ne sait
+ * pas le sérialiser : il ne survivrait pas à la fermeture de l'application, alors que les
+ * positions, elles, sont en base.
+ *
+ * Le poids décroît avec la distance, donc un post qui ressemble beaucoup à un voisin se pose
+ * sur lui plutôt qu'au milieu d'un groupe hétéroclite.
+ */
+function placeAgainstFrozen(
+  vectors: Map<string, Float32Array>,
+  frozen: Map<string, { x: number; y: number }>
+): ProjectedPoint[] {
+  const anchors: { id: string; vector: Float32Array; x: number; y: number }[] = []
+  for (const [id, place] of frozen) {
+    const vector = vectors.get(id)
+    if (vector) anchors.push({ id, vector, x: place.x, y: place.y })
+  }
+  const NEIGHBOURS = 12
+  const out: ProjectedPoint[] = []
+  for (const [id, vector] of vectors) {
+    const known = frozen.get(id)
+    if (known) {
+      out.push({ id, x: known.x, y: known.y })
+      continue
+    }
+    const best: { distance: number; x: number; y: number }[] = []
+    for (const anchor of anchors) {
+      let dot = 0
+      const width = Math.min(vector.length, anchor.vector.length)
+      for (let i = 0; i < width; i += 1) dot += vector[i] * anchor.vector[i]
+      const distance = 1 - dot
+      if (best.length < NEIGHBOURS) {
+        best.push({ distance, x: anchor.x, y: anchor.y })
+        best.sort((a, b) => a.distance - b.distance)
+      } else if (distance < best[NEIGHBOURS - 1].distance) {
+        best[NEIGHBOURS - 1] = { distance, x: anchor.x, y: anchor.y }
+        best.sort((a, b) => a.distance - b.distance)
+      }
+    }
+    if (best.length === 0) {
+      out.push({ id, x: 0.5, y: 0.5 })
+      continue
+    }
+    let weight = 0
+    let x = 0
+    let y = 0
+    for (const neighbour of best) {
+      const w = 1 / (neighbour.distance + 0.05)
+      weight += w
+      x += neighbour.x * w
+      y += neighbour.y * w
+    }
+    out.push({ id, x: x / weight, y: y / weight })
+  }
+  return out
+}
+
+/**
+ * Fige la carte telle qu'elle est affichée.
+ *
+ * Appelé au moment où l'utilisateur pose sa première frontière, et jamais avant : c'est ce
+ * geste qui donne un sens aux positions. Les figer d'office imposerait une carte immuable à
+ * ceux qui ne s'en serviront pas, et les priverait des reprojections qui suivent l'évolution
+ * de leur bibliothèque.
+ */
+export function freezeMap(): boolean {
+  if (!lastProjection || lastProjection.length === 0) return false
+  saveMapPositions(
+    lastProjection.map((point) => ({ postId: point.id, x: point.x, y: point.y }))
+  )
+  return true
+}
+
 /** Dernier plan produit. La carte le réutilise au lieu de relancer toute l'analyse. */
 let lastPlan: AiCollectionPlan | null = null
 /** Dernière projection. Rouvrir l'organisateur ne doit pas refaire neuf secondes de calcul. */
@@ -905,11 +985,34 @@ export async function buildOrganizerMap(): Promise<OrganizerMap> {
   if (!vectors || vectors.size === 0) return { points: [], plan }
 
   try {
+    /* La carte figée passe avant tout calcul.
+       Dès qu'une frontière a été tracée à la main, les positions ne doivent plus bouger :
+       reprojeter déplacerait les neuf mille points et le contour désignerait autre chose. On
+       relit donc ce qui est rangé en base, et on ne projette que ce qui manque — un post
+       arrivé depuis. Effacer la carte figée, c'est le bouton « Regénérer », et il prévient. */
+    if (!lastProjection) {
+      const frozen = mapPositions()
+      if (frozen.size > 0) {
+        const kept = [...vectors.keys()].filter((id) => frozen.has(id))
+        /* Une carte figée qui ne couvre presque plus la bibliothèque n'en est plus une : au
+           delà d'un quart de posts nouveaux, l'interpolation placerait trop de monde à partir
+           de trop peu, et mieux vaut reprojeter franchement. */
+        if (kept.length >= vectors.size * 0.75) {
+          lastProjection = placeAgainstFrozen(vectors, frozen)
+        }
+      }
+    }
     if (!lastProjection || lastProjection.length !== vectors.size) {
       setProgress({ stage: 'projecting', done: 0, total: 100, running: true })
       lastProjection = await project(vectors, (done, total) =>
         setProgress({ stage: 'projecting', done, total, running: true })
       )
+      /* On ne fige qu'à la demande — c'est-à-dire quand des frontières existent déjà et
+         qu'on vient de les honorer. Enregistrer à chaque analyse figerait la carte de tout
+         le monde, y compris de ceux qui ne se serviront jamais des frontières. */
+      if (hasFrozenMap()) {
+        saveMapPositions(lastProjection.map((point) => ({ postId: point.id, x: point.x, y: point.y })))
+      }
     }
   } finally {
     // Toujours, y compris sur échec : sinon l'indicateur reste violet et animé sans fin.

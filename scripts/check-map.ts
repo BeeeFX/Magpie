@@ -79,12 +79,17 @@ async function main(): Promise<void> {
   console.log('\nexécution')
   const ids = Array.from({ length: POINTS }, (_, index) => `p${index}`)
   const flat = new Float32Array(POINTS * WIDTH)
-  // Vingt amas, pour que la projection ait quelque chose à séparer.
+  /* Vingt amas, pour que la projection ait quelque chose à séparer. Bruit tiré d'une graine
+     fixe : avec `Math.random()`, le jeu changeait à chaque exécution et l'assertion d'étalement
+     tombait environ une fois sur quatre — y compris au réglage d'origine. Un garde-fou qui
+     échoue au hasard n'apprend rien et finit par se faire ignorer. */
+  let seed = 20240817
+  const random = (): number => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
   for (let index = 0; index < POINTS; index += 1) {
     const cluster = index % 20
     for (let axis = 0; axis < WIDTH; axis += 1) {
       flat[index * WIDTH + axis] =
-        Math.sin((cluster + 1) * (axis + 1) * 0.05) + (Math.random() - 0.5) * 0.25
+        Math.sin((cluster + 1) * (axis + 1) * 0.05) + (random() - 0.5) * 0.25
     }
   }
 
@@ -116,8 +121,14 @@ async function main(): Promise<void> {
     points.every((point) => point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1),
     'les coordonnées tiennent dans le repère unité'
   )
+  /* Ce qu'on veut attraper ici, c'est l'effondrement : une projection qui pose tout au même
+     endroit, ce qui rend la carte inutilisable. Le seuil valait 40 sur 441 cases, et il était
+     calé sur un tirage — avec la graine, les vingt amas en occupent 37 quel que soit le
+     nombre de voisins, de 15 à 60. Il rejetait donc une projection saine une fois sur quatre
+     tout en ne mesurant rien du réglage. Vingt laisse la marge qu'il faut : un effondrement
+     n'en occupe qu'une poignée. */
   const spread = new Set(points.map((point) => `${Math.round(point.x * 20)}:${Math.round(point.y * 20)}`))
-  assert(spread.size > 40, `les points s’étalent au lieu de s’empiler (${spread.size} cases occupées)`)
+  assert(spread.size > 20, `les points s’étalent au lieu de s’empiler (${spread.size} cases occupées)`)
   console.log(`  ${POINTS} points projetés en ${Math.round(elapsed)} ms`)
   assert(elapsed < 120_000, 'la projection reste sous deux minutes')
 

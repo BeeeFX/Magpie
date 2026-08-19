@@ -61,6 +61,9 @@ createRoot(document.getElementById('root')!).render(
     includedGroups={included}
     groupNames={names}
     showLabels
+    showBoundaries
+    savedBoundaries={new Map()}
+    onBoundaryChange={() => {}}
     onLasso={() => {}}
     onHover={() => {}}
     onOpen={() => {}}

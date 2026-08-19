@@ -130,6 +130,12 @@ export function Sidebar(): React.JSX.Element {
     setCreatingCollection(false)
   }
 
+  const savedCount = stats?.bySource.saved ?? 0
+  const likedCount = stats?.bySource.liked ?? 0
+  /** On masque une provenance vide, sauf si les deux le sont — bibliothèque encore neuve. */
+  const showSaved = savedCount > 0 || likedCount === 0
+  const showLiked = likedCount > 0 || savedCount === 0
+
   return (
     <aside className="sidebar">
       {/* Zone de glissement de la fenêtre ; sous macOS les pastilles système s'y posent. */}
@@ -140,6 +146,10 @@ export function Sidebar(): React.JSX.Element {
         </div>
       </div>
 
+      {/* Une provenance qu'on n'utilise pas n'a pas à occuper une ligne : « Favoris » à zéro,
+          chez quelqu'un qui n'a jamais synchronisé ses likes, ne fait qu'ajouter du vide à
+          lire. On la garde tant que l'autre est vide aussi — sur une bibliothèque neuve, tout
+          est à zéro et masquer les deux laisserait une barre latérale amputée sans raison. */}
       <nav className="sidebar__nav">
         <div className="sidebar__group">
           <button type="button" className={`row ${isAll ? 'is-active' : ''}`} onClick={resetQuery}>
@@ -148,7 +158,7 @@ export function Sidebar(): React.JSX.Element {
             <span className="row__count">{stats?.total ?? 0}</span>
           </button>
 
-          {contentSources.includes('saved') ? (
+          {contentSources.includes('saved') && showSaved ? (
               <button
                 type="button"
                 className={`row ${query.sources.length === 1 && query.sources[0] === 'saved' ? 'is-active' : ''}`}
@@ -165,7 +175,7 @@ export function Sidebar(): React.JSX.Element {
                 <span className="row__count">{stats?.bySource.saved ?? 0}</span>
               </button>
           ) : null}
-          {contentSources.includes('liked') ? (
+          {contentSources.includes('liked') && showLiked ? (
               <button
                 type="button"
                 className={`row ${query.sources.length === 1 && query.sources[0] === 'liked' ? 'is-active' : ''}`}

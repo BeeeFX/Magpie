@@ -1,6 +1,6 @@
 {
   "name": "magpie",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Instagram and X bookmarks and likes in one fast visual library",
   "author": "BeeeFX",
   "license": "MIT",
@@ -32,7 +32,10 @@
     "check:vision": "tsx --tsconfig tsconfig.node.json scripts/check-vision.ts",
     "check:map": "tsx --tsconfig tsconfig.node.json scripts/check-map.ts",
     "bench:vision-topics": "tsx --tsconfig tsconfig.node.json scripts/bench-vision-topics.mts",
-    "bench:recipes": "tsx --tsconfig tsconfig.node.json scripts/bench-recipes.mts"
+    "bench:recipes": "tsx --tsconfig tsconfig.node.json scripts/bench-recipes.mts",
+    "bench:map-zoom": "tsx --tsconfig tsconfig.web.json scripts/bench-map-zoom.mts",
+    "bench:map-islands": "tsx --tsconfig tsconfig.node.json scripts/bench-map-islands.mts",
+    "check:boundaries": "tsx --tsconfig tsconfig.node.json scripts/check-boundaries.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 15
+export const SCHEMA_VERSION = 16
 
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
@@ -124,6 +124,39 @@ CREATE TABLE IF NOT EXISTS post_image_embeddings (
   structure  BLOB NOT NULL,
   meaning    BLOB NOT NULL,
   frames     INTEGER NOT NULL DEFAULT 1,
+  updated_at INTEGER NOT NULL
+);
+`
+
+/**
+ * La carte, figée, et les frontières que l'utilisateur y a posées.
+ *
+ * Deux tables, et un invariant qui les lie : **une frontière ne veut rien dire sans les
+ * positions contre lesquelles elle a été tracée.** Reprojeter déplace les neuf mille points ;
+ * un contour dessiné sur l'ancienne carte désignerait alors n'importe quoi. Les deux tables
+ * se vident donc ensemble, et c'est ce que l'avertissement « cela effacera vos frontières »
+ * traduit à l'écran.
+ *
+ * `post_positions` est aussi ce qui rend les frontières utiles au-delà de l'affichage : un
+ * post arrivé à la synchro suivante est placé par interpolation de ses voisins déjà posés,
+ * tombe dans une région, et prend sa collection. Le modèle UMAP, lui, ne survit pas à la
+ * fermeture de l'application — les positions, si.
+ *
+ * `shape` est la région elle-même : les anneaux de sommets, en JSON, dans le repère unité de
+ * la carte. Du vectoriel et non un masque de bits — un masque se pixellise au zoom, ne peut
+ * pas être lissé, et n'offre aucune poignée à saisir. Les sommets, eux, sont déjà les points
+ * de contrôle de la courbe qu'on trace.
+ */
+export const MIGRATION_16_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS post_positions (
+  post_id TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  x       REAL NOT NULL,
+  y       REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS collection_boundaries (
+  name       TEXT PRIMARY KEY,
+  shape      TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
 `
@@ -347,6 +380,18 @@ CREATE INDEX IF NOT EXISTS idx_organizer_rules_collection
 
 -- Table externe : le contenu vit dans la table posts, l'index FTS ne stocke que ce qu'il
 -- faut pour chercher. Les triggers ci-dessous la maintiennent synchronisée.
+CREATE TABLE IF NOT EXISTS post_positions (
+  post_id TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  x       REAL NOT NULL,
+  y       REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS collection_boundaries (
+  name       TEXT PRIMARY KEY,
+  shape      TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(
   text,
   ai_description,

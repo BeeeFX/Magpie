@@ -2372,6 +2372,153 @@ h1, h2, h3 {
   font-size: 11px;
 }
 
+/* La carte et l'aperçu côte à côte. Le panneau prend une largeur fixe et la carte le reste :
+   ouvrir un post rétrécit la carte au lieu de la recouvrir, pour qu'on garde sous les yeux
+   l'endroit d'où vient le post qu'on regarde. */
+.organizer-stage {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.organizer-stage > .organizer-map {
+  flex: 1;
+  min-width: 0;
+}
+
+/* L'avertissement avant régénération : il annonce une perte, il doit se lire comme telle. */
+.steps__loss {
+  display: block;
+  margin-top: 3px;
+  color: var(--danger, #e0574f);
+  opacity: 0.85;
+}
+
+.organizer-warn {
+  color: var(--danger, #e0574f);
+  font-size: 12px;
+}
+
+.map-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  flex: none;
+  height: min(52vh, 460px);
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+}
+
+.map-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-panel__who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.map-panel__stage {
+  display: flex;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--field);
+}
+
+/* Comme l'infobulle : les deux côtés bornés, aucun imposé, donc le média garde son format. */
+.map-panel__stage img,
+.map-panel__stage video {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  width: auto;
+  height: auto;
+}
+
+.map-panel__nomedia,
+.map-panel__empty {
+  padding: 24px 8px;
+  color: var(--faint);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.map-panel__text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.map-panel__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.map-panel__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.map-panel__tags li {
+  padding: 2px 7px;
+  border-radius: var(--pill);
+  background: var(--field);
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.map-panel__out {
+  margin-top: auto;
+  justify-content: center;
+}
+
+@media (max-width: 900px) {
+  /* Trop étroit pour deux colonnes : le panneau passe dessous plutôt que d'écraser la carte. */
+  .organizer-stage {
+    flex-direction: column;
+  }
+
+  /* L'avertissement avant régénération : il annonce une perte, il doit se lire comme telle. */
+.steps__loss {
+  display: block;
+  margin-top: 3px;
+  color: var(--danger, #e0574f);
+  opacity: 0.85;
+}
+
+.organizer-warn {
+  color: var(--danger, #e0574f);
+  font-size: 12px;
+}
+
+.map-panel {
+    width: auto;
+    height: auto;
+    max-height: 46vh;
+  }
+}
+
 .organizer-map {
   position: relative;
   height: min(52vh, 460px);
@@ -2386,6 +2533,17 @@ h1, h2, h3 {
   height: 100%;
   cursor: grab;
   touch-action: none;
+}
+
+/* Le nom d'un îlot est un bouton : le curseur doit le dire avant le clic, comme la pastille
+   qui apparaît derrière lui. */
+.organizer-map canvas.is-over-label {
+  cursor: pointer;
+}
+
+/* En retouche, le curseur cesse d'être une main qui saisit la carte : on peint. */
+.organizer-map canvas.is-editing {
+  cursor: crosshair;
 }
 
 .organizer-map canvas:active {

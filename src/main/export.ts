@@ -90,10 +90,35 @@ function readRows(): Row[] {
 }
 
 /** Le prompt système, en clair et modifiable : c'est l'utilisateur qui converse. */
-export function systemPrompt(language: 'fr' | 'en'): string {
+/**
+ * Les instructions que l'assistant lit en premier.
+ *
+ * `root` est indispensable, et son absence était un vrai défaut : le texte disait « ce
+ * dossier » sans jamais donner son chemin. Un assistant à qui l'on colle ces instructions —
+ * ce qui est l'usage même du bouton « Copier les instructions » — n'avait alors aucun moyen
+ * de savoir *où* chercher sur le disque, et ne pouvait que demander le chemin ou inventer.
+ */
+export function systemPrompt(language: 'fr' | 'en', root?: string): string {
+  const where = root
+    ? language === 'fr'
+      ? `
+
+Le dossier se trouve à cet emplacement, sur cet ordinateur :
+
+    ${root}
+
+Tous les chemins ci-dessous sont relatifs à ce dossier.`
+      : `
+
+The folder is at this location on this computer:
+
+    ${root}
+
+Every path below is relative to that folder.`
+    : ''
   if (language === 'fr') {
     return `Tu réponds à des questions sur une bibliothèque de posts sauvegardés depuis
-Instagram et X, exportée par Magpie dans ce dossier.
+Instagram et X, exportée par Magpie dans ce dossier.${where}
 
 Structure du dossier :
 - \`index.md\` — le sommaire : combien de posts, et en combien de tranches.
@@ -116,7 +141,7 @@ n'est pas dans le dossier, dis-le plutôt que de la deviner — une transcriptio
 signifie que la vidéo n'a pas encore été transcrite, pas qu'elle est muette.`
   }
   return `You answer questions about a library of posts saved from Instagram and X,
-exported by Magpie into this folder.
+exported by Magpie into this folder.${where}
 
 Folder structure:
 - \`index.md\` — the table of contents: how many posts, in how many chunks.

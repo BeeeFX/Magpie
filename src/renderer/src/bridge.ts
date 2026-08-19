@@ -211,6 +211,10 @@ const previewApi: MagpieApi = {
   stopImageReading: async () => PREVIEW_TASKS,
   startTranscription: async () => PREVIEW_TASKS,
   stopTranscription: async () => PREVIEW_TASKS,
+  organizerBoundaries: async (): Promise<{ name: string; shape: string }[]> => [],
+  saveOrganizerBoundary: async (): Promise<number> => 0,
+  clearOrganizerBoundaries: async (): Promise<boolean> => true,
+  hasFrozenMap: async (): Promise<boolean> => false,
   organizerMap: async (): Promise<OrganizerMap> => {
     const posts = await previewPosts().catch(() => [])
     const islands = [

@@ -342,6 +342,10 @@ export interface MagpieApi {
   startTranscription(): Promise<BackgroundState>
   stopTranscription(): Promise<BackgroundState>
   organizerMap(): Promise<OrganizerMap>
+  organizerBoundaries(): Promise<{ name: string; shape: string }[]>
+  saveOrganizerBoundary(name: string, shape: string, postIds: string[]): Promise<number>
+  clearOrganizerBoundaries(): Promise<boolean>
+  hasFrozenMap(): Promise<boolean>
   lastOrganizerApplication(): Promise<OrganizerApplicationSummary | null>
   undoOrganizerApplication(): Promise<OrganizerUndoResult>
   copyToClipboard(text: string): Promise<void>

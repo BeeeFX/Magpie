@@ -135,6 +135,7 @@ export function Welcome(): React.JSX.Element {
       { key: 'gather', icon: <IconSync size={18} />, title: 'welcome.gatherTitle', text: 'welcome.gatherText' },
       { key: 'see', icon: <IconGrid size={18} />, title: 'welcome.seeTitle', text: 'welcome.seeText' },
       { key: 'organise', icon: <IconTag size={18} />, title: 'welcome.organiseTitle', text: 'welcome.organiseText' },
+      { key: 'map', icon: <IconCollections size={18} />, title: 'welcome.mapTitle', text: 'welcome.mapText' },
       { key: 'find', icon: <IconSearch size={18} />, title: 'welcome.findTitle', text: 'welcome.findText' }
     ],
     [

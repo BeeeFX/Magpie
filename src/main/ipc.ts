@@ -25,6 +25,10 @@ import { dataDir, getDb, mediaDir, writeDataDirLocation } from './db'
 import {
   addTag,
   addToCollection,
+  collectionBoundaries,
+  saveCollectionBoundary,
+  clearFrozenMap,
+  hasFrozenMap,
   collectionsForPost,
   countDemoPosts,
   createCollection,
@@ -63,7 +67,8 @@ import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
 import { checkForUpdates, getUpdateState, installUpdate } from './updater'
 import { exportDir, exportLibrary, systemPrompt } from './export'
-import { buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
+import {
+  freezeMap, buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
 import {
   countPendingTranscripts,
   isTranscribing,
@@ -366,7 +371,9 @@ export function registerIpc({
   })
 
   ipcMain.handle('export:run', () => exportLibrary(exportLanguage()))
-  ipcMain.handle('export:prompt', () => systemPrompt(exportLanguage()))
+  /* Le chemin part avec les instructions : c'est tout l'intérêt du bouton — on les colle dans
+     un assistant, qui doit alors pouvoir ouvrir le dossier sans le demander. */
+  ipcMain.handle('export:prompt', () => systemPrompt(exportLanguage(), exportDir()))
   ipcMain.handle('export:open', async () => {
     await mkdir(exportDir(), { recursive: true })
     await shell.openPath(exportDir())
@@ -400,6 +407,22 @@ export function registerIpc({
   })
 
   ipcMain.handle('organizer:map', () => buildOrganizerMap())
+  ipcMain.handle('organizer:boundaries', () => collectionBoundaries())
+  ipcMain.handle(
+    'organizer:saveBoundary',
+    (_event, name: string, shape: string, postIds: string[]) => {
+      /* Ranger la frontière fige la carte du même coup : sans les positions, le contour
+         désignerait n'importe quoi à la prochaine analyse. Les deux vont ensemble, toujours. */
+      freezeMap()
+      saveCollectionBoundary(String(name), String(shape))
+      return postIds.length
+    }
+  )
+  ipcMain.handle('organizer:clearBoundaries', () => {
+    clearFrozenMap()
+    return true
+  })
+  ipcMain.handle('organizer:hasFrozenMap', () => hasFrozenMap())
   ipcMain.handle('organizer:lastApplication', () => lastOrganizerApplication())
   ipcMain.handle('organizer:undo', () => revertOrganizerApplication())
 

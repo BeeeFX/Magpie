@@ -24,6 +24,12 @@
     "electron.vite.config.ts",
     // Le moteur de mise en page vit côté renderer mais ne dépend d'aucune API DOM :
     // `scripts/check-layout.ts` l'exécute sous Node, il doit donc être visible ici aussi.
-    "src/renderer/src/layout.ts"
+    "src/renderer/src/layout.ts",
+    // Même cas : la couverture du tampon de la carte est de la géométrie pure, et
+    // `scripts/bench-map-zoom.mts` la rejoue sous Node pour compter les retracés.
+    "src/renderer/src/map-coverage.ts",
+    // Même cas encore : les contours de collections sont de la géométrie pure, vérifiée par
+    // `scripts/check-boundaries.ts`.
+    "src/renderer/src/map-boundaries.ts"
   ]
 }

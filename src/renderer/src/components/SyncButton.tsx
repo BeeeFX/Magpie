@@ -4,7 +4,7 @@ import { magpie } from '../bridge'
 import { CLIP_BYTES, THUMBNAIL_BYTES } from '../estimates'
 import { formatBytes, PLATFORM_LABEL } from '../format'
 import { useStore, useT } from '../store'
-import {
+import { IconCheck,
   IconChevronRight,
   IconClock,
   IconCollections,
@@ -30,6 +30,8 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
   const startSync = useStore((s) => s.startSync)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setOrganizerOpen = useStore((s) => s.setOrganizerOpen)
+  const autoOrganizeEnabled = useStore((s) => s.autoOrganizeEnabled)
+  const setAutoOrganizeEnabled = useStore((s) => s.setAutoOrganizeEnabled)
   const setExportOpen = useStore((s) => s.setExportOpen)
   const cacheQuality = useStore((s) => s.videoCacheQuality)
   const [counts, setCounts] = useState<{ thumbnails: number; clips: number } | null>(null)
@@ -54,6 +56,25 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
         <span>
           <strong>{t('actions.organize')}</strong>
           <em>{t('actions.organizeHint')}</em>
+        </span>
+      </button>
+
+      {/* Ranger tout seul après chaque synchronisation. Sa place est ici, à côté de l'action
+          qu'il automatise, plutôt que perdu dans les réglages : c'est en lançant un rangement
+          qu'on se demande s'il faut le refaire à la main la prochaine fois. Avec des
+          frontières posées, le nouveau contenu tombe dans la région qui lui revient. */}
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={autoOrganizeEnabled}
+        onClick={() => void setAutoOrganizeEnabled(!autoOrganizeEnabled)}
+      >
+        <span style={{ opacity: autoOrganizeEnabled ? 1 : 0.18, display: 'inline-flex' }}>
+          <IconCheck size={15} />
+        </span>
+        <span>
+          <strong>{t('actions.autoOrganize')}</strong>
+          <em>{t('actions.autoOrganizeHint')}</em>
         </span>
       </button>
 

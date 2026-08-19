@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { OrganizerMap as MapData, OrganizerMapPoint } from '@shared/types'
 import { useT } from '../store'
+import { neededArea, paintArea, stillCovers, ZOOM_HEADROOM } from '../map-coverage'
+import {
+  fieldFromMask,
+  insideRing,
+  isoContour,
+  ownershipMasks,
+  ringToCurves,
+  simplifyRing,
+  stitchRings,
+  MASK_LEVEL,
+  type Vertex
+} from '../map-boundaries'
 
 /**
  * La carte sémantique.
@@ -35,8 +47,20 @@ const MIN_SCALE = 2
  *  reste dedans, on recopie l'image déjà peinte au lieu de retracer la toile. Assez large
  *  pour absorber un geste franc, assez étroite pour que le tampon reste raisonnable. */
 const WEB_MARGIN = 320
-/** Plafond de zoom, comme la maquette : au-delà on ne lit plus que quelques points isolés. */
-const MAX_SCALE = 24
+/** Plafond de zoom. Porté de 24 à 60 : dans les zones denses, plusieurs posts se superposent
+ *  au même pixel et on ne pouvait pas les séparer pour les lire un par un. */
+const MAX_SCALE = 60
+/** Part de l'image effacée pour les groupes qu'on ne regarde pas. Assez pour qu'ils s'éteignent,
+ *  pas au point de perdre le contexte : on doit encore voir *où* le groupe se situe. */
+const FOCUS_FADE = 0.86
+/**
+ * Écart toléré en simplifiant un contour, en unités de carte.
+ *
+ * Les carrés marchants rendent un sommet par case traversée — trois cents pour une région,
+ * alignés par petits paquets. On ne pose pas de poignées sur trois cents sommets. À 0,004,
+ * mesuré, il en reste une vingtaine et la forme contient toujours 100 % de ses posts.
+ */
+const RING_TOLERANCE = 0.004
 /** Plafond du tampon, en pixels physiques. Sur un grand écran à 200 %, le cadre plus sa marge
  *  dépasserait les cent mégaoctets : on rogne alors la marge, pas la mémoire. */
 const WEB_BUDGET = 24_000_000
@@ -83,6 +107,14 @@ interface Props {
   groupNames: Map<string, string>
   /** Les noms d'amas sont-ils dessinés ? Masqués, la toile se voit entière. */
   showLabels: boolean
+  /** Les contours de collections sont-ils tracés ? */
+  showBoundaries: boolean
+  /** Les frontières déjà rangées en base, par groupe. Vides si la carte n'est pas figée. */
+  savedBoundaries: Map<string, Vertex[][]>
+  /** Une frontière vient d'être déformée : à l'appelant de la ranger et de reclasser. */
+  onBoundaryChange(group: string, rings: Vertex[][], inside: string[]): void
+  /** Quelle frontière est en cours de retouche, pour que l'écran puisse le dire. */
+  onEditingChange?(group: string | null): void
   onLasso(ids: string[]): void
   onHover(point: OrganizerMapPoint | null): void
   /** Clic sur un point : ouvrir le post qu'il représente. */
@@ -139,6 +171,10 @@ export function OrganizerMap({
   includedGroups,
   groupNames,
   showLabels,
+  showBoundaries,
+  savedBoundaries,
+  onBoundaryChange,
+  onEditingChange,
   onLasso,
   onHover,
   onOpen,
@@ -157,10 +193,46 @@ export function OrganizerMap({
   const [hovered, setHovered] = useState<OrganizerMapPoint | null>(null)
   /** Amas éclairé : celui du point survolé, ou celui dont on survole le nom. */
   const [litGroup, setLitGroup] = useState<string | null>(null)
+  /** Amas retenu au clic : tout le reste s'efface tant qu'il l'est. Le survol reste par-dessus. */
+  const [focusGroup, setFocusGroup] = useState<string | null>(null)
+  /** Nom survolé, pour lui donner l'aspect d'un bouton — et au curseur la forme qui va avec. */
+  const [hoverLabel, setHoverLabel] = useState<string | null>(null)
+  /**
+   * La frontière en cours de retouche, s'il y en a une.
+   *
+   * Une seule à la fois, et c'est délibéré : deux régions qui se recouvrent poseraient la
+   * question « à laquelle appartient ce post » sans réponse. Pousser la frontière d'une
+   * collection creuse celles qu'elle recouvre.
+   */
+  const [editing, setEditing] = useState<string | null>(null)
+  useEffect(() => {
+    onEditingChange?.(editing)
+  }, [editing, onEditingChange])
+  /** Le sommet saisi pendant un glisser, s'il y en a un. */
+  const draggedVertexRef = useRef<{ ring: number; index: number } | null>(null)
   /** Où les noms ont été posés au dernier dessin, pour pouvoir les survoler. */
   const labelBoxes = useRef<{ group: string; x: number; y: number; half: number; size: number }[]>(
     []
   )
+  useEffect(() => {
+    if (!focusGroup) return
+    const onKey = (event: KeyboardEvent): void => {
+      /* La touche ne doit pas remonter : Échap ferme aussi la fenêtre d'organisation, et
+         relâcher le focus refermait tout l'écran d'un coup. */
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      setFocusGroup(null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [focusGroup])
+
+  /* Les noms sont la seule poignée du focus : les masquer sans le relâcher laisserait la carte
+     éteinte sans aucun moyen de la rallumer. */
+  useEffect(() => {
+    if (!showLabels) setFocusGroup(null)
+  }, [showLabels])
+
   const lassoRef = useRef<{ x: number; y: number }[]>([])
   /* Le tracé en cours vit dans une référence, pas dans l'état : un mouvement de pointeur peut
      suivre l'appui dans la même image, avant que React n'ait rendu, et le geste était alors
@@ -219,6 +291,102 @@ export function OrganizerMap({
     () => new Map(data.plan.suggestions.map((suggestion, index) => [suggestion.id, index])),
     [data.plan.suggestions]
   )
+
+  /**
+   * Le calque des frontières : un contour et un aplat par collection, peints une fois.
+   *
+   * Peint dans le repère unité de la carte, donc une seule recopie transformée suffit à
+   * chaque image — comme la toile. Le recalculer au zoom coûterait vingt champs de densité
+   * par cran, pour un tracé qui ne change pas : les frontières vivent dans l'espace de la
+   * carte, pas dans celui de l'écran.
+   */
+  /**
+   * Les régions des collections, sous forme de masques modifiables.
+   *
+   * Calculées depuis les points au premier affichage, puis remplacées par celles que
+   * l'utilisateur a déformées et rangées en base. Un masque plutôt qu'un contour : déformer
+   * revient à peindre, et l'appartenance se lit en une case.
+   */
+  /**
+   * Les régions, en contours vectoriels.
+   *
+   * Un anneau de sommets par région, et non plus un masque de 192 × 192 : le masque se
+   * pixellisait dès qu'on zoomait, ne pouvait pas être lissé, et n'offrait aucune poignée à
+   * saisir. Le vectoriel règle les trois — il se trace net à toute échelle, s'arrondit, et
+   * chaque sommet est déjà un point de contrôle.
+   */
+  const [regions, setRegions] = useState<Map<string, Vertex[][]>>(new Map())
+
+  useEffect(() => {
+    const members = new Map<string, { x: number; y: number }[]>()
+    for (const point of data.points) {
+      if (!point.group) continue
+      const list = members.get(point.group)
+      if (list) list.push({ x: point.x, y: point.y })
+      else members.set(point.group, [{ x: point.x, y: point.y }])
+    }
+    /* Les régions se découpent les unes contre les autres, jamais chacune dans son coin :
+       les collections s'interpénètrent, et seuiller séparément faisait revendiquer presque
+       toute la carte à chacune — vingt contours superposés, illisibles. */
+    const owned = ownershipMasks(
+      [...members]
+        .filter(([, points]) => points.length >= 3)
+        .map(([group, points]) => ({ group, points }))
+    )
+    const next = new Map<string, Vertex[][]>()
+    for (const [group, mask] of owned) {
+      const stored = savedBoundaries.get(group)
+      if (stored && stored.length > 0) {
+        next.set(group, stored)
+        continue
+      }
+      const rings = stitchRings(isoContour(fieldFromMask(mask), MASK_LEVEL))
+        .map((ring) => simplifyRing(ring, RING_TOLERANCE))
+        .filter((ring) => ring.length >= 6)
+      if (rings.length > 0) next.set(group, rings)
+    }
+    setRegions(next)
+  }, [data.points, savedBoundaries])
+
+  /**
+   * Où poser le nom d'une collection quand ses frontières sont visibles.
+   *
+   * Au centre de sa région, et non sur la case la plus fournie de l'amas : quand un contour est
+   * tracé, c'est lui que l'œil suit, et un nom posé à côté de sa région désignerait le voisin.
+   */
+  const regionCentres = useMemo(() => {
+    const centres = new Map<string, { x: number; y: number }>()
+    for (const [group, rings] of regions) {
+      const ring = [...rings].sort((a, b) => b.length - a.length)[0]
+      if (!ring || ring.length === 0) continue
+      let x = 0
+      let y = 0
+      for (const vertex of ring) {
+        x += vertex.x
+        y += vertex.y
+      }
+      centres.set(group, { x: x / ring.length, y: y / ring.length })
+    }
+    return centres
+  }, [regions])
+
+  /** Les chemins prêts à tracer, refaits seulement quand une région change. */
+  const boundaryPaths = useMemo(() => {
+    const paths = new Map<string, Path2D>()
+    for (const [group, rings] of regions) {
+      const path = new Path2D()
+      for (const ring of rings) {
+        if (ring.length < 3) continue
+        path.moveTo(ring[0].x, ring[0].y)
+        for (const curve of ringToCurves(ring)) {
+          path.bezierCurveTo(curve.c1.x, curve.c1.y, curve.c2.x, curve.c2.y, curve.to.x, curve.to.y)
+        }
+        path.closePath()
+      }
+      paths.set(group, path)
+    }
+    return paths
+  }, [regions])
 
   /* Découpage en cases pour le pointage. Reconstruit seulement quand les points changent —
      pas au zoom, qui ne déplace rien dans le repère de la carte. */
@@ -351,6 +519,11 @@ export function OrganizerMap({
     const size = Math.min(width, height)
     const landing = landingAt()
     const closeness = Math.min(1, (view.scale - 1) / WEB.nearAt)
+    /* L'origine du carré unité à l'écran, avant décalage du cadrage. Remontée ici parce que
+       les frontières s'en servent aussi, et qu'elle ne dépend que du cadre et de l'échelle. */
+    const span = size * view.scale
+    const originX = ((width - size) / 2) * view.scale
+    const originY = ((height - size) / 2) * view.scale
     const edgeAlpha =
       (WEB.edgeFar + WEB.edgeNear * closeness) /
       Math.sqrt(Math.max(1, links.length / WEB.reference))
@@ -464,10 +637,15 @@ export function OrganizerMap({
     /* Survoler éclaire l'amas désigné au lieu d'éteindre les autres : la toile complète doit
        rester lisible en permanence, c'est tout son intérêt. Repeint par-dessus l'image en
        cache — repeindre le tampon entier pour un survol coûterait 220 ms par mouvement. */
-    const lightUp = (group: string): void => {
+    const lightUp = (group: string, stretch = 1): void => {
       if (edgeAlpha <= 0.002 || pathCache.current.key === '') return
       context.save()
       context.translate(view.x, view.y)
+      /* Pendant un geste de zoom, le fond est une recopie *étirée* du tampon : aucun retracé
+         n'a eu lieu, donc `pathCache` tient encore les courbes de l'échelle précédente. Les
+         dessiner telles quelles les décalait du fond — c'était le calque qui glissait sous
+         les points pendant qu'on zoomait. On leur applique le même étirement qu'à l'image. */
+      if (stretch !== 1) context.scale(stretch, stretch)
       context.globalCompositeOperation = 'lighter'
       for (const entry of pathCache.current.paths.values()) {
         if (entry.group !== group) continue
@@ -477,6 +655,46 @@ export function OrganizerMap({
         context.stroke(entry.path)
         context.lineWidth = core
         context.globalAlpha = Math.min(0.75, edgeAlpha * 4.5)
+        context.stroke(entry.path)
+      }
+      context.globalCompositeOperation = 'source-over'
+      context.globalAlpha = 1
+      context.restore()
+    }
+
+    /**
+     * Repeint un groupe **tel qu'il était**, après que l'effacement du focus l'a emporté avec
+     * le reste.
+     *
+     * Rigoureusement les mêmes passes et les mêmes opacités que `paintWeb` : c'est là toute la
+     * différence avec `lightUp`, qui *surexpose* pour désigner un amas au survol. Le focus ne
+     * doit rien éclairer — il assombrit les autres, et celui qu'on regarde garde exactement la
+     * luminance qu'il avait. Passer par `lightUp` rendait le groupe sélectionné éclatant, si
+     * bien qu'on ne le voyait plus tel qu'il est.
+     */
+    const restoreGroup = (group: string, stretch = 1): void => {
+      if (edgeAlpha <= 0.002 || pathCache.current.key === '') return
+      context.save()
+      context.translate(view.x, view.y)
+      /* Pendant un geste de zoom, le fond est une recopie *étirée* du tampon : aucun retracé
+         n'a eu lieu, donc `pathCache` tient encore les courbes de l'échelle précédente. Les
+         dessiner telles quelles les décalait du fond — c'était le calque qui glissait sous
+         les points pendant qu'on zoomait. On leur applique le même étirement qu'à l'image. */
+      if (stretch !== 1) context.scale(stretch, stretch)
+      context.globalCompositeOperation = 'lighter'
+      for (const entry of pathCache.current.paths.values()) {
+        if (entry.group !== group) continue
+        context.strokeStyle = entry.tone
+        if (bloom > 0.02) {
+          context.lineWidth = core * WEB.bloomWidth
+          context.globalAlpha = edgeAlpha * bloom * 0.5
+          context.stroke(entry.path)
+          context.lineWidth = core * Math.max(1.5, WEB.bloomWidth / 2.3)
+          context.globalAlpha = edgeAlpha * bloom * 0.6
+          context.stroke(entry.path)
+        }
+        context.lineWidth = core
+        context.globalAlpha = edgeAlpha
         context.stroke(entry.path)
       }
       context.globalCompositeOperation = 'source-over'
@@ -560,9 +778,6 @@ export function OrganizerMap({
        n'en recopie qu'une image : 4 ms au lieu de 494. Le rendu n'est pas au bit près —
        l'accumulation additive s'arrondit une fois de plus dans le tampon — mais l'écart mesuré
        est de 126 pixels sur 15 188 allumés, d'au plus 14 niveaux sur 255 : invisible. */
-    const span = size * view.scale
-    const originX = ((width - size) / 2) * view.scale
-    const originY = ((height - size) / 2) * view.scale
     // Débord du dessin autour des points : halo des fils et lueur des pastilles.
     const spill = Math.max(core * WEB.bloomWidth, dotRadius * (2.4 + 1.4 * closeness)) + 4
     const content = {
@@ -574,25 +789,15 @@ export function OrganizerMap({
     /* Ce qu'il faut avoir peint pour que le cadre soit juste : la carte, limitée au cadre.
        Au-delà il n'y a rien à peindre, et c'est ce qui rend les recuissons rares une fois
        dézoomé — la carte entière tient alors dans le tampon. */
-    const needed = {
-      left: Math.max(content.left, -view.x),
-      top: Math.max(content.top, -view.y),
-      right: Math.min(content.right, -view.x + width),
-      bottom: Math.min(content.bottom, -view.y + height)
-    }
+    /* Combien le fond peint est étiré par rapport à l'échelle courante. Vaut 1 hors geste de
+       zoom, et c'est alors sans effet sur les calques. */
+    let overlayStretch = 1
+    const frame = { width, height, scale: view.scale, x: view.x, y: view.y }
+    const needed = neededArea(frame, content)
     const painted = webCache.current
     const key = `${colourMode}|${ratio}|${[...includedGroups].sort().join(',')}`
-    /* L'espace de la carte grandit proportionnellement à l'échelle : une zone peinte à `S0`
-       couvre, à l'échelle `S`, la même zone multipliée par `S / S0`. */
-    const stretch = painted.scale > 0 ? view.scale / painted.scale : 0
     const usable =
-      painted.canvas !== null &&
-      painted.key === key &&
-      (needed.right <= needed.left ||
-        (painted.left * stretch <= needed.left &&
-          painted.top * stretch <= needed.top &&
-          (painted.left + painted.width) * stretch >= needed.right &&
-          (painted.top + painted.height) * stretch >= needed.bottom))
+      painted.canvas !== null && painted.key === key && stillCovers(painted, needed, view.scale)
     // Étirer ne vaut que le temps du geste : à l'arrêt, la toile doit être nette.
     const covers = usable && (painted.scale === view.scale || zooming)
 
@@ -611,15 +816,7 @@ export function OrganizerMap({
         /* On peint le cadre élargi d'une marge, recoupé au contenu : un déplacement court
            reste dedans, et ce qui déborde de la carte ne coûte rien à laisser de côté. */
         const budget = WEB_BUDGET / (ratio * ratio)
-        const sum = width + height
-        const room = Math.sqrt(Math.max(0, sum * sum - 4 * (width * height - budget)))
-        const margin = Math.max(0, Math.min(WEB_MARGIN, (room - sum) / 4))
-        const area = {
-          left: Math.max(content.left, -view.x - margin),
-          top: Math.max(content.top, -view.y - margin),
-          right: Math.min(content.right, -view.x + width + margin),
-          bottom: Math.min(content.bottom, -view.y + height + margin)
-        }
+        const area = paintArea(frame, content, budget, ZOOM_HEADROOM, WEB_MARGIN)
         const bufferWidth = Math.max(1, Math.ceil(area.right - area.left))
         const bufferHeight = Math.max(1, Math.ceil(area.bottom - area.top))
         const buffer = painted.canvas ?? document.createElement('canvas')
@@ -649,6 +846,7 @@ export function OrganizerMap({
            l'écran, et la recopie rééchantillonne : la toile deviendrait floue au déplacement,
            alors qu'elle est nette au premier tracé. */
         const zoom = web.scale > 0 ? view.scale / web.scale : 1
+        overlayStretch = zoom
         const snap = (value: number): number => Math.round(value * ratio) / ratio
         context.drawImage(
           web.canvas,
@@ -660,7 +858,76 @@ export function OrganizerMap({
       }
     }
 
-    if (litGroup) lightUp(litGroup)
+    /* Les frontières, recopiées une fois dans le repère de la carte. Le carré unité occupe
+       `size × scale` pixels à partir de l'origine de centrage — exactement la transformation
+       de `at()`, donc les contours tombent sur les points qu'ils cernent. */
+    if (showBoundaries && boundaryPaths.size > 0) {
+      /* Tracé dans le repère unité puis mis à l'échelle : le contour reste net quel que soit
+         le zoom, là où l'image de 1 024 pixels se pixellisait dès qu'on approchait. */
+      context.save()
+      context.translate(originX + view.x, originY + view.y)
+      context.scale(span, span)
+      for (const [group, path] of boundaryPaths) {
+        const tone = colourOfGroup(group, groupIndex)
+        context.fillStyle = tone
+        context.globalAlpha = 0.1
+        context.fill(path)
+        context.strokeStyle = tone
+        context.globalAlpha = editing === group ? 1 : 0.8
+        // L'épaisseur est donnée en unités de carte : on la ramène à des pixels constants.
+        context.lineWidth = (editing === group ? 3 : 1.8) / span
+        context.lineJoin = 'round'
+        context.stroke(path)
+      }
+      context.restore()
+      context.globalAlpha = 1
+    }
+
+    /* Focus sur un groupe : tout s'efface sauf lui.
+       L'effacement se fait en `destination-out` plutôt qu'en peignant un voile de la couleur
+       du fond — on retire de l'alpha au lieu d'ajouter une couche. Deux raisons : la toile
+       est peinte en `lighter` sur un canvas transparent, c'est le CSS qui donne le fond, donc
+       un voile supposerait de lire `--field` et de le suivre au changement de thème ; et
+       retirer l'alpha laisse le fond réel transparaître, quel qu'il soit.
+       Les points sont dans le tampon, avec la toile : les griser un par un demanderait de
+       retracer les 133 810 arêtes à chaque clic. On efface tout, puis on remet le groupe. */
+    if (focusGroup) {
+      context.save()
+      context.globalCompositeOperation = 'destination-out'
+      context.globalAlpha = FOCUS_FADE
+      context.fillStyle = '#000'
+      context.fillRect(0, 0, width, height)
+      context.restore()
+      restoreGroup(focusGroup, overlayStretch)
+      // Les points du groupe, repeints par-dessus : ils viennent d'être effacés avec le reste.
+      const bodies = new Map<string, Path2D>()
+      for (const point of data.points) {
+        if (point.group !== focusGroup) continue
+        const [ux, uy] = at(point)
+        const x = ux + view.x
+        const y = uy + view.y
+        if (x < -8 || y < -8 || x > width + 8 || y > height + 8) continue
+        const tone = colourFor(point, colourMode, groupIndex)
+        let body = bodies.get(tone)
+        if (!body) {
+          body = new Path2D()
+          bodies.set(tone, body)
+        }
+        body.moveTo(x + dotRadius, y)
+        body.arc(x, y, dotRadius, 0, Math.PI * 2)
+      }
+      context.globalCompositeOperation = 'lighter'
+      // Même opacité que dans `paintDots` : on remet, on ne rehausse pas.
+      context.globalAlpha = WEB.dotFar + WEB.dotNear * closeness
+      for (const [tone, body] of bodies) {
+        context.fillStyle = tone
+        context.fill(body)
+      }
+      context.globalCompositeOperation = 'source-over'
+      context.globalAlpha = 1
+    }
+
+    if (litGroup) lightUp(litGroup, overlayStretch)
 
     /* Chaque amas doit porter son nom, y compris quand deux étiquettes se gênent : la plus
        petite s'écarte de son amas avec un trait de rappel, au lieu de disparaître.
@@ -678,7 +945,11 @@ export function OrganizerMap({
     for (const island of showLabels ? islands : []) {
       const name = groupNames.get(island.group)?.trim().toLocaleLowerCase()
       if (!name) continue
-      const [ux, uy] = at(island)
+      /* Avec les frontières, le nom se pose au centre de la région et prend sa couleur : le
+         blanc se confondait d'un contour à l'autre, et la position d'amas tombait souvent
+         hors de la région qu'elle prétendait nommer. */
+      const region = showBoundaries ? regionCentres.get(island.group) : undefined
+      const [ux, uy] = region ? at(region) : at(island)
       const centreX = ux + view.x
       const centreY = uy + view.y
       if (centreX < -80 || centreY < -60 || centreX > width + 80 || centreY > height + 60) continue
@@ -733,6 +1004,31 @@ export function OrganizerMap({
         context.stroke()
         context.globalAlpha = faded ? 0.28 : 1
       }
+      /* Le nom est un bouton, et rien ne le disait : cliquer dessus isole l'amas, mais aucun
+         retour ne le laissait deviner — l'utilisateur n'a aucune raison d'essayer. Au survol,
+         une pastille apparaît derrière le nom, et le curseur devient une main (plus bas). Le
+         groupe déjà retenu la garde en permanence : c'est ce qui dit lequel est isolé. */
+      const active = island.group === focusGroup
+      if (island.group === hoverLabel || active) {
+        const padX = size * 0.42
+        const padY = size * 0.3
+        const radius = size * 0.36
+        context.beginPath()
+        context.roundRect(
+          centreX - half - padX,
+          y - size / 2 - padY,
+          (half + padX) * 2,
+          size + padY * 2,
+          radius
+        )
+        context.fillStyle = active ? 'rgba(255, 255, 255, 0.16)' : 'rgba(255, 255, 255, 0.09)'
+        context.fill()
+        context.lineWidth = 1.5
+        context.strokeStyle = active
+          ? colourOfGroup(island.group, groupIndex)
+          : 'rgba(255, 255, 255, 0.4)'
+        context.stroke()
+      }
       /* Blanc et en minuscules, contour noir épais : coloré par groupe, le texte se noyait
          dans une toile déjà colorée. Le blanc tranche sur tout, la couleur reste au réseau. */
       context.font = `600 ${size.toFixed(1)}px system-ui, sans-serif`
@@ -742,7 +1038,7 @@ export function OrganizerMap({
       context.lineWidth = size / 5
       context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
       context.strokeText(name, centreX, y)
-      context.fillStyle = '#ffffff'
+      context.fillStyle = region ? colourOfGroup(island.group, groupIndex) : '#ffffff'
       context.fillText(name, centreX, y)
       context.letterSpacing = '0px'
     }
@@ -786,7 +1082,12 @@ export function OrganizerMap({
     includedGroups,
     islands,
     links,
+    boundaryPaths,
+    regionCentres,
+    focusGroup,
+    hoverLabel,
     litGroup,
+    showBoundaries,
     showLabels,
     view,
     zooming
@@ -829,12 +1130,52 @@ export function OrganizerMap({
     const canvas = canvasRef.current
     const wrap = wrapRef.current
     if (!canvas || !wrap) return
+    /** Dernières dimensions connues, pour savoir de combien le cadre a changé. */
+    let lastWidth = 0
+    let lastHeight = 0
     const resize = (): void => {
       const ratio = window.devicePixelRatio || 1
       canvas.width = wrap.clientWidth * ratio
       canvas.height = wrap.clientHeight * ratio
       canvas.style.width = `${wrap.clientWidth}px`
       canvas.style.height = `${wrap.clientHeight}px`
+      /* Rétrécir le cadre ne doit rien déplacer. Ouvrir le panneau latéral reprend de la
+         largeur à la carte, et le contenu partait d'un bloc vers la gauche : la carte est
+         posée à `(p.x × size + (width − size) / 2) × scale + view.x`, où le terme de centrage
+         `(width − size) / 2` est **multiplié par l'échelle**. Perdre 300 px de largeur déplace
+         donc tout de 150 × `scale` — 300 px à ×2, et bien davantage une fois zoomé.
+         On annule exactement ce terme. Tant que le petit côté ne change pas, l'empan est
+         inchangé et une translation suffit à tout figer ; sinon le repère lui-même se
+         redimensionne, et on se rabat sur garder le centre du cadre. */
+      const w = wrap.clientWidth
+      const h = wrap.clientHeight
+      if (framedRef.current && lastWidth > 0 && (w !== lastWidth || h !== lastHeight)) {
+        const sizeBefore = Math.min(lastWidth, lastHeight)
+        const sizeAfter = Math.min(w, h)
+        const beforeWidth = lastWidth
+        const beforeHeight = lastHeight
+        setView((current) => {
+          if (sizeBefore === sizeAfter) {
+            return clamped({
+              ...current,
+              x: current.x + ((beforeWidth - w) / 2) * current.scale,
+              y: current.y + ((beforeHeight - h) / 2) * current.scale
+            })
+          }
+          /* Le point de la carte qui était au centre y reste. */
+          const mapX =
+            (beforeWidth / 2 - current.x) / current.scale - (beforeWidth - sizeBefore) / 2
+          const mapY =
+            (beforeHeight / 2 - current.y) / current.scale - (beforeHeight - sizeBefore) / 2
+          return clamped({
+            ...current,
+            x: w / 2 - ((mapX / sizeBefore) * sizeAfter + (w - sizeAfter) / 2) * current.scale,
+            y: h / 2 - ((mapY / sizeBefore) * sizeAfter + (h - sizeAfter) / 2) * current.scale
+          })
+        })
+      }
+      lastWidth = w
+      lastHeight = h
       if (!framedRef.current && wrap.clientWidth > 0) {
         framedRef.current = true
         const box = Math.min(wrap.clientWidth, wrap.clientHeight)
@@ -929,6 +1270,90 @@ export function OrganizerMap({
     }
   }, [])
 
+  /** Le point de la carte sous le curseur, dans le repère unité. */
+  const mapPointAt = useCallback(
+    (clientX: number, clientY: number): Vertex | null => {
+      const canvas = canvasRef.current
+      if (!canvas) return null
+      const rect = canvas.getBoundingClientRect()
+      const size = Math.min(rect.width, rect.height)
+      return {
+        x: ((clientX - rect.left - view.x) / view.scale - (rect.width - size) / 2) / size,
+        y: ((clientY - rect.top - view.y) / view.scale - (rect.height - size) / 2) / size
+      }
+    },
+    [view.scale, view.x, view.y]
+  )
+
+  /**
+   * Le sommet le plus proche du curseur, dans la région retouchée.
+   *
+   * La tolérance est en pixels d'écran, pas en unités de carte : viser une poignée doit
+   * demander la même précision de la main quel que soit le zoom.
+   */
+  const vertexAt = useCallback(
+    (clientX: number, clientY: number): { ring: number; index: number } | null => {
+      const group = editing
+      const canvas = canvasRef.current
+      const rings = group ? regions.get(group) : null
+      if (!group || !canvas || !rings) return null
+      const place = mapPointAt(clientX, clientY)
+      if (!place) return null
+      const rect = canvas.getBoundingClientRect()
+      const size = Math.min(rect.width, rect.height)
+      const tolerance = 11 / (size * view.scale)
+      let best: { ring: number; index: number } | null = null
+      let bestDistance = tolerance
+      rings.forEach((ring, ringIndex) => {
+        ring.forEach((vertex, index) => {
+          const distance = Math.hypot(vertex.x - place.x, vertex.y - place.y)
+          if (distance < bestDistance) {
+            bestDistance = distance
+            best = { ring: ringIndex, index }
+          }
+        })
+      })
+      return best
+    },
+    [editing, regions, mapPointAt, view.scale]
+  )
+
+  /** Déplace le sommet saisi. La courbe suit, puisqu'elle passe par les sommets. */
+  const moveVertex = useCallback(
+    (clientX: number, clientY: number): void => {
+      const group = editing
+      const held = draggedVertexRef.current
+      if (!group || !held) return
+      const place = mapPointAt(clientX, clientY)
+      if (!place) return
+      setRegions((current) => {
+        const rings = current.get(group)
+        if (!rings) return current
+        const nextRings = rings.map((ring, ringIndex) =>
+          ringIndex === held.ring
+            ? ring.map((vertex, index) => (index === held.index ? place : vertex))
+            : ring
+        )
+        const copy = new Map(current)
+        copy.set(group, nextRings)
+        return copy
+      })
+    },
+    [editing, mapPointAt]
+  )
+
+  /** Fin du geste : on remonte la région et ce qu'elle contient désormais. */
+  const commitRegion = useCallback((): void => {
+    const group = editing
+    if (!group) return
+    const rings = regions.get(group)
+    if (!rings) return
+    const inside = data.points
+      .filter((point) => rings.some((ring) => insideRing(ring, point.x, point.y)))
+      .map((point) => point.id)
+    onBoundaryChange(group, rings, inside)
+  }, [editing, regions, data.points, onBoundaryChange])
+
   /** Le nom d'amas sous le curseur, s'il y en a un. */
   const labelAt = useCallback((clientX: number, clientY: number): string | null => {
     const canvas = canvasRef.current
@@ -960,8 +1385,22 @@ export function OrganizerMap({
     } else {
       /* La carte est statique : les points ne se tirent plus. Un appui sur un point retient
          seulement de quoi savoir, au relâchement, s'il s'agissait d'un clic ou d'un
-         déplacement de la carte. */
-      clickedRef.current = pointAt(event.clientX, event.clientY)
+         déplacement de la carte.
+         Le nom passe devant : un titre repose presque toujours sur son propre amas, donc un
+         point se trouvait sous le curseur une fois sur deux et c'est lui qui l'emportait —
+         viser le nom devenait un jeu d'adresse. Rien n'est perdu à le prioriser : le point
+         reste atteignable partout ailleurs, et les noms se masquent. */
+      /* En retouche, l'appui commence un coup de pinceau au lieu de saisir la carte.
+         Bouton droit ou touche Alt : on creuse au lieu de pousser. */
+      if (editing) {
+        const grabbed = vertexAt(event.clientX, event.clientY)
+        if (grabbed) {
+          draggedVertexRef.current = grabbed
+          return
+        }
+      }
+      const overLabel = labelAt(event.clientX, event.clientY)
+      clickedRef.current = overLabel ? null : pointAt(event.clientX, event.clientY)
       draggingRef.current = { x: event.clientX - view.x, y: event.clientY - view.y, moved: false }
     }
   }
@@ -976,6 +1415,10 @@ export function OrganizerMap({
       draw()
       return
     }
+    if (draggedVertexRef.current) {
+      moveVertex(event.clientX, event.clientY)
+      return
+    }
     const dragging = draggingRef.current
     if (dragging) {
       dragging.moved = true
@@ -984,20 +1427,29 @@ export function OrganizerMap({
       )
       return
     }
-    const found = pointAt(event.clientX, event.clientY)
+    const overLabel = labelAt(event.clientX, event.clientY)
+    /* Le nom couvre le point, au survol comme au clic. Sans ça l'infobulle proposait un post
+       qu'un clic n'ouvrait plus — elle annonçait une action que le curseur ne ferait pas. */
+    const found = overLabel ? null : pointAt(event.clientX, event.clientY)
     if (found?.id !== hovered?.id) {
       setHovered(found)
       onHover(found)
     }
     /* Survoler un nom éclaire son amas, comme un point : c'est souvent le nom qu'on vise,
        et il est bien plus facile à viser qu'une pastille d'un demi-pixel. */
-    const lit = found?.group ?? labelAt(event.clientX, event.clientY)
+    if (overLabel !== hoverLabel) setHoverLabel(overLabel)
+    const lit = found?.group ?? overLabel
     if (lit !== litGroup) setLitGroup(lit)
     cursorRef.current = { x: event.clientX, y: event.clientY }
     if (found) placeTip(event.clientX, event.clientY)
   }
 
   const onPointerUp = (): void => {
+    if (draggedVertexRef.current) {
+      draggedVertexRef.current = null
+      commitRegion()
+      return
+    }
     if (lassoActiveRef.current) {
       const path = lassoRef.current
       lassoRef.current = []
@@ -1007,8 +1459,18 @@ export function OrganizerMap({
       draw()
     }
     // Relâché sans avoir déplacé la carte : c'était un clic sur un point.
-    if (clickedRef.current && draggingRef.current && !draggingRef.current.moved) {
+    const still = draggingRef.current && !draggingRef.current.moved
+    if (clickedRef.current && still) {
       onOpen(clickedRef.current)
+    } else if (still) {
+      /* Clic sur un nom : on retient le groupe et tout le reste s'efface. Ailleurs dans le
+         vide : on relâche. Le nom sert de poignée parce qu'un point a déjà son geste — il
+         ouvre le post — et qu'on ne peut pas faire dire deux choses au même clic. */
+      const name = labelAt(cursorRef.current.x, cursorRef.current.y)
+      setFocusGroup((current) => (name && name !== current ? name : null))
+      /* Sortir de la retouche dès qu'on relâche ailleurs : rester en pinceau sans le voir
+         ferait déformer une frontière en croyant déplacer la carte. */
+      if (!name) setEditing(null)
     }
     clickedRef.current = null
     draggingRef.current = null
@@ -1067,16 +1529,26 @@ export function OrganizerMap({
     <div className="organizer-map" ref={wrapRef}>
       <canvas
         ref={canvasRef}
-        className={lassoing ? 'is-lassoing' : ''}
+        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}${editing ? ' is-editing' : ''}`.trim()}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={() => {
           setHovered(null)
           setLitGroup(null)
+          setHoverLabel(null)
           onHover(null)
           draggingRef.current = null
           clickedRef.current = null
+        }}
+        onDoubleClick={(event) => {
+          /* Double-clic sur un nom : on retouche sa frontière. Le simple clic isole déjà le
+             groupe, et il fallait un geste distinct — entrer en pinceau sur un clic simple
+             ferait déformer une région en croyant seulement la regarder. */
+          const name = labelAt(event.clientX, event.clientY)
+          if (!name) return
+          setFocusGroup(name)
+          setEditing((current) => (current === name ? null : name))
         }}
         onContextMenu={(event) => event.preventDefault()}
       />

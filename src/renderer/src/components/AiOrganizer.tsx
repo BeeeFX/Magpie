@@ -14,7 +14,9 @@ import { magpie, magpieEvents } from '../bridge'
 import { displayName, formatDateTime } from '../format'
 import { useStore, useT } from '../store'
 import { IconChevronRight, IconClose } from './Icons'
+import { MapPostPanel } from './MapPostPanel'
 import { OrganizerMap, type ColourMode } from './OrganizerMap'
+import type { Vertex } from '../map-boundaries'
 import { OrganizerSteps } from './OrganizerSteps'
 import { PlatformIcon } from './PlatformIcon'
 
@@ -91,6 +93,16 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [lassoed, setLassoed] = useState<string[]>([])
   /** Les noms d'amas sur la carte. Affichés par défaut : sans eux on ne sait pas où l'on est. */
   const [showLabels, setShowLabels] = useState(true)
+  /** Les contours des collections. C'est la lecture qu'on vient chercher : affichés d'emblée. */
+  const [showBoundaries, setShowBoundaries] = useState(true)
+  /** Les frontières déjà rangées en base, relues à l'ouverture. */
+  const [savedBoundaries, setSavedBoundaries] = useState<Map<string, Vertex[][]>>(new Map())
+  /** La frontière en cours de retouche, pour l'annoncer et proposer d'en sortir. */
+  const [editingBoundary, setEditingBoundary] = useState<string | null>(null)
+  /** Demande de régénération en attente de confirmation. */
+  const [confirmRegen, setConfirmRegen] = useState(false)
+  /** Le post ouvert dans le panneau latéral, à côté de la carte. */
+  const [panelPostId, setPanelPostId] = useState<string | null>(null)
   const [lastApplication, setLastApplication] = useState<OrganizerApplicationSummary | null>(null)
   const [undoing, setUndoing] = useState(false)
   const [undone, setUndone] = useState<OrganizerUndoResult | null>(null)
@@ -107,6 +119,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
     setLastMerge(null)
     setMapData(null)
     setLassoed([])
+    setPanelPostId(null)
     setError(null)
     setResult(null)
     setRememberChoices(autoOrganizeEnabled)
@@ -131,6 +144,54 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
     if (!open) return
     return magpieEvents.onOrganizerProgress(setOrganizerProgress)
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    void magpie
+      .organizerBoundaries()
+      .then((rows) => {
+        /* Une forme illisible ne doit pas emporter l'écran : on la laisse de côté et la
+           frontière se recalcule, ce qui est exactement ce qu'il faut faire d'un contour
+           qu'on ne sait plus lire. */
+        const parsed = new Map<string, Vertex[][]>()
+        for (const row of rows) {
+          try {
+            const rings = JSON.parse(row.shape) as Vertex[][]
+            if (Array.isArray(rings) && rings.length > 0) parsed.set(row.name, rings)
+          } catch {
+            console.warn('[magpie] Frontière illisible, ignorée :', row.name)
+          }
+        }
+        setSavedBoundaries(parsed)
+      })
+      .catch(() => {})
+  }, [open])
+
+  /**
+   * Une frontière vient d'être déformée.
+   *
+   * Deux effets, et le second est le vrai : la région est rangée en base — ce qui fige la
+   * carte du même coup — et les posts qu'elle contient désormais rejoignent la collection.
+   * Le groupe devient « épinglé » : ses posts sont désignés, plus déduits, donc une prochaine
+   * analyse ne les reprendra pas. C'est ce qui fait de la frontière un classeur et non une
+   * décoration.
+   */
+  const onBoundaryChange = useCallback(
+    (group: string, rings: Vertex[][], inside: string[]): void => {
+      const chosen = new Set(inside)
+      setSuggestions((current) =>
+        current.map((suggestion) => {
+          if (suggestion.id === group) {
+            return { ...suggestion, pinned: true, postIds: [...chosen] }
+          }
+          // Un post ne vit que dans une collection : celle qui le prend le retire aux autres.
+          return { ...suggestion, postIds: suggestion.postIds.filter((id) => !chosen.has(id)) }
+        })
+      )
+      void magpie.saveOrganizerBoundary(group, JSON.stringify(rings), inside).catch(() => {})
+    },
+    []
+  )
 
   const redistributed = useMemo(
     () =>
@@ -542,15 +603,37 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                 >
                   {t(showLabels ? 'organizer.labelsHide' : 'organizer.labelsShow')}
                 </button>
+                <button
+                  type="button"
+                  className={`segmented__toggle${showBoundaries ? ' is-active' : ''}`}
+                  aria-pressed={showBoundaries}
+                  onClick={() =>
+                    setShowBoundaries((current) => {
+                      /* Afficher les frontières éteint les noms d'amas : ils désignent le
+                         regroupement, pas la collection, et se superposaient aux contours
+                         sans rien ajouter. Le bouton des noms reste là pour les rappeler —
+                         ils reviennent alors posés dans leur région et à sa couleur. */
+                      if (!current) setShowLabels(false)
+                      return !current
+                    })
+                  }
+                >
+                  {t(showBoundaries ? 'organizer.edgesHide' : 'organizer.edgesShow')}
+                </button>
               </div>
 
               {mapData ? (
                   <>
+                    <div className="organizer-stage">
                     <OrganizerMap
                       data={mapData}
                       colourMode={colourMode}
                       groupNames={groupNames}
                       showLabels={showLabels}
+                      showBoundaries={showBoundaries}
+                      savedBoundaries={savedBoundaries}
+                      onBoundaryChange={onBoundaryChange}
+                      onEditingChange={setEditingBoundary}
                   includedGroups={
                         new Set(suggestions.filter((s) => s.included).map((s) => s.id))
                       }
@@ -579,10 +662,57 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                           })
                         }, 90)
                       }}
-                      onOpen={(point) => void magpie.getPostsByIds([point.id]).then((posts) => {
-                        if (posts[0]) void magpie.openExternal(posts[0].url)
-                      })}
+                      onOpen={(point) => setPanelPostId(point.id)}
                     />
+                    <MapPostPanel postId={panelPostId} onClose={() => setPanelPostId(null)} />
+                    </div>
+                    {editingBoundary ? (
+                      <div className="organizer-lasso" role="status">
+                        <span>
+                          {t('organizer.edgeEditing', {
+                            name: groupNames.get(editingBoundary) ?? ''
+                          })}
+                        </span>
+                      </div>
+                    ) : null}
+                    {savedBoundaries.size > 0 ? (
+                      <div className="organizer-lasso" role="status">
+                        <span>{t('organizer.edgeKept', { count: savedBoundaries.size })}</span>
+                        {confirmRegen ? (
+                          <>
+                            <span className="organizer-warn">{t('organizer.edgeWarn')}</span>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => setConfirmRegen(false)}
+                            >
+                              {t('organizer.cancel')}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--danger"
+                              onClick={() => {
+                                void magpie.clearOrganizerBoundaries().then(() => {
+                                  setSavedBoundaries(new Map())
+                                  setConfirmRegen(false)
+                                  void analyse()
+                                })
+                              }}
+                            >
+                              {t('organizer.edgeRegenerate')}
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => setConfirmRegen(true)}
+                          >
+                            {t('organizer.edgeRegenerate')}
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
                     {lassoed.length > 0 ? (
                       <div className="organizer-lasso" role="status">
                         <span>{t('organizer.mapSelected', { count: lassoed.length })}</span>

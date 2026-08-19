@@ -1860,3 +1860,91 @@ function toFtsQuery(raw: string): string | null {
   if (terms.length === 0) return null
   return terms.map((t, i) => (i === terms.length - 1 ? `"${t}"*` : `"${t}"`)).join(' AND ')
 }
+
+/** Une position figée sur la carte, dans le repère unité. */
+export interface MapPosition {
+  postId: string
+  x: number
+  y: number
+}
+
+/**
+ * Fige la projection courante.
+ *
+ * Sans elle, chaque analyse redistribue les neuf mille points et toute frontière tracée à la
+ * main désignerait aussitôt autre chose. C'est ce qui rend le classement par frontières
+ * possible : les positions ne bougent plus, les nouveaux posts viennent s'y ajouter.
+ */
+export function saveMapPositions(positions: MapPosition[]): void {
+  if (positions.length === 0) return
+  const insert = getDb().prepare(
+    'INSERT INTO post_positions (post_id, x, y) VALUES (?, ?, ?)\n' +
+      '  ON CONFLICT(post_id) DO UPDATE SET x = excluded.x, y = excluded.y'
+  )
+  getDb().transaction(() => {
+    for (const position of positions) insert.run(position.postId, position.x, position.y)
+  })()
+}
+
+export function mapPositions(): Map<string, { x: number; y: number }> {
+  const rows = getDb().prepare('SELECT post_id, x, y FROM post_positions').all() as {
+    post_id: string
+    x: number
+    y: number
+  }[]
+  return new Map(rows.map((row) => [row.post_id, { x: row.x, y: row.y }]))
+}
+
+/**
+ * La région d'une collection : ses anneaux de sommets, en JSON, dans le repère unité.
+ *
+ * Du vectoriel plutôt qu'un masque de bits. Le masque se pixellisait au zoom, ne pouvait pas
+ * être lissé, et n'offrait aucune poignée à saisir ; les sommets, eux, sont déjà les points de
+ * contrôle de la courbe qu'on trace.
+ */
+export interface CollectionBoundary {
+  name: string
+  shape: string
+}
+
+export function saveCollectionBoundary(name: string, shape: string): void {
+  getDb()
+    .prepare(
+      'INSERT INTO collection_boundaries (name, shape, updated_at) VALUES (?, ?, ?)\n' +
+        '  ON CONFLICT(name) DO UPDATE SET shape = excluded.shape, updated_at = excluded.updated_at'
+    )
+    .run(name, shape, Date.now())
+}
+
+export function collectionBoundaries(): CollectionBoundary[] {
+  return getDb().prepare('SELECT name, shape FROM collection_boundaries').all() as {
+    name: string
+    shape: string
+  }[]
+}
+
+export function deleteCollectionBoundary(name: string): void {
+  getDb().prepare('DELETE FROM collection_boundaries WHERE name = ?').run(name)
+}
+
+/**
+ * Efface la carte figée **et** les frontières, ensemble.
+ *
+ * Jamais l'une sans l'autre : une frontière ne veut rien dire sans les positions contre
+ * lesquelles elle a été tracée. Les séparer laisserait des contours qui désignent d'anciens
+ * emplacements — c'est-à-dire des collections fausses, sans que rien ne le signale. C'est
+ * aussi ce que l'avertissement « cela effacera vos frontières » promet à l'utilisateur.
+ */
+export function clearFrozenMap(): void {
+  getDb().transaction(() => {
+    getDb().prepare('DELETE FROM collection_boundaries').run()
+    getDb().prepare('DELETE FROM post_positions').run()
+  })()
+}
+
+/** La carte est-elle figée ? Sert à savoir si les frontières ont un sens. */
+export function hasFrozenMap(): boolean {
+  return (
+    ((getDb().prepare('SELECT COUNT(*) n FROM post_positions').get() as { n: number }).n ?? 0) > 0
+  )
+}
