@@ -2343,6 +2343,31 @@ h1, h2, h3 {
   flex-wrap: wrap;
 }
 
+/* Interrupteur isolé, à côté du sélecteur de couleur : même hauteur et même pilule, mais
+   il commute au lieu de choisir — il ne fait donc pas partie du groupe segmenté. */
+.segmented__toggle {
+  height: 32px;
+  padding: 0 12px;
+  background: var(--field);
+  border: 0;
+  border-radius: var(--pill);
+  color: var(--faint);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.segmented__toggle:hover {
+  color: var(--text);
+}
+
+.segmented__toggle.is-active {
+  color: var(--text);
+}
+
 .segmented--quiet button {
   font-size: 11px;
 }
@@ -2424,10 +2449,16 @@ h1, h2, h3 {
 }
 
 .map-tip img {
-  width: 100%;
-  height: 96px;
-  margin-top: 8px;
-  object-fit: cover;
+  /* L'aperçu garde le format du média. Une hauteur fixe avec `object-fit: cover` recadrait
+     tout au même rectangle : un portrait perdait sa tête et ses pieds, et la vignette ne
+     disait plus de quoi le post avait l'air. En bornant les deux côtés sans en imposer
+     aucun, l'image se pose à son format — ni rognée, ni cernée de bandes noires. */
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  width: auto;
+  height: auto;
+  margin: 8px auto 0;
   border-radius: var(--radius-md);
 }
 

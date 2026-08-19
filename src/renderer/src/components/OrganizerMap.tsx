@@ -81,6 +81,8 @@ interface Props {
   includedGroups: Set<string>
   /** Nom de chaque groupe, pour poser une étiquette sur son îlot. */
   groupNames: Map<string, string>
+  /** Les noms d'amas sont-ils dessinés ? Masqués, la toile se voit entière. */
+  showLabels: boolean
   onLasso(ids: string[]): void
   onHover(point: OrganizerMapPoint | null): void
   /** Clic sur un point : ouvrir le post qu'il représente. */
@@ -136,6 +138,7 @@ export function OrganizerMap({
   colourMode,
   includedGroups,
   groupNames,
+  showLabels,
   onLasso,
   onHover,
   onOpen,
@@ -670,15 +673,21 @@ export function OrganizerMap({
     context.textBaseline = 'middle'
     context.lineJoin = 'round'
     const drawn: { group: string; x: number; y: number; half: number; size: number }[] = []
-    for (const island of islands) {
+    /* Masqués, on ne dessine rien *et* `drawn` reste vide : le survol d'un nom s'appuie
+       dessus, donc il s'éteint de lui-même au lieu de réagir à des boîtes invisibles. */
+    for (const island of showLabels ? islands : []) {
       const name = groupNames.get(island.group)?.trim().toLocaleLowerCase()
       if (!name) continue
       const [ux, uy] = at(island)
       const centreX = ux + view.x
       const centreY = uy + view.y
       if (centreX < -80 || centreY < -60 || centreX > width + 80 || centreY > height + 60) continue
+      /* Assez gros pour se lire, pas au point de manger la carte. Les bornes précédentes —
+         28 px, ×2,1 — laissaient un nom monter à 59 px : sur un gros amas, le mot couvrait le
+         réseau qu'il désigne et la carte se lisait comme une affiche. La toile est le sujet,
+         le nom n'est qu'une légende. */
       const size =
-        Math.min(28, 11 + Math.sqrt(island.count) * 0.4) * Math.min(2.1, Math.sqrt(view.scale))
+        Math.min(18, 10 + Math.sqrt(island.count) * 0.25) * Math.min(1.4, Math.sqrt(view.scale))
       /* Demi-largeur estimée sans `measureText` : la mesurer pour vingt-deux étiquettes à
          chaque image coûtait plus que de la deviner, et une approximation suffit à savoir
          que deux noms se chevauchent. */
@@ -728,7 +737,9 @@ export function OrganizerMap({
          dans une toile déjà colorée. Le blanc tranche sur tout, la couleur reste au réseau. */
       context.font = `600 ${size.toFixed(1)}px system-ui, sans-serif`
       context.letterSpacing = '-0.02em'
-      context.lineWidth = size / 3.2
+      /* Le contour détache le nom sans l'épaissir : à `size / 3.2` il formait un halo noir
+         plus large que les lettres, qui masquait la toile autour du mot. */
+      context.lineWidth = size / 5
       context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
       context.strokeText(name, centreX, y)
       context.fillStyle = '#ffffff'
@@ -776,6 +787,7 @@ export function OrganizerMap({
     islands,
     links,
     litGroup,
+    showLabels,
     view,
     zooming
   ])

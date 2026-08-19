@@ -60,6 +60,7 @@ createRoot(document.getElementById('root')!).render(
     colourMode={colourMode}
     includedGroups={included}
     groupNames={names}
+    showLabels
     onLasso={() => {}}
     onHover={() => {}}
     onOpen={() => {}}
