@@ -488,3 +488,60 @@ export function insideRing(ring: Vertex[], x: number, y: number): boolean {
   }
   return hit
 }
+
+/**
+ * Repousse les sommets d'une région hors d'une autre.
+ *
+ * Pousser une frontière doit faire reculer celle d'en face : sans cela, avancer sur son voisin
+ * produit deux contours qui se recouvrent, et un post pris dans les deux n'a plus de
+ * propriétaire — exactement ce que le découpage par domination évitait au premier tracé.
+ *
+ * On ne calcule pas une soustraction de polygones : chaque sommet pris à l'intérieur est
+ * ramené sur l'arête la plus proche de l'envahisseur, avec un cheveu de marge. Le résultat
+ * suit le geste au pixel près là où on pousse, ce qui est ce qu'on regarde, et laisse le reste
+ * du contour intact.
+ */
+export function carveOutside(rings: Vertex[][], invader: Vertex[][]): Vertex[][] {
+  if (invader.length === 0) return rings
+  const nearestOnRing = (ring: Vertex[], point: Vertex): { at: Vertex; distance: number } => {
+    let best = ring[0]
+    let bestDistance = Infinity
+    for (let i = 0; i < ring.length; i += 1) {
+      const a = ring[i]
+      const b = ring[(i + 1) % ring.length]
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const lengthSquared = dx * dx + dy * dy || 1
+      let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared
+      t = Math.max(0, Math.min(1, t))
+      const at = { x: a.x + dx * t, y: a.y + dy * t }
+      const distance = Math.hypot(at.x - point.x, at.y - point.y)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        best = at
+      }
+    }
+    return { at: best, distance: bestDistance }
+  }
+  return rings.map((ring) =>
+    ring.map((vertex) => {
+      const swallowed = invader.some((other) => insideRing(other, vertex.x, vertex.y))
+      if (!swallowed) return vertex
+      let moved = vertex
+      let bestDistance = Infinity
+      for (const other of invader) {
+        const near = nearestOnRing(other, vertex)
+        if (near.distance < bestDistance) {
+          bestDistance = near.distance
+          moved = near.at
+        }
+      }
+      /* Un cheveu au-delà de l'arête : posé exactement dessus, le sommet retomberait dedans au
+         prochain test selon l'arrondi, et la région se ferait ronger geste après geste. */
+      const dx = moved.x - vertex.x
+      const dy = moved.y - vertex.y
+      const length = Math.hypot(dx, dy) || 1
+      return { x: moved.x + (dx / length) * 0.002, y: moved.y + (dy / length) * 0.002 }
+    })
+  )
+}

@@ -3,6 +3,7 @@ import type { OrganizerMap as MapData, OrganizerMapPoint } from '@shared/types'
 import { useT } from '../store'
 import { neededArea, paintArea, stillCovers, ZOOM_HEADROOM } from '../map-coverage'
 import {
+  carveOutside,
   fieldFromMask,
   insideRing,
   isoContour,
@@ -370,11 +371,21 @@ export function OrganizerMap({
     return centres
   }, [regions])
 
-  /** Les chemins prêts à tracer, refaits seulement quand une région change. */
+  /**
+   * Les chemins prêts à tracer, refaits seulement quand une région change.
+   *
+   * Chacun porte son emprise, pour pouvoir l'écarter sans l'examiner : zoomé dans un amas,
+   * dix-neuf régions sur vingt sont hors cadre, et les remplir puis les border à chaque image
+   * coûtait sans que rien n'apparaisse.
+   */
   const boundaryPaths = useMemo(() => {
-    const paths = new Map<string, Path2D>()
+    const paths = new Map<string, { path: Path2D; left: number; top: number; right: number; bottom: number }>()
     for (const [group, rings] of regions) {
       const path = new Path2D()
+      let left = Infinity
+      let top = Infinity
+      let right = -Infinity
+      let bottom = -Infinity
       for (const ring of rings) {
         if (ring.length < 3) continue
         path.moveTo(ring[0].x, ring[0].y)
@@ -382,8 +393,14 @@ export function OrganizerMap({
           path.bezierCurveTo(curve.c1.x, curve.c1.y, curve.c2.x, curve.c2.y, curve.to.x, curve.to.y)
         }
         path.closePath()
+        for (const vertex of ring) {
+          if (vertex.x < left) left = vertex.x
+          if (vertex.y < top) top = vertex.y
+          if (vertex.x > right) right = vertex.x
+          if (vertex.y > bottom) bottom = vertex.y
+        }
       }
-      paths.set(group, path)
+      if (left <= right) paths.set(group, { path, left, top, right, bottom })
     }
     return paths
   }, [regions])
@@ -867,7 +884,24 @@ export function OrganizerMap({
       context.save()
       context.translate(originX + view.x, originY + view.y)
       context.scale(span, span)
-      for (const [group, path] of boundaryPaths) {
+      /* Le cadre, ramené dans le repère unité : ce qui n'y touche pas ne se dessine pas.
+         Une marge d'un dixième absorbe le débord des courbes au-delà de leurs sommets. */
+      const seen = {
+        left: (-view.x - originX) / span - 0.1,
+        top: (-view.y - originY) / span - 0.1,
+        right: (-view.x - originX + width) / span + 0.1,
+        bottom: (-view.y - originY + height) / span + 0.1
+      }
+      for (const [group, entry] of boundaryPaths) {
+        if (
+          entry.right < seen.left ||
+          entry.left > seen.right ||
+          entry.bottom < seen.top ||
+          entry.top > seen.bottom
+        ) {
+          continue
+        }
+        const path = entry.path
         const tone = colourOfGroup(group, groupIndex)
         context.fillStyle = tone
         context.globalAlpha = 0.1
@@ -945,11 +979,7 @@ export function OrganizerMap({
     for (const island of showLabels ? islands : []) {
       const name = groupNames.get(island.group)?.trim().toLocaleLowerCase()
       if (!name) continue
-      /* Avec les frontières, le nom se pose au centre de la région et prend sa couleur : le
-         blanc se confondait d'un contour à l'autre, et la position d'amas tombait souvent
-         hors de la région qu'elle prétendait nommer. */
-      const region = showBoundaries ? regionCentres.get(island.group) : undefined
-      const [ux, uy] = region ? at(region) : at(island)
+      const [ux, uy] = at(island)
       const centreX = ux + view.x
       const centreY = uy + view.y
       if (centreX < -80 || centreY < -60 || centreX > width + 80 || centreY > height + 60) continue
@@ -1038,7 +1068,7 @@ export function OrganizerMap({
       context.lineWidth = size / 5
       context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
       context.strokeText(name, centreX, y)
-      context.fillStyle = region ? colourOfGroup(island.group, groupIndex) : '#ffffff'
+      context.fillStyle = '#ffffff'
       context.fillText(name, centreX, y)
       context.letterSpacing = '0px'
     }
@@ -1285,6 +1315,19 @@ export function OrganizerMap({
     [view.scale, view.x, view.y]
   )
 
+  /** La région sous le curseur, s'il y en a une. C'est elle qu'on saisit pour la retoucher. */
+  const regionAt = useCallback(
+    (clientX: number, clientY: number): string | null => {
+      const place = mapPointAt(clientX, clientY)
+      if (!place) return null
+      for (const [group, rings] of regions) {
+        if (rings.some((ring) => insideRing(ring, place.x, place.y))) return group
+      }
+      return null
+    },
+    [regions, mapPointAt]
+  )
+
   /**
    * Le sommet le plus proche du curseur, dans la région retouchée.
    *
@@ -1336,6 +1379,12 @@ export function OrganizerMap({
         )
         const copy = new Map(current)
         copy.set(group, nextRings)
+        /* La frontière d'en face recule. Sans cela, avancer sur son voisin laissait deux
+           contours superposés, et un post pris dans les deux sans propriétaire. */
+        for (const [other, otherRings] of current) {
+          if (other === group) continue
+          copy.set(other, carveOutside(otherRings, nextRings))
+        }
         return copy
       })
     },
@@ -1468,9 +1517,10 @@ export function OrganizerMap({
          ouvre le post — et qu'on ne peut pas faire dire deux choses au même clic. */
       const name = labelAt(cursorRef.current.x, cursorRef.current.y)
       setFocusGroup((current) => (name && name !== current ? name : null))
-      /* Sortir de la retouche dès qu'on relâche ailleurs : rester en pinceau sans le voir
-         ferait déformer une frontière en croyant déplacer la carte. */
-      if (!name) setEditing(null)
+      /* On ne quitte la retouche qu'en cliquant hors de toute région : la quitter dès qu'un
+         clic tombait à côté d'un sommet obligeait à re-double-cliquer entre chaque
+         déplacement, ce qui rendait l'outil inutilisable. */
+      if (!regionAt(cursorRef.current.x, cursorRef.current.y)) setEditing(null)
     }
     clickedRef.current = null
     draggingRef.current = null
@@ -1542,13 +1592,15 @@ export function OrganizerMap({
           clickedRef.current = null
         }}
         onDoubleClick={(event) => {
-          /* Double-clic sur un nom : on retouche sa frontière. Le simple clic isole déjà le
-             groupe, et il fallait un geste distinct — entrer en pinceau sur un clic simple
-             ferait déformer une région en croyant seulement la regarder. */
-          const name = labelAt(event.clientX, event.clientY)
-          if (!name) return
-          setFocusGroup(name)
-          setEditing((current) => (current === name ? null : name))
+          /* Double-clic dans une région : on retouche sa frontière.
+             C'était le nom qui servait de poignée, et c'était un piège : afficher les
+             frontières éteint les noms, donc il ne restait aucune boîte à viser — le geste
+             disparaissait à l'instant où l'on affichait ce qu'on voulait retoucher. La
+             région, elle, est toujours là. */
+          const group = regionAt(event.clientX, event.clientY)
+          if (!group) return
+          setFocusGroup(group)
+          setEditing((current) => (current === group ? null : group))
         }}
         onContextMenu={(event) => event.preventDefault()}
       />
