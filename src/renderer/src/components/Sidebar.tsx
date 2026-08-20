@@ -317,7 +317,10 @@ export function Sidebar(): React.JSX.Element {
           {collections.length === 0 ? (
             <p className="sidebar__empty">{t('sidebar.noneYet')}</p>
           ) : (
-            collections.map((collection) => (
+            /* Sa propre zone de défilement : vingt-sept collections poussaient les tags hors
+               du panneau, et rien ne disait qu'il en restait. */
+            <div className="sidebar__scroll">
+            {collections.map((collection) => (
               <div key={collection.id} className="collection-row">
                 <button
                   type="button"
@@ -348,7 +351,8 @@ export function Sidebar(): React.JSX.Element {
                   />
                 </div>
               </div>
-            ))
+            ))}
+            </div>
           )}
         </div>
 

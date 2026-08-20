@@ -297,6 +297,14 @@ h1, h2, h3 {
   transform: rotate(-8deg) scale(1.08);
 }
 
+/**
+ * Le panneau défile, il ne comprime pas.
+ *
+ * `overflow: hidden` avec un `min-height: 0` sur chaque groupe laissait le flex écraser les
+ * groupes quand le contenu dépassait la hauteur : leurs rangées débordaient alors sous le titre
+ * du groupe suivant. C'est ce qui faisait chevaucher « X » et « Collections » — pas un défaut de
+ * marge, un manque de place que personne ne signalait.
+ */
 .sidebar__nav {
   display: flex;
   flex-direction: column;
@@ -304,7 +312,9 @@ h1, h2, h3 {
   padding: 6px 10px;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--field-hover) transparent;
 }
 
 .sidebar__group {
@@ -312,6 +322,8 @@ h1, h2, h3 {
   flex-direction: column;
   gap: 1px;
   min-height: 0;
+  /* Un groupe garde sa hauteur : c'est le panneau qui défile, pas les rangées qui se tassent. */
+  flex: none;
 }
 
 .sidebar__group--tags {
@@ -367,10 +379,13 @@ h1, h2, h3 {
   font-size: 11.5px;
 }
 
+/* Bornée comme la liste des collections : le panneau ne défile qu'en dernier recours, et
+   chaque liste reste consultable sans chasser sa voisine hors de l'écran. */
 .tag-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  max-height: 30vh;
   overflow-y: auto;
   min-height: 0;
   scrollbar-width: thin;
@@ -6710,4 +6725,24 @@ html.window-is-moving .app *::after {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/**
+ * La liste des collections, bornée.
+ *
+ * Vingt-sept collections — ce que produisent les brouillons de thèmes — poussaient les tags hors
+ * du panneau et occupaient tout le défilement à elles seules. Une hauteur maximale les garde
+ * consultables sans qu'elles mangent le reste ; la barre dit qu'il en reste.
+ */
+.sidebar__scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 34vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--field-hover) transparent;
+  /* La pastille de couleur d'une collection s'ouvre au-dessus de la liste : sans marge, elle se
+     ferait couper par le bord de la zone de défilement. */
+  padding-right: 2px;
 }
