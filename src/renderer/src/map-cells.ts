@@ -67,12 +67,18 @@ function clip(polygon: Vertex[], plane: HalfPlane): Vertex[] {
  * Un germe unique par collection rangerait une collection éparpillée d'un seul côté de la
  * carte. On prend donc les cases les plus fournies, en s'interdisant deux germes voisins —
  * sans quoi les vingt germes d'un même amas dense se partageraient un confetti chacun.
+ *
+ * Deux au plus, et séparés d'au moins un quart de la carte. À quatre germes espacés de 0,14,
+ * vingt-quatre collections produisaient près de quatre-vingt-dix cellules : la carte devenait
+ * une mosaïque où l'on ne retrouvait plus ses collections. Un deuxième foyer ne doit
+ * apparaître que si la collection est vraiment coupée en deux, à l'autre bout de la carte — ce
+ * que 94 % de compacité rend rare, et c'est bien pour cela qu'on a mesuré cette compacité.
  */
 export function collectionSeeds(
   points: Vertex[],
-  most = 4,
+  most = 2,
   cell = 0.08,
-  apart = 0.14
+  apart = 0.28
 ): Vertex[] {
   if (points.length === 0) return []
   const buckets = new Map<string, Vertex[]>()

@@ -101,6 +101,8 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [editingBoundary, setEditingBoundary] = useState<string | null>(null)
   /** Demande de régénération en attente de confirmation. */
   const [confirmRegen, setConfirmRegen] = useState(false)
+  /** Mode édition des frontières. Explicite, parce qu'un geste qui déforme ne doit pas surprendre. */
+  const [editMode, setEditMode] = useState(false)
   /** Le post ouvert dans le panneau latéral, à côté de la carte. */
   const [panelPostId, setPanelPostId] = useState<string | null>(null)
   const [lastApplication, setLastApplication] = useState<OrganizerApplicationSummary | null>(null)
@@ -605,6 +607,22 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                 </button>
                 <button
                   type="button"
+                  className={`segmented__toggle${editMode ? ' is-active' : ''}`}
+                  aria-pressed={editMode}
+                  disabled={!showBoundaries}
+                  onClick={() =>
+                    setEditMode((current) => {
+                      /* Éditer suppose de voir ce qu'on édite : allumer le mode allume les
+                         frontières, et les masquer le coupe. */
+                      if (!current) setShowBoundaries(true)
+                      return !current
+                    })
+                  }
+                >
+                  {t(editMode ? 'organizer.edgeEditDone' : 'organizer.edgeEdit')}
+                </button>
+                <button
+                  type="button"
                   className={`segmented__toggle${showBoundaries ? ' is-active' : ''}`}
                   aria-pressed={showBoundaries}
                   onClick={() =>
@@ -614,6 +632,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                          sans rien ajouter. Le bouton des noms reste là pour les rappeler —
                          ils reviennent alors posés dans leur région et à sa couleur. */
                       if (!current) setShowLabels(false)
+                      else setEditMode(false)
                       return !current
                     })
                   }
@@ -631,6 +650,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                       groupNames={groupNames}
                       showLabels={showLabels}
                       showBoundaries={showBoundaries}
+                      editMode={editMode}
                       savedBoundaries={savedBoundaries}
                       onBoundaryChange={onBoundaryChange}
                       onEditingChange={setEditingBoundary}

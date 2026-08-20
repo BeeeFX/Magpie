@@ -62,6 +62,7 @@ createRoot(document.getElementById('root')!).render(
     groupNames={names}
     showLabels
     showBoundaries
+    editMode={false}
     savedBoundaries={new Map()}
     onBoundaryChange={() => {}}
     onLasso={() => {}}

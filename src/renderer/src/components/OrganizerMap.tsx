@@ -7,10 +7,12 @@ import {
   cellRing,
   collectionSeeds,
   meshWalls,
+  moveMeshVertex,
+  ringArea,
   seedReach,
   type CellMesh
 } from '../map-cells'
-import { carveOutside, insideRing, type Vertex } from '../map-boundaries'
+import { insideRing, type Vertex } from '../map-boundaries'
 
 /**
  * La carte sémantique.
@@ -99,6 +101,8 @@ interface Props {
   showLabels: boolean
   /** Les contours de collections sont-ils tracés ? */
   showBoundaries: boolean
+  /** En édition, un appui saisit la paroi la plus proche au lieu de déplacer la carte. */
+  editMode: boolean
   /** Les frontières déjà rangées en base, par groupe. Vides si la carte n'est pas figée. */
   savedBoundaries: Map<string, Vertex[][]>
   /** Une frontière vient d'être déformée : à l'appelant de la ranger et de reclasser. */
@@ -162,6 +166,7 @@ export function OrganizerMap({
   groupNames,
   showLabels,
   showBoundaries,
+  editMode,
   savedBoundaries,
   onBoundaryChange,
   onEditingChange,
@@ -199,7 +204,7 @@ export function OrganizerMap({
     onEditingChange?.(editing)
   }, [editing, onEditingChange])
   /** Le sommet saisi pendant un glisser, s'il y en a un. */
-  const draggedVertexRef = useRef<{ ring: number; index: number } | null>(null)
+  const draggedVertexRef = useRef<number | null>(null)
   /** Où les noms ont été posés au dernier dessin, pour pouvoir les survoler. */
   const labelBoxes = useRef<{ group: string; x: number; y: number; half: number; size: number }[]>(
     []
@@ -305,9 +310,34 @@ export function OrganizerMap({
    * saisir. Le vectoriel règle les trois — il se trace net à toute échelle, s'arrondit, et
    * chaque sommet est déjà un point de contrôle.
    */
-  const [regions, setRegions] = useState<Map<string, Vertex[][]>>(new Map())
-  /** Le maillage dont les régions sont tirées. Sert à ne tracer chaque paroi qu'une fois. */
+  /**
+   * Le maillage : la source de vérité des frontières.
+   *
+   * Tout en découle — les régions, les parois tracées une seule fois, et le déplacement qui
+   * met à jour les deux côtés d'une paroi du même geste.
+   */
   const [cellMesh, setCellMesh] = useState<CellMesh | null>(null)
+
+  /**
+   * Les régions, dérivées du maillage.
+   *
+   * Le maillage est la source de vérité, et c'est ce qui fait fonctionner le partage des
+   * parois : déplacer un sommet met à jour toutes les cellules qui le désignent, donc les deux
+   * côtés d'une paroi, sans rien à propager. Les garder en état séparé les détachait du
+   * maillage, et pousser ne bougeait qu'un côté.
+   */
+  const regions = useMemo(() => {
+    const out = new Map<string, Vertex[][]>()
+    if (!cellMesh) return out
+    for (const cell of cellMesh.cells) {
+      const ring = cellRing(cellMesh, cell)
+      if (ring.length < 3) continue
+      const rings = out.get(cell.group)
+      if (rings) rings.push(ring)
+      else out.set(cell.group, [ring])
+    }
+    return out
+  }, [cellMesh])
 
   useEffect(() => {
     const members = new Map<string, { x: number; y: number }[]>()
@@ -331,22 +361,8 @@ export function OrganizerMap({
            et les cellules du bord s'étendent jusqu'aux angles, en rectangles vides. */
         return foci.map((at, index) => ({ group, at, reach: seedReach(foci, points, index) }))
       })
-    const mesh = buildCellMesh(seeds)
-    setCellMesh(mesh)
-    const next = new Map<string, Vertex[][]>()
-    for (const cell of mesh.cells) {
-      const ring = cellRing(mesh, cell)
-      if (ring.length < 3) continue
-      const rings = next.get(cell.group)
-      if (rings) rings.push(ring)
-      else next.set(cell.group, [ring])
-    }
-    /* Une frontière posée à la main l'emporte sur celle qu'on vient de calculer : c'est tout
-       l'intérêt de l'avoir tracée. */
-    for (const [group, stored] of savedBoundaries) {
-      if (stored.length > 0) next.set(group, stored)
-    }
-    setRegions(next)
+    setCellMesh(buildCellMesh(seeds))
+
   }, [data.points, savedBoundaries])
 
   /**
@@ -370,6 +386,36 @@ export function OrganizerMap({
       path.lineTo(to.x, to.y)
     }
     return path
+  }, [cellMesh])
+
+  /**
+   * Les noms à poser quand les frontières sont visibles : un par **cellule**.
+   *
+   * Ce ne sont plus les noms d'amas. Un amas est une densité de points ; une cellule est une
+   * collection, et c'est d'elle qu'on parle quand on regarde des frontières. Les deux se
+   * mélangeaient à l'écran sans qu'on sache lequel on lisait. Une collection en deux endroits
+   * porte donc son nom deux fois, une fois dans chaque cellule — c'est exact, et c'est même le
+   * seul moyen de voir qu'elle est en deux morceaux.
+   *
+   * Les noms d'amas restent utiles ailleurs : sur la carte de l'écran principal, où il n'y a
+   * pas de collection à désigner.
+   */
+  const cellLabels = useMemo(() => {
+    if (!cellMesh) return []
+    return cellMesh.cells
+      .map((cell) => {
+        const ring = cellRing(cellMesh, cell)
+        if (ring.length < 3) return null
+        let x = 0
+        let y = 0
+        for (const vertex of ring) {
+          x += vertex.x / ring.length
+          y += vertex.y / ring.length
+        }
+        return { group: cell.group, x, y, count: Math.round(ringArea(ring) * 10_000), near: 0 }
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      .sort((left, right) => right.count - left.count)
   }, [cellMesh])
 
   /**
@@ -998,7 +1044,10 @@ export function OrganizerMap({
     const drawn: { group: string; x: number; y: number; half: number; size: number }[] = []
     /* Masqués, on ne dessine rien *et* `drawn` reste vide : le survol d'un nom s'appuie
        dessus, donc il s'éteint de lui-même au lieu de réagir à des boîtes invisibles. */
-    for (const island of showLabels ? islands : []) {
+    /* Avec les frontières, ce sont les cellules qu'on nomme, pas les amas. Le bouton des noms
+       commande donc les unes ou les autres selon ce qu'on regarde. */
+    const labelled = showLabels ? (showBoundaries ? cellLabels : islands) : []
+    for (const island of labelled) {
       const name = groupNames.get(island.group)?.trim().toLocaleLowerCase()
       if (!name) continue
       const [ux, uy] = at(island)
@@ -1090,7 +1139,12 @@ export function OrganizerMap({
       context.lineWidth = size / 5
       context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
       context.strokeText(name, centreX, y)
-      context.fillStyle = '#ffffff'
+      /* À la couleur de sa cellule, pas en blanc : c'est ce qui rattache le nom à la région
+         qu'il désigne quand une vingtaine se touchent. Sans frontières, le blanc reste le bon
+         choix — il tranche sur une toile déjà colorée. */
+      context.fillStyle = showBoundaries
+        ? colourOfGroup(island.group, groupIndex)
+        : '#ffffff'
       context.fillText(name, centreX, y)
       context.letterSpacing = '0px'
     }
@@ -1135,6 +1189,7 @@ export function OrganizerMap({
     islands,
     links,
     boundaryPaths,
+    cellLabels,
     wallPath,
     regionCentres,
     focusGroup,
@@ -1352,79 +1407,64 @@ export function OrganizerMap({
   )
 
   /**
-   * Le sommet le plus proche du curseur, dans la région retouchée.
+   * Le sommet du maillage le plus proche du curseur.
    *
-   * La tolérance est en pixels d'écran, pas en unités de carte : viser une poignée doit
-   * demander la même précision de la main quel que soit le zoom.
+   * Sur le maillage, et non sur la région d'une collection : un sommet appartient souvent à
+   * trois cellules, et c'est en le déplaçant qu'on pousse une paroi **des deux côtés à la
+   * fois**. Chercher dans les anneaux d'une seule collection ne bougeait qu'un côté.
+   *
+   * La tolérance est en pixels d'écran : viser une jonction doit demander la même précision de
+   * la main quel que soit le zoom. Large, parce qu'on vise une paroi, pas un pixel.
    */
-  const vertexAt = useCallback(
-    (clientX: number, clientY: number): { ring: number; index: number } | null => {
-      const group = editing
+  const meshVertexAt = useCallback(
+    (clientX: number, clientY: number): number | null => {
       const canvas = canvasRef.current
-      const rings = group ? regions.get(group) : null
-      if (!group || !canvas || !rings) return null
+      if (!cellMesh || !canvas) return null
       const place = mapPointAt(clientX, clientY)
       if (!place) return null
       const rect = canvas.getBoundingClientRect()
       const size = Math.min(rect.width, rect.height)
-      const tolerance = 11 / (size * view.scale)
-      let best: { ring: number; index: number } | null = null
+      const tolerance = 22 / (size * view.scale)
+      let best: number | null = null
       let bestDistance = tolerance
-      rings.forEach((ring, ringIndex) => {
-        ring.forEach((vertex, index) => {
-          const distance = Math.hypot(vertex.x - place.x, vertex.y - place.y)
-          if (distance < bestDistance) {
-            bestDistance = distance
-            best = { ring: ringIndex, index }
-          }
-        })
+      cellMesh.vertices.forEach((vertex, at) => {
+        const distance = Math.hypot(vertex.x - place.x, vertex.y - place.y)
+        if (distance < bestDistance) {
+          bestDistance = distance
+          best = at
+        }
       })
       return best
     },
-    [editing, regions, mapPointAt, view.scale]
+    [cellMesh, mapPointAt, view.scale]
   )
 
-  /** Déplace le sommet saisi. La courbe suit, puisqu'elle passe par les sommets. */
+  /** Déplace le sommet saisi. Toutes les cellules qui le désignent suivent. */
   const moveVertex = useCallback(
     (clientX: number, clientY: number): void => {
-      const group = editing
       const held = draggedVertexRef.current
-      if (!group || !held) return
+      if (held === null) return
       const place = mapPointAt(clientX, clientY)
       if (!place) return
-      setRegions((current) => {
-        const rings = current.get(group)
-        if (!rings) return current
-        const nextRings = rings.map((ring, ringIndex) =>
-          ringIndex === held.ring
-            ? ring.map((vertex, index) => (index === held.index ? place : vertex))
-            : ring
-        )
-        const copy = new Map(current)
-        copy.set(group, nextRings)
-        /* La frontière d'en face recule. Sans cela, avancer sur son voisin laissait deux
-           contours superposés, et un post pris dans les deux sans propriétaire. */
-        for (const [other, otherRings] of current) {
-          if (other === group) continue
-          copy.set(other, carveOutside(otherRings, nextRings))
-        }
-        return copy
-      })
+      setCellMesh((current) => (current ? moveMeshVertex(current, held, place) : current))
     },
-    [editing, mapPointAt]
+    [mapPointAt]
   )
 
-  /** Fin du geste : on remonte la région et ce qu'elle contient désormais. */
+  /**
+   * Fin du geste : on remonte **chaque** collection touchée.
+   *
+   * Une paroi sépare deux cellules : la pousser change le contenu des deux. N'en remonter
+   * qu'une laissait l'autre avec des posts qu'elle avait perdus.
+   */
   const commitRegion = useCallback((): void => {
-    const group = editing
-    if (!group) return
-    const rings = regions.get(group)
-    if (!rings) return
-    const inside = data.points
-      .filter((point) => rings.some((ring) => insideRing(ring, point.x, point.y)))
-      .map((point) => point.id)
-    onBoundaryChange(group, rings, inside)
-  }, [editing, regions, data.points, onBoundaryChange])
+    for (const [group, rings] of regions) {
+      const inside = data.points
+        .filter((point) => rings.some((ring) => insideRing(ring, point.x, point.y)))
+        .map((point) => point.id)
+      onBoundaryChange(group, rings, inside)
+    }
+  }, [regions, data.points, onBoundaryChange])
 
   /** Le nom d'amas sous le curseur, s'il y en a un. */
   const labelAt = useCallback((clientX: number, clientY: number): string | null => {
@@ -1464,9 +1504,12 @@ export function OrganizerMap({
          reste atteignable partout ailleurs, et les noms se masquent. */
       /* En retouche, l'appui commence un coup de pinceau au lieu de saisir la carte.
          Bouton droit ou touche Alt : on creuse au lieu de pousser. */
-      if (editing) {
-        const grabbed = vertexAt(event.clientX, event.clientY)
-        if (grabbed) {
+      /* En mode édition, l'appui saisit la paroi la plus proche — sans viser un titre ni un
+         point. C'est ce qui manquait : la retouche s'ouvrait par un double-clic dans une région
+         et ne se voyait nulle part, donc personne ne la trouvait. */
+      if (editMode) {
+        const grabbed = meshVertexAt(event.clientX, event.clientY)
+        if (grabbed !== null) {
           draggedVertexRef.current = grabbed
           return
         }
@@ -1487,7 +1530,7 @@ export function OrganizerMap({
       draw()
       return
     }
-    if (draggedVertexRef.current) {
+    if (draggedVertexRef.current !== null) {
       moveVertex(event.clientX, event.clientY)
       return
     }
@@ -1517,7 +1560,7 @@ export function OrganizerMap({
   }
 
   const onPointerUp = (): void => {
-    if (draggedVertexRef.current) {
+    if (draggedVertexRef.current !== null) {
       draggedVertexRef.current = null
       commitRegion()
       return
@@ -1602,7 +1645,7 @@ export function OrganizerMap({
     <div className="organizer-map" ref={wrapRef}>
       <canvas
         ref={canvasRef}
-        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}${editing ? ' is-editing' : ''}`.trim()}
+        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}${editMode ? ' is-editing' : ''}`.trim()}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
