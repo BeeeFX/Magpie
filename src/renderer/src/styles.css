@@ -6139,17 +6139,7 @@ html.window-is-moving .app *::after {
   }
 }
 
-/* Le mode « nommer un endroit » est armé : on dit ce qu'il fait, et comment en sortir. */
-.library-map__armed {
-  align-self: center;
-  padding: 5px 11px;
-  border-radius: var(--pill);
-  background: rgb(0 0 0 / 0.55);
-  border: 1px solid var(--hairline);
-  backdrop-filter: blur(8px);
-  color: var(--muted);
-  font-size: 11.5px;
-}
+
 
 /* --- L'éditeur de collection, dans le rail ---------------------------------- */
 
@@ -6338,4 +6328,56 @@ html.window-is-moving .app *::after {
   border-radius: var(--pill);
   backdrop-filter: blur(8px);
   padding: 2px;
+}
+
+/* Les trois familles de noms, en interrupteurs. Enfoncé = affiché. */
+.library-map__titles {
+  display: flex;
+  gap: 4px;
+}
+
+.library-map__label.is-active {
+  background: var(--accent, #7b5cff);
+  border-color: transparent;
+  color: #fff;
+}
+
+/**
+ * Le menu du clic droit.
+ *
+ * Posé à l'endroit exact du clic, dans le repère du canevas : c'est ce qui fait qu'il désigne
+ * l'endroit dont il parle. Nommer un endroit était un mode qu'il fallait armer d'un bouton, et
+ * un clic gauche perdu suffisait à poser une étiquette qu'on n'avait pas demandée.
+ */
+.map-menu {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  min-width: 172px;
+  padding: 5px;
+  border-radius: 14px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(14 14 18 / 0.92);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: var(--shadow-lg);
+}
+
+.map-menu button {
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.map-menu button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.09);
+}
+
+.map-menu button:disabled {
+  color: var(--faint);
 }

@@ -61,7 +61,7 @@ const WEB_BUDGET = 24_000_000
 
 /** Portée du ressort quand on tire un point : ses voisins suivent, de moins en moins. */
 
-export type ColourMode = 'group' | 'platform' | 'kind' | 'source'
+export type ColourMode = 'group' | 'platform' | 'kind' | 'source' | 'collection'
 
 interface Props {
   data: MapData
@@ -94,9 +94,28 @@ interface Props {
    * puisque le pavage couvre tout et qu'aucun point de la carte n'est plus « hors région ».
    * Un mode armé depuis un bouton le rend visible, et le rend accessible partout.
    */
-  placingLabel?: boolean
   /** Retirer une étiquette posée. Sans cela, une étiquette de trop restait là pour toujours. */
   onRemoveLabel?(id: string): void
+  /**
+   * Les collections de l'utilisateur, telles que la carte les lit.
+   *
+   * `members` ne porte qu'une collection par post — la dominante —, parce qu'un pixel n'a
+   * qu'une teinte et qu'un nom se pose au milieu des siens. L'appartenance multiple existe
+   * bien en base ; c'est l'affichage qui doit trancher, pas le modèle.
+   */
+  collections?: { id: number; name: string; tone: string; members: Set<string> }[]
+  /** Les noms des collections, posés au milieu de leurs posts. */
+  showCollectionNames?: boolean
+  /** Les étiquettes posées à la main. */
+  showOwnLabels?: boolean
+  /**
+   * Le clic droit ouvre un menu au lieu de commencer un lasso.
+   *
+   * Vrai sur la carte plein écran, faux dans l'organisateur, qui se sert du glisser droit pour
+   * sélectionner. Nommer un endroit était un mode qu'il fallait armer d'un bouton, et un clic
+   * gauche perdu suffisait à poser une étiquette qu'on n'avait pas demandée.
+   */
+  menuOnRightClick?: boolean
   /**
    * La collection regardée, peinte en chaleur.
    *
@@ -212,10 +231,14 @@ function colourFor(
   point: OrganizerMapPoint,
   mode: ColourMode,
   groupIndex: Map<string, number>,
-  heat?: { degrees: Map<string, number>; reach: number } | null
+  heat?: { degrees: Map<string, number>; reach: number } | null,
+  tint?: Map<string, string> | null
 ): string {
   // La chaleur prime : quand on regarde une collection, c'est elle qu'on regarde.
   if (heat) return heatTone(heat.degrees.get(point.id) ?? Number.NEGATIVE_INFINITY, heat.reach)
+  /* La teinte que l'utilisateur a lui-même donnée à la collection du post. Un post sans
+     collection garde le gris des sans-groupe : il est là, il n'est simplement rangé nulle part. */
+  if (mode === 'collection') return tint?.get(point.id) ?? '#5a5a66'
   if (mode === 'platform') return point.platform === 'instagram' ? '#c9539b' : '#4a90d9'
   if (mode === 'kind') {
     return point.kind === 'video'
@@ -240,8 +263,11 @@ export function OrganizerMap({
   editMode,
   ownLabels,
   onPlaceLabel,
-  placingLabel = false,
   onRemoveLabel,
+  collections,
+  showCollectionNames = false,
+  showOwnLabels = true,
+  menuOnRightClick = false,
   heat = null,
   savedBoundaries,
   onBoundaryChange,
@@ -275,6 +301,33 @@ export function OrganizerMap({
   const morphStart = useRef(0)
   const [hovered, setHovered] = useState<OrganizerMapPoint | null>(null)
   /** Amas éclairé : celui du point survolé, ou celui dont on survole le nom. */
+  /**
+   * La teinte de chaque post, d'après sa collection. Bâtie une fois par changement.
+   *
+   * Elle entre dans la clé du tampon par un jeton : sans lui, recolorer une collection
+   * repeindrait sur une image déjà peinte et rien ne changerait à l'écran.
+   */
+  const collectionTint = useMemo(() => {
+    if (!collections || collections.length === 0) return null
+    const out = new Map<string, string>()
+    for (const room of collections) {
+      for (const id of room.members) out.set(id, room.tone)
+    }
+    return out
+  }, [collections])
+  const tintToken = useMemo(
+    () => (collections ?? []).map((room) => `${room.id}${room.tone}`).join(','),
+    [collections]
+  )
+
+  /** Le menu du clic droit : ce qu'il propose dépend de ce qu'il y a sous le curseur. */
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    labelId: string | null
+    anchors: string[] | null
+  } | null>(null)
+
   const [litGroup, setLitGroup] = useState<string | null>(null)
   /** Amas retenu au clic : tout le reste s'efface tant qu'il l'est. Le survol reste par-dessus. */
   const [focusGroup, setFocusGroup] = useState<string | null>(null)
@@ -747,6 +800,78 @@ export function OrganizerMap({
     }
   }, [data.points])
 
+  /**
+   * Où poser un nom pour un ensemble de points.
+   *
+   * Sur la masse, pas sur la moyenne : un ensemble éparpillé — « architecture » en trois
+   * endroits — a une moyenne qui ne tombe sur aucun d'eux, et le nom flottait dans le vide à
+   * côté d'une carte pleine. On prend la case la plus fournie, puis le centre de ce qu'elle et
+   * ses voisines contiennent.
+   */
+  const denseSpot = (
+    points: { x: number; y: number }[]
+  ): { x: number; y: number; near: number } | null => {
+    const CELL = 0.04
+    const cells = new Map<string, { x: number; y: number }[]>()
+    for (const point of points) {
+      const key = `${Math.floor(point.x / CELL)}:${Math.floor(point.y / CELL)}`
+      const cell = cells.get(key)
+      if (cell) cell.push(point)
+      else cells.set(key, [point])
+    }
+    let bestKey = ''
+    let bestCount = -1
+    for (const [key, cell] of cells) {
+      if (cell.length > bestCount) {
+        bestCount = cell.length
+        bestKey = key
+      }
+    }
+    if (!bestKey) return null
+    const [cx, cy] = bestKey.split(':').map(Number)
+    let x = 0
+    let y = 0
+    let near = 0
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (const point of cells.get(`${cx + dx}:${cy + dy}`) ?? []) {
+          x += point.x
+          y += point.y
+          near += 1
+        }
+      }
+    }
+    return near > 0 ? { x: x / near, y: y / near, near } : null
+  }
+
+  /** Les noms de collections, posés au milieu des leurs. */
+  const collectionSpots = useMemo(() => {
+    if (!collections || collections.length === 0) return []
+    const at = new Map(data.points.map((point) => [point.id, point]))
+    return collections
+      .map((room) => {
+        const own = [...room.members]
+          .map((id) => at.get(id))
+          .filter((point): point is OrganizerMapPoint => point !== undefined)
+        if (own.length < 6) return null
+        const spot = denseSpot(own)
+        if (!spot) return null
+        return {
+          key: `collection:${room.id}`,
+          text: room.name.trim().toLocaleLowerCase(),
+          tone: room.tone,
+          x: spot.x,
+          y: spot.y,
+          count: own.length,
+          near: spot.near,
+          faded: false,
+          members: room.members
+        }
+      })
+      .filter((spot): spot is NonNullable<typeof spot> => spot !== null)
+      .sort((left, right) => right.count - left.count)
+  }, [collections, data.points])
+
   const islands = useMemo(() => {
     /* L'étiquette se pose sur la masse du groupe, pas sur la moyenne de ses points.
        Une catégorie éparpillée — « architecture » répartie en trois endroits — a une moyenne
@@ -909,6 +1034,9 @@ export function OrganizerMap({
            teinte des fils (ils s'éteignent), régler l'ampleur ne la change pas. Mettre le jeton
            complet ici coûtait une reconstruction des courbes par cran de curseur. */
         heat ? 'heat' : '',
+        /* Recolorer une collection change la teinte des points : sans ce jeton, on repeindrait
+           une image déjà peinte et rien ne bougerait. */
+        tintToken,
         keep.toFixed(3),
         [...includedGroups].sort().join(',')
       ].join(':')
@@ -955,8 +1083,8 @@ export function OrganizerMap({
              seconde par cran. Et à l'œil c'est aussi mieux : la toile éteinte fait ressortir
              les points allumés, au lieu de rivaliser avec eux. */
           const tone =
-            colourFor(from, colourMode, groupIndex) === colourFor(to, colourMode, groupIndex)
-              ? colourFor(from, colourMode, groupIndex)
+            colourFor(from, colourMode, groupIndex, null, collectionTint) === colourFor(to, colourMode, groupIndex, null, collectionTint)
+              ? colourFor(from, colourMode, groupIndex, null, collectionTint)
               : NEUTRAL_EDGE
           const shared = tone === NEUTRAL_EDGE ? null : from.group
           /* Un chemin par couple groupe/teinte. La teinte seule suffirait à peindre, mais pas
@@ -1170,7 +1298,7 @@ export function OrganizerMap({
           continue
         }
         const dimmed = point.group !== null && !includedGroups.has(point.group)
-        const tone = colourFor(point, colourMode, groupIndex, heat)
+        const tone = colourFor(point, colourMode, groupIndex, heat, collectionTint)
         const bodies = dimmed ? dim : full
         let body = bodies.get(tone)
         if (!body) {
@@ -1240,7 +1368,7 @@ export function OrganizerMap({
     const frame = { width, height, scale: view.scale, x: view.x, y: view.y }
     const needed = neededArea(frame, content)
     const painted = webCache.current
-    const key = `${colourMode}|${ratio}|${heat?.token ?? ''}|${[...includedGroups].sort().join(',')}`
+    const key = `${colourMode}|${ratio}|${heat?.token ?? ''}|${tintToken}|${[...includedGroups].sort().join(',')}`
     const usable =
       painted.canvas !== null && painted.key === key && stillCovers(painted, needed, view.scale)
     // Étirer ne vaut que le temps du geste : à l'arrêt, la toile doit être nette.
@@ -1485,22 +1613,31 @@ export function OrganizerMap({
        Les points sont dans le tampon, avec la toile : les griser un par un demanderait de
        retracer les 133 810 arêtes à chaque clic. On efface tout, puis on remet le groupe. */
     if (focusGroup) {
+      /**
+       * Isoler, qu'il s'agisse d'un amas ou d'une collection.
+       *
+       * Un amas est un groupe des courbes : on peut donc rallumer sa toile. Une collection ne
+       * l'est pas — ses membres sont dispersés dans tous les paquets — et reconstruire ses
+       * arêtes coûterait une passe sur cent trente mille. On rallume donc ses **points** seuls,
+       * ce qui dit exactement ce qu'on veut savoir : où elle est, et comment elle est répartie.
+       */
+      const isolated = collectionSpots.find((spot) => spot.key === focusGroup)?.members ?? null
       context.save()
       context.globalCompositeOperation = 'destination-out'
       context.globalAlpha = FOCUS_FADE
       context.fillStyle = '#000'
       context.fillRect(0, 0, width, height)
       context.restore()
-      restoreGroup(focusGroup)
-      // Les points du groupe, repeints par-dessus : ils viennent d'être effacés avec le reste.
+      if (!isolated) restoreGroup(focusGroup)
+      // Les points retenus, repeints par-dessus : ils viennent d'être effacés avec le reste.
       const bodies = new Map<string, Path2D>()
       for (const point of data.points) {
-        if (point.group !== focusGroup) continue
+        if (isolated ? !isolated.has(point.id) : point.group !== focusGroup) continue
         const [ux, uy] = at(point)
         const x = ux + view.x
         const y = uy + view.y
         if (x < -8 || y < -8 || x > width + 8 || y > height + 8) continue
-        const tone = colourFor(point, colourMode, groupIndex, heat)
+        const tone = colourFor(point, colourMode, groupIndex, heat, collectionTint)
         let body = bodies.get(tone)
         if (!body) {
           body = new Path2D()
@@ -1553,9 +1690,34 @@ export function OrganizerMap({
        dessus, donc il s'éteint de lui-même au lieu de réagir à des boîtes invisibles. */
     /* Avec les frontières, ce sont les cellules qu'on nomme, pas les amas. Le bouton des noms
        commande donc les unes ou les autres selon ce qu'on regarde. */
-    const labelled = showLabels ? (showBoundaries ? cellLabels : islands) : []
+    /**
+     * Trois familles de noms, chacune avec son interrupteur.
+     *
+     * Les amas que l'analyse a trouvés, les collections que l'utilisateur a écrites, et les
+     * endroits qu'il a nommés lui-même. Elles disaient trois choses différentes et un seul
+     * bouton les commandait toutes — ou plutôt, la troisième n'en avait aucun.
+     *
+     * Chaque nom porte son texte et sa teinte plutôt que de les faire déduire de son groupe :
+     * c'est ce qui permet à une collection d'apparaître ici avec la couleur que l'utilisateur
+     * lui a donnée, sans que la boucle ait à savoir de quelle famille elle vient.
+     */
+    const groupTitles = (showBoundaries ? cellLabels : islands).map((island) => ({
+      key: island.group,
+      text: groupNames.get(island.group)?.trim().toLocaleLowerCase() ?? '',
+      tone: colourOfGroup(island.group, groupIndex),
+      x: island.x,
+      y: island.y,
+      count: island.count,
+      near: island.near,
+      faded: !includedGroups.has(island.group),
+      members: null as Set<string> | null
+    }))
+    const labelled = [
+      ...(showLabels ? groupTitles : []),
+      ...(showCollectionNames ? collectionSpots : [])
+    ]
     for (const island of labelled) {
-      const name = groupNames.get(island.group)?.trim().toLocaleLowerCase()
+      const name = island.text
       if (!name) continue
       const [ux, uy] = at(island)
       const centreX = ux + view.x
@@ -1598,15 +1760,15 @@ export function OrganizerMap({
         y = step % 2 === 1 ? centreY - away : centreY + away
       }
       if (Number.isNaN(y)) continue
-      drawn.push({ group: island.group, x: centreX, y, half, size })
-      const faded = !includedGroups.has(island.group)
+      drawn.push({ group: island.key, x: centreX, y, half, size })
+      const faded = island.faded
       context.globalAlpha = faded ? 0.28 : 1
       if (y !== centreY) {
         /* Le trait de rappel dit de quel amas le nom déplacé parle, et prend la teinte du
            groupe quel que soit le mode de couleur. Le faire passer par `colourFor` obligeait
            à fabriquer un faux point, sans plateforme, ni type, ni provenance : en mode
            « Signet / Likes », lire `sources` sur ce leurre plantait l'écran. */
-        context.strokeStyle = colourOfGroup(island.group, groupIndex)
+        context.strokeStyle = island.tone
         // Un pixel à 45 % se perdait dans la toile : le trait doit se suivre à l'œil.
         context.lineWidth = 2
         context.globalAlpha = faded ? 0.3 : 0.85
@@ -1620,8 +1782,8 @@ export function OrganizerMap({
          retour ne le laissait deviner — l'utilisateur n'a aucune raison d'essayer. Au survol,
          une pastille apparaît derrière le nom, et le curseur devient une main (plus bas). Le
          groupe déjà retenu la garde en permanence : c'est ce qui dit lequel est isolé. */
-      const active = island.group === focusGroup
-      if (island.group === hoverLabel || active) {
+      const active = island.key === focusGroup
+      if (island.key === hoverLabel || active) {
         const padX = size * 0.42
         const padY = size * 0.3
         const radius = size * 0.36
@@ -1636,9 +1798,7 @@ export function OrganizerMap({
         context.fillStyle = active ? 'rgba(255, 255, 255, 0.16)' : 'rgba(255, 255, 255, 0.09)'
         context.fill()
         context.lineWidth = 1.5
-        context.strokeStyle = active
-          ? colourOfGroup(island.group, groupIndex)
-          : 'rgba(255, 255, 255, 0.4)'
+        context.strokeStyle = active ? island.tone : 'rgba(255, 255, 255, 0.4)'
         context.stroke()
       }
       /* Blanc et en minuscules, contour noir épais : coloré par groupe, le texte se noyait
@@ -1650,11 +1810,12 @@ export function OrganizerMap({
       context.lineWidth = size / 5
       context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
       context.strokeText(name, centreX, y)
-      /* À la couleur de son groupe, toujours. Le blanc tranchait mieux sur la toile, mais il
-         coupait le nom de ce qu'il désigne : devant vingt titres, savoir lequel va avec quel
-         amas demandait de suivre le trait de rappel à chaque fois. Le contour noir épais
-         au-dessus fait le travail de lisibilité que le blanc faisait. */
-      context.fillStyle = colourOfGroup(island.group, groupIndex)
+      /* À sa propre teinte : celle du groupe pour un amas, celle que l'utilisateur a choisie
+         pour une collection. Le blanc tranchait mieux sur la toile, mais il coupait le nom de
+         ce qu'il désigne — devant vingt titres, savoir lequel va avec quoi demandait de suivre
+         le trait de rappel à chaque fois. Le contour noir épais au-dessus fait le travail de
+         lisibilité que le blanc faisait. */
+      context.fillStyle = island.tone
       context.fillText(name, centreX, y)
       context.letterSpacing = '0px'
     }
@@ -1662,7 +1823,7 @@ export function OrganizerMap({
        elles ne désignent pas une collection mais un endroit, et il faut que la différence se
        voie sans avoir à réfléchir. */
     const ownDrawn: { id: string; x: number; y: number; half: number; size: number }[] = []
-    for (const spot of ownLabelSpots) {
+    for (const spot of showOwnLabels ? ownLabelSpots : []) {
       const [ux, uy] = at(spot)
       const x = ux + view.x
       const y = uy + view.y
@@ -1692,7 +1853,7 @@ export function OrganizerMap({
       const x = ux + view.x
       const y = uy + view.y
       context.globalAlpha = 1
-      context.fillStyle = colourFor(hovered, colourMode, groupIndex, heat)
+      context.fillStyle = colourFor(hovered, colourMode, groupIndex, heat, collectionTint)
       context.beginPath()
       context.arc(x, y, HOVER_DOT, 0, Math.PI * 2)
       context.fill()
@@ -2075,6 +2236,19 @@ export function OrganizerMap({
   }, [regions, data.points, onBoundaryChange])
 
   /** Le nom d'amas sous le curseur, s'il y en a un. */
+  /** L'étiquette personnelle sous le curseur, s'il y en a une. */
+  const ownLabelAt = useCallback((clientX: number, clientY: number): string | null => {
+    const canvas = canvasRef.current
+    const rect = canvas?.getBoundingClientRect()
+    if (!rect) return null
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+    const hit = ownLabelBoxes.current.find(
+      (box) => Math.abs(box.x + box.half - x) < box.half + 8 && Math.abs(box.y - y) < box.size
+    )
+    return hit?.id ?? null
+  }, [])
+
   const labelAt = useCallback((clientX: number, clientY: number): string | null => {
     const canvas = canvasRef.current
     if (!canvas) return null
@@ -2119,29 +2293,11 @@ export function OrganizerMap({
     } catch {
       /* Pointeur déjà relâché ou identifiant inconnu : la capture est un confort, pas un dû. */
     }
-    /* Le mode armé passe avant tout le reste : on est venu poser un mot, pas déplacer la
-       carte ni ouvrir un post. */
-    if (placingLabel && event.button === 0) {
-      /* Viser une étiquette déjà posée la retire. C'est le même mode : on y entre pour nommer
-         un endroit, on y reste pour changer d'avis. Sans cela, une étiquette de trop ne
-         partait jamais — rien ne la désignait. */
-      const canvas = canvasRef.current
-      const rect = canvas?.getBoundingClientRect()
-      if (rect) {
-        const x = event.clientX - rect.left
-        const y = event.clientY - rect.top
-        const hit = ownLabelBoxes.current.find(
-          (box) => Math.abs(box.x + box.half - x) < box.half + 8 && Math.abs(box.y - y) < box.size
-        )
-        if (hit) {
-          onRemoveLabel?.(hit.id)
-          return
-        }
-      }
-      const anchors = anchorsAt(event.clientX, event.clientY)
-      if (anchors) onPlaceLabel?.(anchors)
-      return
-    }
+    /* Un menu ouvert se referme au premier appui, où qu'il soit. */
+    if (menu) setMenu(null)
+    /* Le clic droit ouvre un menu au lieu de commencer un lasso — mais seulement là où on l'a
+       demandé : l'organisateur, lui, sélectionne au glisser droit. */
+    if (menuOnRightClick && event.button === 2) return
     if (event.shiftKey || event.button === 2) {
       lassoActiveRef.current = true
       setLassoing(true)
@@ -2352,9 +2508,43 @@ export function OrganizerMap({
 
   return (
     <div className="organizer-map" ref={wrapRef}>
+      {menu ? (
+        <div
+          className="map-menu"
+          style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
+          role="menu"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {menu.labelId ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                if (menu.labelId) onRemoveLabel?.(menu.labelId)
+                setMenu(null)
+              }}
+            >
+              {t('map.removeLabel')}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            role="menuitem"
+            /* Sans voisins, il n'y a rien à nommer : une étiquette accrochée au vide n'aurait
+               nulle part où revenir après la prochaine projection. */
+            disabled={!menu.anchors}
+            onClick={() => {
+              if (menu.anchors) onPlaceLabel?.(menu.anchors)
+              setMenu(null)
+            }}
+          >
+            {t('map.placeLabel')}
+          </button>
+        </div>
+      ) : null}
       <canvas
         ref={canvasRef}
-        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}${editMode ? ' is-editing' : ''}${placingLabel ? ' is-placing' : ''}`.trim()}
+        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}${editMode ? ' is-editing' : ''}`.trim()}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -2385,7 +2575,26 @@ export function OrganizerMap({
           setFocusGroup(group)
           setEditing((current) => (current === group ? null : group))
         }}
-        onContextMenu={(event) => event.preventDefault()}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          if (!menuOnRightClick || !onPlaceLabel) return
+          /**
+           * Nommer un endroit se demande, il ne s'arme pas.
+           *
+           * C'était un mode : un bouton l'allumait, et le clic gauche suivant posait une
+           * étiquette — y compris quand ce clic ne voulait rien dire. Un menu au clic droit dit
+           * ce qu'il fait avant de le faire, ne coûte aucun état, et laisse le clic gauche à ce
+           * qu'il a toujours servi : regarder.
+           */
+          const rect = canvasRef.current?.getBoundingClientRect()
+          if (!rect) return
+          setMenu({
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+            labelId: ownLabelAt(event.clientX, event.clientY),
+            anchors: anchorsAt(event.clientX, event.clientY)
+          })
+        }}
       />
       {/* L'infobulle de la maquette, qui suit le curseur : la vignette posée dans un coin
           obligeait à quitter le point des yeux pour lire ce qu'il était. */}
@@ -2400,7 +2609,7 @@ export function OrganizerMap({
             <div className="map-tip__who">
               <span
                 className="map-tip__swatch"
-                style={{ background: colourFor(hovered, colourMode, groupIndex, heat) }}
+                style={{ background: colourFor(hovered, colourMode, groupIndex, heat, collectionTint) }}
               />
               {/* Le nom de l'amas tient lieu de titre le temps que l'auteur arrive : ouvrir sur
                   un vide, puis le remplir, faisait sauter l'infobulle sous le curseur. Une

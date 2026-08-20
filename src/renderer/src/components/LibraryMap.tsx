@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { OrganizerMap as OrganizerMapData, OrganizerProgress } from '@shared/types'
+import type {
+  CollectionMembership,
+  OrganizerMap as OrganizerMapData,
+  OrganizerProgress
+} from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import type { Vertex } from '../map-boundaries'
 import { displayName } from '../format'
 import { useStore, useT } from '../store'
 import { IconClose } from './Icons'
+import { swatchOf } from '../collection-colours'
 import { CollectionsRail } from './CollectionsRail'
 import { OrganizerMap, type ColourMode } from './OrganizerMap'
 import { MapPostPanel } from './MapPostPanel'
@@ -62,8 +67,16 @@ export function LibraryMap(): React.JSX.Element {
   const [draft, setDraft] = useState('')
   /** Reposer le même écran ne change aucun état : il faut un compteur pour redemander. */
   const [attempt, setAttempt] = useState(0)
-  /** Le prochain clic pose une étiquette. Armé depuis le bouton, désarmé dès qu'on a posé. */
-  const [placing, setPlacing] = useState(false)
+  /**
+   * Quels noms la carte affiche.
+   *
+   * Trois familles qui disaient trois choses et qu'un seul bouton commandait — ou plutôt, dont
+   * la troisième n'avait aucun bouton. Les amas sortent de l'analyse, les collections de ce que
+   * l'utilisateur a écrit, les étiquettes de ce qu'il a nommé lui-même.
+   */
+  const [titles, setTitles] = useState({ groups: true, collections: true, own: true })
+  /** Les collections, pour teinter les points et poser leurs noms. */
+  const [rooms, setRooms] = useState<CollectionMembership[]>([])
   /**
    * Ce que la couleur raconte.
    *
@@ -107,16 +120,24 @@ export function LibraryMap(): React.JSX.Element {
   /* Échap sort de la saisie et du mode, d'où que vienne le focus. Il n'était écouté que par le
      champ lui-même : un clic ailleurs et la boîte ne se fermait plus par aucun moyen. */
   useEffect(() => {
-    if (!naming && !placing) return
+    if (!naming) return
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
       event.stopPropagation()
       setNaming(null)
-      setPlacing(false)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [naming, placing])
+  }, [naming])
+
+  /* Rechargées quand la chaleur change : c'est le signe qu'une collection vient d'être créée,
+     redéfinie ou recolorée, donc que les teintes et les noms ont bougé. */
+  useEffect(() => {
+    void magpie
+      .collectionMembership()
+      .then(setRooms)
+      .catch((error) => console.warn('[magpie] Collections illisibles', error))
+  }, [heat?.token])
 
   useEffect(() => {
     void magpie
@@ -199,6 +220,20 @@ export function LibraryMap(): React.JSX.Element {
      interdire la carte serait pire : on annonce la durée et on laisse décider. Repère mesuré —
      26 s pour 9 740 posts, et le coût monte en n·log n, ce qui donne l'ordre de grandeur sans
      prétendre à la seconde près. */
+  /** Les collections telles que la carte les lit : une teinte, un nom, ses membres. */
+  const mapRooms = useMemo(
+    () =>
+      rooms
+        .filter((room) => room.postIds.length > 0)
+        .map((room) => ({
+          id: room.id,
+          name: room.name,
+          tone: swatchOf(room.color),
+          members: new Set(room.postIds)
+        })),
+    [rooms]
+  )
+
   const count = shown?.points.length ?? 0
   const heavy = count > 15_000
   const estimate = Math.max(
@@ -274,9 +309,9 @@ export function LibraryMap(): React.JSX.Element {
           À la place, ce qui manquait vraiment : de quoi nommer un endroit. Le geste existait
           — double-clic — et rien ne l'annonçait. */}
       <div className="library-map__tools">
-        {/* Quatre lectures du même nuage. Le groupe d'abord : c'est celle qu'on vient voir. */}
+        {/* Cinq lectures du même nuage. Le groupe d'abord : c'est celle qu'on vient voir. */}
         <div className="segmented segmented--quiet library-map__colours">
-          {(['group', 'platform', 'kind', 'source'] as const).map((mode) => (
+          {(['group', 'collection', 'platform', 'kind', 'source'] as const).map((mode) => (
             <button
               key={mode}
               type="button"
@@ -291,19 +326,21 @@ export function LibraryMap(): React.JSX.Element {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className={`btn library-map__label${placing ? ' is-active' : ''}`}
-          aria-pressed={placing}
-          onClick={() => setPlacing((current) => !current)}
-        >
-          {t(placing ? 'map.placeLabelArmed' : 'map.placeLabel')}
-        </button>
-        {placing ? (
-          <span className="library-map__armed" role="status">
-            {t('map.placeLabelHint')}
-          </span>
-        ) : null}
+        {/* Les trois familles de noms. Poser une étiquette se fait au clic droit sur la carte :
+            le bouton qui armait un mode a disparu avec le mode. */}
+        <div className="library-map__titles" role="group" aria-label={t('map.titles')}>
+          {(['groups', 'collections', 'own'] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              className={`btn library-map__label${titles[kind] ? ' is-active' : ''}`}
+              aria-pressed={titles[kind]}
+              onClick={() => setTitles((current) => ({ ...current, [kind]: !current[kind] }))}
+            >
+              {t(`map.titles${kind[0].toUpperCase()}${kind.slice(1)}` as Parameters<typeof t>[0])}
+            </button>
+          ))}
+        </div>
       </div>
       {heavy ? (
         <p className="library-map__notice" role="status">
@@ -316,7 +353,7 @@ export function LibraryMap(): React.JSX.Element {
         colourMode={colourMode}
         includedGroups={includedGroups}
         groupNames={groupNames}
-        showLabels
+        showLabels={titles.groups}
         showBoundaries={false}
         editMode={false}
         savedBoundaries={NO_BOUNDARIES}
@@ -346,7 +383,6 @@ export function LibraryMap(): React.JSX.Element {
            reste accessible depuis la grille : ici on veut regarder sans quitter la carte. */
         onOpen={(point) => setPanelPostId(point.id)}
         ownLabels={ownLabels}
-        placingLabel={placing}
         onRemoveLabel={(id) => {
           setOwnLabels((current) => current.filter((label) => label.id !== id))
           void magpie
@@ -354,8 +390,11 @@ export function LibraryMap(): React.JSX.Element {
             .catch((error) => console.warn('[magpie] Étiquette non retirée', error))
         }}
         heat={heat}
+        collections={mapRooms}
+        showCollectionNames={titles.collections}
+        showOwnLabels={titles.own}
+        menuOnRightClick
         onPlaceLabel={(anchors) => {
-          setPlacing(false)
           setNaming(anchors)
           setDraft('')
         }}

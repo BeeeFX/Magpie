@@ -45,7 +45,7 @@ const data: MapData = {
 }
 
 const asked = new URLSearchParams(location.search).get('colour')
-const colourMode: ColourMode = (['group', 'platform', 'kind', 'source'] as const).includes(
+const colourMode: ColourMode = (['group', 'platform', 'kind', 'source', 'collection'] as const).includes(
   asked as ColourMode
 )
   ? (asked as ColourMode)

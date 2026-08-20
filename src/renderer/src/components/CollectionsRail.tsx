@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LABELS, type CollectionHeat, type CollectionInfo, type LabelColor } from '@shared/types'
+import { LABELS, type CollectionHeat, type CollectionInfo } from '@shared/types'
 import { magpie } from '../bridge'
+import { SWATCH } from '../collection-colours'
 import { useT } from '../store'
 import { IconClose } from './Icons'
 
@@ -50,17 +51,6 @@ const toSlider = (size: number): number =>
   Math.log(size / SIZE_MIN) / Math.log(SIZE_MAX / SIZE_MIN)
 const fromSlider = (value: number): number =>
   Math.round(SIZE_MIN * (SIZE_MAX / SIZE_MIN) ** value)
-
-/** Les teintes que porte une collection, celles des étiquettes de posts. */
-const SWATCH: Record<LabelColor, string> = {
-  red: '#ff5c5c',
-  orange: '#ff9f43',
-  yellow: '#ffd93d',
-  green: '#4ade80',
-  blue: '#38bdf8',
-  purple: '#a78bfa',
-  grey: '#94a3b8'
-}
 
 interface Word {
   word: string
