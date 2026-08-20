@@ -8,7 +8,10 @@
 import { existsSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import { libraryDbPath } from './library-path'
+import { MEDIA_UPSERT_SQL } from '../src/main/db/media-upsert'
+import { mediaIdentity } from '../src/main/media/identity'
 import {
+  SCHEMA_SQL,
   MIGRATION_9_SQL,
   MIGRATION_10_SQL,
   MIGRATION_11_SQL,
@@ -319,6 +322,74 @@ check(
       AND color NOT IN ('red','orange','yellow','green','blue','purple','grey')`
   ).n === 0
 )
+
+console.log('\ncache média conservé d’une synchronisation à l’autre')
+{
+  /*
+   * Le banc rejoue l’upsert de synchronisation sur une base en mémoire. C’est la seule
+   * façon de vérifier ce qui a réellement fait du mal : deux signatures successives du même
+   * fichier ne doivent pas passer pour deux médias différents, sans quoi chaque page
+   * resynchronisée jette la vignette et le clip déjà téléchargés — et une bibliothèque
+   * entière repasse en « média en préparation » pendant que ses fichiers dorment sur le
+   * disque.
+   */
+  const memory = new Database(':memory:')
+  memory.function('media_identity', { deterministic: true }, (value: unknown) =>
+    mediaIdentity(typeof value === 'string' ? value : null)
+  )
+  memory.exec(SCHEMA_SQL)
+  memory
+    .prepare(
+      `INSERT INTO posts (id, platform, native_id, url, kind, discovered_at, updated_at)
+       VALUES ('instagram:1', 'instagram', '1', 'https://x.test/p/1', 'video', 0, 0)`
+    )
+    .run()
+
+  const upsert = memory.prepare(MEDIA_UPSERT_SQL)
+  const signed = (signature: string): { remote: string; video: string } => ({
+    remote: `https://scontent-${signature}.cdninstagram.com/v/t51.82787-15/760930005_1854850_n.webp?oh=${signature}&oe=6A8D5E58`,
+    video: `https://scontent-${signature}.cdninstagram.com/o1/v/t2/f2/m86/AQ${signature}.mp4?_nc_vs=SGFzaFBlcm1hbmVudA&oh=${signature}`
+  })
+  const write = (source: { remote: string; video: string }): void => {
+    upsert.run({
+      post_id: 'instagram:1',
+      idx: 0,
+      kind: 'video',
+      remote_url: source.remote,
+      source_path: null,
+      video_source: source.video
+    })
+  }
+  const cached = (): { thumb_path: string | null; video_path: string | null; video_cache_state: string } =>
+    memory
+      .prepare(`SELECT thumb_path, video_path, video_cache_state FROM media WHERE post_id = 'instagram:1'`)
+      .get() as { thumb_path: string | null; video_path: string | null; video_cache_state: string }
+
+  write(signed('lhr6-2'))
+  memory
+    .prepare(
+      `UPDATE media SET thumb_path = 'abc.webp', video_path = 'abc.mp4',
+        video_cache_state = 'cached' WHERE post_id = 'instagram:1' AND idx = 0`
+    )
+    .run()
+
+  write(signed('lhr11-1'))
+  const kept = cached()
+  check('une resignature du même média garde sa vignette', kept.thumb_path === 'abc.webp')
+  check('une resignature du même média garde son clip', kept.video_path === 'abc.mp4')
+  check('et le clip reste marqué en cache', kept.video_cache_state === 'cached')
+
+  write({
+    remote: 'https://scontent-lhr6-2.cdninstagram.com/v/t51.82787-15/999999999_0000000_n.webp',
+    video: 'https://scontent-lhr6-2.cdninstagram.com/o1/v/t2/f2/m86/AQz.mp4?_nc_vs=QXV0cmVBc3NldA'
+  })
+  const dropped = cached()
+  check('un média réellement remplacé perd sa vignette', dropped.thumb_path === null)
+  check('un média réellement remplacé perd son clip', dropped.video_path === null)
+  check('et son clip repasse en attente', dropped.video_cache_state === 'pending')
+
+  memory.close()
+}
 
 console.log('\nintégrité')
 check('intégrité SQLite', one<{ integrity_check: string }>('PRAGMA integrity_check').integrity_check === 'ok')

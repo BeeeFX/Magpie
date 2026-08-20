@@ -1,5 +1,6 @@
 import { readdirSync } from 'node:fs'
 import { getDb, mediaDir } from '../db'
+import { thumbName, videoName } from '../media/names'
 
 /**
  * Réparations de données déjà en base.
@@ -14,37 +15,56 @@ const MAX_VIDEO_BITRATE = 2_500_000
 const MAX_VIDEO_WIDTH = 720
 
 /**
- * Réconcilie la base avec ce qui reste réellement dans le dossier média.
+ * Réconcilie la base avec ce que contient réellement le dossier média — dans les deux sens.
  *
- * Une référence qui pointe vers un fichier disparu est le pire des deux mondes : la carte
- * croit avoir sa vignette, donc elle n'affiche ni image ni indicateur d'attente — juste son
- * aplat de couleur — et la file de préparation ne la reprendra jamais, puisqu'elle ne
- * retient que les médias dont le chemin est vide. Un mur entier pouvait rester ainsi, sans
- * qu'aucune synchronisation n'y change quoi que ce soit.
+ * **Référence sans fichier.** C'est le pire des deux mondes : la carte croit avoir sa
+ * vignette, donc elle n'affiche ni image ni indicateur d'attente — juste son aplat de
+ * couleur — et la file de préparation ne la reprendra jamais, puisqu'elle ne retient que les
+ * médias dont le chemin est vide. Un mur entier pouvait rester ainsi, sans qu'aucune
+ * synchronisation n'y change quoi que ce soit. Le cas venait d'une purge de cache
+ * interrompue : un seul fichier verrouillé par Windows suffisait à supprimer les autres sans
+ * jamais remettre les références à zéro.
  *
- * Le cas venait d'une purge de cache interrompue : un seul fichier verrouillé par Windows
- * suffisait à supprimer les autres sans jamais remettre les références à zéro.
+ * **Fichier sans référence.** Le symétrique, et de très loin le plus coûteux : chaque
+ * resynchronisation d'un post déjà connu comparait des URLs de CDN resignées, concluait que
+ * le média avait changé et effaçait le chemin de sa vignette et de son clip. Les fichiers,
+ * eux, restaient — seize mille vignettes sur le disque pour treize mille reconnues, et
+ * treize gigaoctets de clips qu'il aurait fallu retélécharger. Comme le nom d'un fichier de
+ * cache se déduit du couple (post, index), on les retrouve sans rien lire : ce sont des
+ * fichiers à rattacher, pas à refaire.
+ *
+ * `media_identity` empêche désormais l'orphelinat de se reproduire ; cette passe répare ce
+ * que les versions précédentes ont laissé.
  */
-export function repairMissingCacheFiles(): { thumbs: number; videos: number } {
+export interface CacheReconciliation {
+  /** Références vers un fichier disparu, remises en file. */
+  thumbs: number
+  videos: number
+  /** Fichiers présents que la base avait cessé de reconnaître. */
+  relinkedThumbs: number
+  relinkedVideos: number
+}
+
+export function repairMissingCacheFiles(): CacheReconciliation {
   let present: Set<string>
   try {
     present = new Set(readdirSync(mediaDir()))
   } catch {
     // Bibliothèque sur un disque absent : on ne touche à rien plutôt que de tout effacer.
-    return { thumbs: 0, videos: 0 }
+    return { thumbs: 0, videos: 0, relinkedThumbs: 0, relinkedVideos: 0 }
   }
 
   const db = getDb()
   const rows = db
     .prepare(
-      `SELECT post_id, idx, thumb_path, video_path FROM media
-        WHERE thumb_path IS NOT NULL OR video_path IS NOT NULL`
+      `SELECT post_id, idx, thumb_path, video_path, kind FROM media`
     )
     .all() as {
     post_id: string
     idx: number
     thumb_path: string | null
     video_path: string | null
+    kind: string
   }[]
 
   const clearThumb = db.prepare(
@@ -54,22 +74,47 @@ export function repairMissingCacheFiles(): { thumbs: number; videos: number } {
     `UPDATE media SET video_path = NULL, video_cache_state = 'pending', video_attempts = 0
       WHERE post_id = ? AND idx = ?`
   )
+  const linkThumb = db.prepare(
+    'UPDATE media SET thumb_path = ?, thumb_attempts = 0 WHERE post_id = ? AND idx = ?'
+  )
+  const linkVideo = db.prepare(
+    `UPDATE media SET video_path = ?, video_cache_state = 'cached', video_attempts = 0
+      WHERE post_id = ? AND idx = ?`
+  )
 
-  let thumbs = 0
-  let videos = 0
+  const result: CacheReconciliation = {
+    thumbs: 0,
+    videos: 0,
+    relinkedThumbs: 0,
+    relinkedVideos: 0
+  }
+
   db.transaction(() => {
     for (const row of rows) {
       if (row.thumb_path && !present.has(row.thumb_path)) {
         clearThumb.run(row.post_id, row.idx)
-        thumbs++
+        result.thumbs++
+      } else if (!row.thumb_path) {
+        const name = thumbName(row.post_id, row.idx)
+        if (present.has(name)) {
+          linkThumb.run(name, row.post_id, row.idx)
+          result.relinkedThumbs++
+        }
       }
+
       if (row.video_path && !present.has(row.video_path)) {
         clearVideo.run(row.post_id, row.idx)
-        videos++
+        result.videos++
+      } else if (!row.video_path && row.kind === 'video') {
+        const name = videoName(row.post_id, row.idx)
+        if (present.has(name)) {
+          linkVideo.run(name, row.post_id, row.idx)
+          result.relinkedVideos++
+        }
       }
     }
   })()
-  return { thumbs, videos }
+  return result
 }
 
 interface XVariant {

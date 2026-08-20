@@ -45,6 +45,22 @@ const PACING: Record<Platform, { minMs: number; maxMs: number }> = {
 
 /** Pages consécutives sans nouveauté avant de considérer le rattrapage terminé. */
 const STALE_PAGES_BEFORE_STOP = 3
+
+/**
+ * Le même arrêt, pour un rattrapage — plus tolérant, mais il existe.
+ *
+ * Il n'existait pas du tout : un rattrapage allait au plafond de pages quoi qu'il trouve.
+ * Or `partial` est *aussi* ce qu'écrit un rattrapage arrêté par ce plafond, si bien que la
+ * synchronisation suivante se croyait à son tour en rattrapage. Une bibliothèque plus
+ * grande que le plafond ne pouvait donc plus jamais sortir de cet état : chaque
+ * synchronisation reparcourait cent vingt pages pour zéro nouveauté — et, avant que
+ * `media_identity` ne la protège, remettait au passage toute la bibliothèque en
+ * « média en préparation ».
+ *
+ * Huit pages laissent traverser une poche de déjà-vu au milieu d'un vrai rattrapage — quatre
+ * cents éléments connus d'affilée — tout en s'arrêtant bien avant le plafond.
+ */
+const STALE_PAGES_BEFORE_STOP_BACKFILL = 8
 const MAX_RATE_LIMIT_RETRIES = 5
 
 interface ResumeCursor {
@@ -291,7 +307,11 @@ class SyncEngine {
       // a rejoint ce qu'on avait déjà. Un sync incrémental s'arrête donc en une ou deux
       // requêtes au lieu de reparcourir tout l'historique.
       stalePages = fresh.length === 0 ? stalePages + 1 : 0
-      if (!isBackfill && stalePages >= STALE_PAGES_BEFORE_STOP) {
+      if (
+        stalePages >= (isBackfill ? STALE_PAGES_BEFORE_STOP_BACKFILL : STALE_PAGES_BEFORE_STOP)
+      ) {
+        // `completed` efface le curseur de reprise : on ne redémarrera plus au milieu de
+        // l'historique, là où les nouveautés du haut de la liste ne se voient pas.
         completed = true
         break
       }

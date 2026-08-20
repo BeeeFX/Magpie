@@ -12,6 +12,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
+import { mediaIdentity } from '../media/identity'
 import {
   MIGRATION_9_SQL,
   MIGRATION_10_SQL,
@@ -168,6 +169,14 @@ function prepareConnection(
   conn.pragma('journal_mode = WAL')
   conn.pragma('synchronous = NORMAL')
   conn.pragma('foreign_keys = ON')
+
+  /* Comparer deux liens de CDN dans une requête demande de savoir lequel des deux désigne
+     le même fichier — ce que seul `mediaIdentity` sait dire. La fonction est déclarée sur
+     la connexion plutôt que le calcul remonté en JavaScript : l'upsert de synchronisation
+     reste ainsi une seule instruction, sans lecture préalable ligne à ligne. */
+  conn.function('media_identity', { deterministic: true }, (value: unknown) =>
+    mediaIdentity(typeof value === 'string' ? value : null)
+  )
 
   const current = conn.pragma('user_version', { simple: true }) as number
 

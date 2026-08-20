@@ -12,6 +12,7 @@ import type {
   VideoQuality
 } from '@shared/types'
 import { CONTENT_SOURCES, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
+import { MEDIA_UPSERT_SQL } from './media-upsert'
 import { getDb } from './index'
 
 interface PostRow {
@@ -947,38 +948,7 @@ export function upsertPosts(
 ): void {
   const db = getDb()
   const post = upsertPostStmt()
-  const mediaStmt = db.prepare(/* sql */ `
-    INSERT INTO media (post_id, idx, kind, remote_url, source_path, video_source)
-    VALUES (@post_id, @idx, @kind, @remote_url, @source_path, @video_source)
-    ON CONFLICT(post_id, idx) DO UPDATE SET
-      kind         = excluded.kind,
-      thumb_path   = CASE
-                       WHEN media.remote_url IS excluded.remote_url THEN media.thumb_path
-                       ELSE NULL
-                     END,
-      thumb_attempts = CASE
-                         WHEN media.remote_url IS excluded.remote_url
-                           THEN media.thumb_attempts
-                         ELSE 0
-                       END,
-      video_path   = CASE
-                       WHEN media.video_source IS excluded.video_source THEN media.video_path
-                       ELSE NULL
-                     END,
-      video_cache_state = CASE
-                            WHEN media.video_source IS excluded.video_source
-                              THEN media.video_cache_state
-                            ELSE 'pending'
-                          END,
-      video_attempts = CASE
-                         WHEN media.video_source IS excluded.video_source
-                           THEN media.video_attempts
-                         ELSE 0
-                       END,
-      remote_url   = excluded.remote_url,
-      source_path  = excluded.source_path,
-      video_source = excluded.video_source
-  `)
+  const mediaStmt = db.prepare(MEDIA_UPSERT_SQL)
   const deleteVariants = db.prepare('DELETE FROM media_variants WHERE post_id = ? AND idx = ?')
   // Compilées une fois, pas une fois par post : `prepare` reconstruit le plan à chaque
   // appel, et une page de synchronisation en faisait deux de plus par élément.

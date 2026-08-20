@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { existsSync, rmSync } from 'node:fs'
 import { copyFile, readdir, rm, stat, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -21,6 +20,7 @@ import {
   thumbnailPathsForPosts,
 } from '../db/queries'
 import { readSettings } from '../settings'
+import { THUMB_NAME_PATTERN, thumbName, videoName } from './names'
 
 /**
  * Cache de vignettes. Voir SPEC.md §7.
@@ -50,18 +50,7 @@ function warnMedia(postId: string, idx: number, error: unknown): void {
   }
 }
 
-/** Nom déterministe : rejouer le cache n'accumule pas de fichiers orphelins. */
-function thumbName(postId: string, idx: number): string {
-  return `${createHash('sha1').update(`${postId}:${idx}`).digest('hex')}.webp`
-}
-
-function videoName(postId: string, idx: number): string {
-  return `${createHash('sha1').update(`${postId}:${idx}:video`).digest('hex')}.mp4`
-}
-
-/** Le protocole `magpie://` ne sert que des noms de ces formes — voir main/index.ts. */
-export const THUMB_NAME_PATTERN = /^[0-9a-f]{40}\.webp$/
-export const VIDEO_NAME_PATTERN = /^[0-9a-f]{40}\.mp4$/
+export { THUMB_NAME_PATTERN, VIDEO_NAME_PATTERN } from './names'
 
 class CacheQuotaReached extends Error {}
 

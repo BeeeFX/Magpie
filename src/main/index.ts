@@ -705,11 +705,17 @@ async function bootstrap(): Promise<void> {
   if (repaired > 0) console.log(`[magpie] Date de synchronisation réparée : ${repaired} compte(s).`)
 
   // Doit précéder la file média : c'est ce qui remet en attente les vignettes dont le
-  // fichier a disparu, et qu'aucune synchronisation ne pourrait rattraper autrement.
-  const missing = repairMissingCacheFiles()
-  if (missing.thumbs > 0 || missing.videos > 0) {
+  // fichier a disparu, et surtout ce qui rend à la base les fichiers qu'elle avait cessé de
+  // reconnaître — sans quoi la file les retéléchargerait un par un, tous déjà sur le disque.
+  const cache = repairMissingCacheFiles()
+  if (cache.thumbs > 0 || cache.videos > 0) {
     console.log(
-      `[magpie] Cache réconcilié : ${missing.thumbs} vignette(s) et ${missing.videos} clip(s) à refaire.`
+      `[magpie] Cache réconcilié : ${cache.thumbs} vignette(s) et ${cache.videos} clip(s) à refaire.`
+    )
+  }
+  if (cache.relinkedThumbs > 0 || cache.relinkedVideos > 0) {
+    console.log(
+      `[magpie] Cache rattaché : ${cache.relinkedThumbs} vignette(s) et ${cache.relinkedVideos} clip(s) retrouvés sur le disque.`
     )
   }
 
