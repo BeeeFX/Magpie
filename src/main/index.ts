@@ -35,7 +35,11 @@ import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
 import { repairMissingCacheFiles, repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
-import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
+import {
+  applyRememberedOrganizerRules,
+  localOrganizer,
+  prepareForMode
+} from './tagging/organize'
 import type { BackgroundState, PostQuery, PreloadRequest, SyncPhase } from '@shared/types'
 import { PUBLIC_PLATFORMS } from '@shared/types'
 import { backgroundTasks } from './tasks'
@@ -823,7 +827,9 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
           organizerAfterSyncTimer = null
           if (syncEngine.isRunning()) return
           organizerAfterSyncPending = false
-          void applyRememberedOrganizerRules()
+          /* La méthode choisie se rejoue en entier : sa préparation, puis son classement. */
+          void prepareForMode(readSettings().organizeMode)
+            .then(() => applyRememberedOrganizerRules())
             .then((result) => {
               if (result.added > 0) mainWindow?.webContents.send('library:updated')
             })

@@ -1144,6 +1144,31 @@ export function rememberedOrganizerDestinations(
 }
 
 /** Applique les destinations apprises sans recréer ni renommer les collections. */
+/**
+ * La préparation que le mode choisi implique, avant de ranger tout seul.
+ *
+ * Rejouer « la méthode choisie » n'est pas rejouer une étiquette : c'est refaire le travail qui
+ * la distingue. `applyRememberedOrganizerRules` classe avec ce qui se trouve déjà en base — donc
+ * après une analyse approfondie, les posts arrivés à la synchronisation suivante étaient classés
+ * sur leur **texte seul**, leurs images n'ayant jamais été lues. La méthode se dégradait
+ * silencieusement d'une synchronisation à l'autre, et c'est exactement ce qu'on ne veut pas d'un
+ * réglage qui promet de refaire la même chose.
+ *
+ * Les deux étapes ne portent que sur ce qui manque — leurs files sont bâties sur « pas encore
+ * lu », « pas encore écouté » — donc leur coût suit le nombre de posts nouveaux, pas la taille de
+ * la bibliothèque. Elles passent par le registre de tâches, donc elles s'annoncent et se mettent
+ * en pause comme le reste.
+ */
+export async function prepareForMode(mode: 'quick' | 'deep' | null): Promise<void> {
+  if (mode !== 'deep') return
+  const { readAllImages } = await import('./read-images')
+  const { transcribeAll } = await import('./transcribe')
+  /* Les images d'abord : la transcription est de loin la plus lente, et un classement qui
+     arriverait sans elle vaut déjà mieux qu'un classement sans les images. */
+  await readAllImages()
+  await transcribeAll()
+}
+
 export function applyRememberedOrganizerRules(): Promise<AiCollectionApplyResult> {
   if (automaticApply) return automaticApply
   const idle: AiCollectionApplyResult = {

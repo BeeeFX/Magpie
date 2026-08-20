@@ -442,6 +442,8 @@ export interface MagpieApi {
   createManualCollection(name: string, postIds: string[]): Promise<number>
   deleteCollection(collectionId: number): Promise<void>
   mergeCollections(from: number, into: number): Promise<void>
+  /** Ne garder que ces collections, les autres disparaissant. Voir `keepOnly`. */
+  keepOnlyCollections(ids: number[]): Promise<{ kept: number; removed: number }>
   collectionMembership(): Promise<CollectionMembership[]>
   collectionKeywords(collectionId: number): Promise<{ word: string; weight: number }[]>
   addCollectionKeyword(collectionId: number, word: string): Promise<CollectionHeat | null>

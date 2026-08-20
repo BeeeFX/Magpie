@@ -418,7 +418,40 @@ export function membership(): {
 
   return (
     getDb()
-      .prepare('SELECT id, name, color FROM collections ORDER BY sort_index, name COLLATE NOCASE')
+      .prepare(
+        "SELECT id, name, color FROM collections WHERE kind = 'query' ORDER BY sort_index, name COLLATE NOCASE"
+      )
       .all() as { id: number; name: string; color: string | null }[]
   ).map((row) => ({ ...row, postIds: rooms.get(row.id) ?? [] }))
+}
+
+/**
+ * Ne garder que les collections désignées, et mettre celles-là hors d'atteinte.
+ *
+ * Appelé avant une analyse approfondie qui succède à un rangement rapide. Les deux produisent
+ * chacun un jeu de collections couvrant la bibliothèque ; les laisser cohabiter donnerait deux
+ * fois les mêmes thèmes sous deux noms, et personne ne saurait lequel fait foi. On demande donc,
+ * plutôt que de choisir à la place de l'utilisateur.
+ *
+ * Ce qu'on garde passe en « manual » : plus aucun recalcul n'y touche, et la carte ne l'affiche
+ * pas — elle n'a pas de définition à montrer. Ce n'est pas une archive figée pour autant : c'est
+ * une collection ordinaire partout ailleurs, qu'on peut ouvrir, filtrer et exporter.
+ */
+export function keepOnly(ids: number[]): { kept: number; removed: number } {
+  const db = getDb()
+  const keep = new Set(ids.map(Number))
+  const all = (db.prepare('SELECT id FROM collections').all() as { id: number }[]).map(
+    (row) => row.id
+  )
+  const doomed = all.filter((id) => !keep.has(id))
+  db.transaction(() => {
+    for (const id of keep) {
+      db.prepare("UPDATE collections SET kind = 'manual' WHERE id = ?").run(id)
+      /* Les mots ne servent plus à rien sur une liste, et les laisser ferait ressortir la
+         collection au premier recalcul si son genre était un jour remis à « query ». */
+      db.prepare('DELETE FROM collection_keywords WHERE collection_id = ?').run(id)
+    }
+    for (const id of doomed) db.prepare('DELETE FROM collections WHERE id = ?').run(id)
+  })()
+  return { kept: keep.size, removed: doomed.length }
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  CollectionInfo,
   AiCollectionApplyResult,
   AiCollectionPlan,
   AiCollectionSuggestion,
@@ -41,8 +42,18 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const stepsRunning = useStore((state) => state.stepsRunning)
   const [organizerProgress, setOrganizerProgress] = useState<OrganizerProgress | null>(null)
   const [phase, setPhase] = useState<
-    'choose' | 'intro' | 'loading' | 'review' | 'applying' | 'done'
+    'choose' | 'keep' | 'intro' | 'loading' | 'review' | 'applying' | 'done'
   >('choose')
+  /**
+   * Les collections déjà là, quand une analyse approfondie succède à un rangement rapide.
+   *
+   * Les deux produisent chacun un jeu couvrant la bibliothèque : les laisser cohabiter donnerait
+   * deux fois les mêmes thèmes sous deux noms, et rien ne dirait lequel fait foi. On demande donc
+   * lesquelles garder, plutôt que de choisir à la place de quelqu'un — et ce qu'il garde devient
+   * une liste que plus aucun recalcul ne touche.
+   */
+  const [existing, setExisting] = useState<CollectionInfo[]>([])
+  const [keeping, setKeeping] = useState<number[]>([])
   /**
    * Rapide ou approfondi. Choisi à l'ouverture, retenu jusqu'à la fin.
    *
@@ -540,7 +551,13 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                   onClick={() => {
                     setDepth('deep')
                     setStepChoices(['sync', 'thumbnails', 'clips', 'images', 'transcribe'])
-                    setPhase('intro')
+                    /* Des collections existent déjà : on demande avant de proposer un jeu neuf
+                       par-dessus. Sur une bibliothèque vierge, la question n'a pas lieu d'être. */
+                    void magpie.listCollections().then((rows) => {
+                      setExisting(rows)
+                      setKeeping([])
+                      setPhase(rows.length > 0 ? 'keep' : 'intro')
+                    })
                   }}
                 >
                   <span className="organizer-card__icon" aria-hidden="true">
@@ -554,6 +571,60 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
               </div>
               <small>{t('organizer.costNote')}</small>
               {undoPanel()}
+            </div>
+          ) : null}
+
+          {phase === 'keep' ? (
+            <div className="organizer-keep">
+              <h3>{t('organizer.keepTitle')}</h3>
+              <p>{t('organizer.keepText', { count: existing.length })}</p>
+              <ul className="organizer-keep__list">
+                {existing.map((room) => {
+                  const on = keeping.includes(room.id)
+                  return (
+                    <li key={room.id}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() =>
+                            setKeeping((current) =>
+                              on ? current.filter((id) => id !== room.id) : [...current, room.id]
+                            )
+                          }
+                        />
+                        <span className="organizer-keep__name">{room.name}</span>
+                        <span className="organizer-keep__count">{room.count}</span>
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+              <p className="organizer-keep__note">{t('organizer.keepNote')}</p>
+              <div className="organizer-keep__foot">
+                <button type="button" className="btn" onClick={() => setPhase('choose')}>
+                  {t('organizer.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    void magpie.keepOnlyCollections(keeping).then(() => {
+                      void refresh(false, true)
+                      setPhase('intro')
+                    })
+                  }}
+                >
+                  {t(
+                    keeping.length === 0
+                      ? 'organizer.keepNone'
+                      : keeping.length === 1
+                        ? 'organizer.keepOne'
+                        : 'organizer.keepMany',
+                    { count: keeping.length }
+                  )}
+                </button>
+              </div>
             </div>
           ) : null}
 
