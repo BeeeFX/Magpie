@@ -75,7 +75,7 @@ const FOCUS_FADE = 0.86
  * ce qui fait passer d'une bulle à une cellule. Au-delà, on commence à rogner les coins et à
  * perdre un post sur trente.
  */
-const RING_TOLERANCE = 0.012
+const RING_TOLERANCE = 0.006
 
 /**
  * Rondeur des jonctions entre deux parois.
@@ -589,37 +589,31 @@ export function OrganizerMap({
     /* La toile, en trois passes par couleur : deux tracés larges et très faibles qui font la
        lueur, puis le fil net. Un chemin par couleur et non par arête — cent trente mille
        appels à `stroke` était le vrai coût, pas les courbes. */
-    const paintWeb = (
-      target: CanvasRenderingContext2D,
-      area: { left: number; top: number; right: number; bottom: number }
-    ): void => {
+    const paintWeb = (target: CanvasRenderingContext2D): void => {
       if (edgeAlpha <= 0.002) return
-      /* La zone peinte fait partie de la clé : à fort zoom, l'écarter laissait construire
-         cent trente mille courbes dont trois cents seulement tombaient dans le cadre. */
-      const key = [
-        view.scale,
-        landing.toFixed(3),
-        colourMode,
-        area.left.toFixed(0),
-        area.top.toFixed(0),
-        area.right.toFixed(0),
-        area.bottom.toFixed(0)
-      ].join(':')
+      /* Ni l'échelle ni la zone visible n'entrent dans la clé, et c'est le remède au gel.
+         Les courbes sont construites dans le repère de la carte — des coordonnées entre 0 et 1
+         — puis mises à l'échelle au tracé. Elles ne dépendent donc plus du zoom, et chaque
+         retracé se contente de les peindre.
+         Avant, la clé portait l'échelle *et* la zone : le moindre cran de molette invalidait
+         tout et reconstruisait les cent trente mille courbes avant de les tracer. C'est la
+         moitié des cinq cents millisecondes de gel — le reste est le tracé lui-même, qui est
+         irréductible. La zone y avait été mise pour éviter de bâtir cent trente mille courbes
+         dont trois cents tombent dans le cadre ; le problème disparaît quand on ne les bâtit
+         qu'une fois pour toute la session. */
+      const key = [landing.toFixed(3), colourMode, [...includedGroups].sort().join(',')].join(':')
       if (pathCache.current.key !== key) {
         const built = new Map<string, { path: Path2D; tone: string; group: string | null }>()
-        // La courbe s'écarte de la corde : de la marge, sinon les arcs sautent aux bords.
-        const slack = core * WEB.bloomWidth + LINK_RADIUS * size * view.scale * 0.3
+        /* L'atterrissage tire les points depuis le centre ; on garde le même adoucissement,
+           mais en coordonnées de carte, pour que les courbes soient indépendantes du zoom. */
+        const eased = 1 - Math.pow(1 - landing, 3)
+        const unitOf = (point: { x: number; y: number }): [number, number] => [
+          0.5 + (point.x - 0.5) * eased,
+          0.5 + (point.y - 0.5) * eased
+        ]
         for (const [from, to] of links) {
-          const [x1, y1] = at(from)
-          const [x2, y2] = at(to)
-          if (
-            (x1 < area.left - slack && x2 < area.left - slack) ||
-            (x1 > area.right + slack && x2 > area.right + slack) ||
-            (y1 < area.top - slack && y2 < area.top - slack) ||
-            (y1 > area.bottom + slack && y2 > area.bottom + slack)
-          ) {
-            continue
-          }
+          const [x1, y1] = unitOf(from)
+          const [x2, y2] = unitOf(to)
           /* Un fil ne prend une couleur que s'il relie deux posts de la même couleur.
              Colorer chaque fil d'après son seul point de départ mettait de la couleur partout :
              les catégories de l'organiseur ne sont pas des zones — elles suivent le sens, pas
@@ -657,20 +651,26 @@ export function OrganizerMap({
         pathCache.current = { key, paths: built }
       }
       target.globalCompositeOperation = 'lighter'
+      /* Les courbes vivent entre 0 et 1 : c'est la transformation qui les porte à l'échelle,
+         et les épaisseurs se divisent d'autant pour rester constantes à l'écran. */
+      target.save()
+      target.translate(originX, originY)
+      target.scale(span, span)
       for (const { path, tone } of pathCache.current.paths.values()) {
         target.strokeStyle = tone
         if (bloom > 0.02) {
-          target.lineWidth = core * WEB.bloomWidth
+          target.lineWidth = (core * WEB.bloomWidth) / span
           target.globalAlpha = edgeAlpha * bloom * 0.5
           target.stroke(path)
-          target.lineWidth = core * Math.max(1.5, WEB.bloomWidth / 2.3)
+          target.lineWidth = (core * Math.max(1.5, WEB.bloomWidth / 2.3)) / span
           target.globalAlpha = edgeAlpha * bloom * 0.6
           target.stroke(path)
         }
-        target.lineWidth = core
+        target.lineWidth = core / span
         target.globalAlpha = edgeAlpha
         target.stroke(path)
       }
+      target.restore()
       target.globalCompositeOperation = 'source-over'
       target.globalAlpha = 1
     }
@@ -849,7 +849,7 @@ export function OrganizerMap({
       const area = { left: -view.x, top: -view.y, right: -view.x + width, bottom: -view.y + height }
       context.save()
       context.translate(view.x, view.y)
-      paintWeb(context, area)
+      paintWeb(context)
       paintDots(context, area)
       context.restore()
     } else {
@@ -868,7 +868,7 @@ export function OrganizerMap({
         paint.setTransform(ratio, 0, 0, ratio, 0, 0)
         paint.clearRect(0, 0, bufferWidth, bufferHeight)
         paint.translate(-area.left, -area.top)
-        paintWeb(paint, area)
+        paintWeb(paint)
         paintDots(paint, area)
         webCache.current = {
           key,
