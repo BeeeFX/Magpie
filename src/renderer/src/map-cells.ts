@@ -118,7 +118,7 @@ export function collectionSeeds(
  * existe.
  */
 export function buildCellMesh(
-  seeds: { group: string; at: Vertex }[],
+  seeds: { group: string; at: Vertex; reach?: number }[],
   weld = 1e-4
 ): CellMesh {
   const vertices: Vertex[] = []
@@ -157,6 +157,26 @@ export function buildCellMesh(
       })
       if (polygon.length === 0) break
     }
+    /* Et on borne la cellule autour de son foyer.
+       Sans cela le Voronoï découpe le carré entier : les cellules du bord s'étendent jusqu'aux
+       angles et la carte se termine par un rectangle de couleur qui ne contient rien. La portée
+       vient des posts de la collection, pas d'une constante — une cellule doit s'arrêter là où
+       s'arrête ce qu'elle contient. Approchée par un polygone à seize côtés : au-delà on ne
+       distingue plus le cercle, en deçà les coins se voient. */
+    if (seed.reach && seed.reach > 0) {
+      const SIDES = 16
+      for (let i = 0; i < SIDES; i += 1) {
+        const angle = (i / SIDES) * Math.PI * 2
+        const a = Math.cos(angle)
+        const b = Math.sin(angle)
+        polygon = clip(polygon, {
+          a,
+          b,
+          c: a * seed.at.x + b * seed.at.y + seed.reach
+        })
+        if (polygon.length === 0) break
+      }
+    }
     if (polygon.length < 3) continue
     cells.push({ group: seed.group, loop: polygon.map(share) })
   }
@@ -191,4 +211,62 @@ export function moveMeshVertex(mesh: CellMesh, at: number, to: Vertex): CellMesh
   const vertices = mesh.vertices.slice()
   vertices[at] = to
   return { vertices, cells: mesh.cells }
+}
+
+
+/**
+ * Jusqu'où une cellule doit s'étendre autour de son foyer.
+ *
+ * On prend le quantile des distances des posts que ce foyer est le plus proche de servir, plus
+ * une marge : la cellule englobe alors son île sans la serrer, et s'arrête avant le vide. Un
+ * quantile plutôt que le maximum, parce qu'un seul post égaré à l'autre bout de la carte
+ * ferait à lui seul retomber la cellule dans le rectangle qu'on cherche à éviter.
+ */
+export function seedReach(
+  seeds: Vertex[],
+  points: Vertex[],
+  index: number,
+  quantile = 0.9,
+  margin = 0.04
+): number {
+  const mine: number[] = []
+  for (const point of points) {
+    let closest = 0
+    let best = Infinity
+    seeds.forEach((seed, at) => {
+      const distance = Math.hypot(seed.x - point.x, seed.y - point.y)
+      if (distance < best) {
+        best = distance
+        closest = at
+      }
+    })
+    if (closest === index) mine.push(best)
+  }
+  if (mine.length === 0) return margin
+  mine.sort((a, b) => a - b)
+  return mine[Math.min(mine.length - 1, Math.floor(quantile * mine.length))] + margin
+}
+
+/** Les parois du maillage, chacune une seule fois. */
+export function meshWalls(mesh: CellMesh): { from: number; to: number; groups: string[] }[] {
+  const walls = new Map<string, { from: number; to: number; groups: string[] }>()
+  for (const cell of mesh.cells) {
+    for (let i = 0; i < cell.loop.length; i += 1) {
+      const a = cell.loop[i]
+      const b = cell.loop[(i + 1) % cell.loop.length]
+      if (a === b) continue
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`
+      const found = walls.get(key)
+      /* Deux cellules voisines décrivent la même paroi, chacune dans son sens. La tracer depuis
+         les boucles la peignait donc deux fois, dans deux couleurs : ce sont les doubles traits
+         qu'on prenait pour un chevauchement. Ici elle n'existe qu'une fois, et sait à qui elle
+         appartient des deux côtés. */
+      if (found) {
+        if (!found.groups.includes(cell.group)) found.groups.push(cell.group)
+      } else {
+        walls.set(key, { from: Math.min(a, b), to: Math.max(a, b), groups: [cell.group] })
+      }
+    }
+  }
+  return [...walls.values()]
 }

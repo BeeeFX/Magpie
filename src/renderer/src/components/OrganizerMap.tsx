@@ -2,8 +2,15 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { OrganizerMap as MapData, OrganizerMapPoint } from '@shared/types'
 import { useT } from '../store'
 import { neededArea, paintArea, stillCovers, ZOOM_HEADROOM } from '../map-coverage'
-import { buildCellMesh, cellRing, collectionSeeds } from '../map-cells'
-import { carveOutside, insideRing, ringToCurves, type Vertex } from '../map-boundaries'
+import {
+  buildCellMesh,
+  cellRing,
+  collectionSeeds,
+  meshWalls,
+  seedReach,
+  type CellMesh
+} from '../map-cells'
+import { carveOutside, insideRing, type Vertex } from '../map-boundaries'
 
 /**
  * La carte sémantique.
@@ -44,15 +51,6 @@ const MAX_SCALE = 60
 /** Part de l'image effacée pour les groupes qu'on ne regarde pas. Assez pour qu'ils s'éteignent,
  *  pas au point de perdre le contexte : on doit encore voir *où* le groupe se situe. */
 const FOCUS_FADE = 0.86
-/**
- * Rondeur des jonctions entre deux parois.
- *
- * 1/6 est la conversion exacte d'une spline en Bézier : la courbe passe alors « au large » des
- * sommets et le contour redevient une bulle, ce que la simplification venait justement de
- * corriger. Un sixième de cette valeur ne fait qu'adoucir l'angle — les parois se lisent
- * droites, les jonctions ne piquent pas.
- */
-const WALL_TENSION = 1 / 36
 /** Plafond du tampon, en pixels physiques. Sur un grand écran à 200 %, le cadre plus sa marge
  *  dépasserait les cent mégaoctets : on rogne alors la marge, pas la mémoire. */
 const WEB_BUDGET = 24_000_000
@@ -308,6 +306,8 @@ export function OrganizerMap({
    * chaque sommet est déjà un point de contrôle.
    */
   const [regions, setRegions] = useState<Map<string, Vertex[][]>>(new Map())
+  /** Le maillage dont les régions sont tirées. Sert à ne tracer chaque paroi qu'une fois. */
+  const [cellMesh, setCellMesh] = useState<CellMesh | null>(null)
 
   useEffect(() => {
     const members = new Map<string, { x: number; y: number }[]>()
@@ -325,8 +325,14 @@ export function OrganizerMap({
        lui donnent une cellule à chacun de ses endroits au lieu d'une seule à l'autre bout. */
     const seeds = [...members]
       .filter(([, points]) => points.length >= 3)
-      .flatMap(([group, points]) => collectionSeeds(points).map((at) => ({ group, at })))
+      .flatMap(([group, points]) => {
+        const foci = collectionSeeds(points)
+        /* La portée borne la cellule à son île : sans elle, le Voronoï découpe le carré entier
+           et les cellules du bord s'étendent jusqu'aux angles, en rectangles vides. */
+        return foci.map((at, index) => ({ group, at, reach: seedReach(foci, points, index) }))
+      })
     const mesh = buildCellMesh(seeds)
+    setCellMesh(mesh)
     const next = new Map<string, Vertex[][]>()
     for (const cell of mesh.cells) {
       const ring = cellRing(mesh, cell)
@@ -342,6 +348,29 @@ export function OrganizerMap({
     }
     setRegions(next)
   }, [data.points, savedBoundaries])
+
+  /**
+  /**
+   * Toutes les parois, chacune une seule fois.
+   *
+   * Deux cellules voisines décrivent la même paroi, chacune dans son sens : la tracer depuis
+   * leurs contours la peignait deux fois, dans deux couleurs, et ces doubles traits se lisaient
+   * comme un chevauchement. Ici elle n'existe qu'une fois, dans une teinte neutre — l'identité
+   * d'une cellule est portée par son remplissage et par son nom, pas par un bord qu'elle
+   * partage avec une autre.
+   */
+  const wallPath = useMemo(() => {
+    if (!cellMesh) return null
+    const path = new Path2D()
+    for (const wall of meshWalls(cellMesh)) {
+      const from = cellMesh.vertices[wall.from]
+      const to = cellMesh.vertices[wall.to]
+      if (!from || !to) continue
+      path.moveTo(from.x, from.y)
+      path.lineTo(to.x, to.y)
+    }
+    return path
+  }, [cellMesh])
 
   /**
    * Où poser le nom d'une collection quand ses frontières sont visibles.
@@ -383,9 +412,7 @@ export function OrganizerMap({
       for (const ring of rings) {
         if (ring.length < 3) continue
         path.moveTo(ring[0].x, ring[0].y)
-        for (const curve of ringToCurves(ring, WALL_TENSION)) {
-          path.bezierCurveTo(curve.c1.x, curve.c1.y, curve.c2.x, curve.c2.y, curve.to.x, curve.to.y)
-        }
+        for (const vertex of ring.slice(1)) path.lineTo(vertex.x, vertex.y)
         path.closePath()
         for (const vertex of ring) {
           if (vertex.x < left) left = vertex.x
@@ -895,17 +922,18 @@ export function OrganizerMap({
         ) {
           continue
         }
-        const path = entry.path
         const tone = colourOfGroup(group, groupIndex)
         context.fillStyle = tone
-        context.globalAlpha = 0.1
-        context.fill(path)
-        context.strokeStyle = tone
-        context.globalAlpha = editing === group ? 1 : 0.8
+        context.globalAlpha = editing === group ? 0.22 : 0.1
+        context.fill(entry.path)
+      }
+      if (wallPath) {
+        context.strokeStyle = '#c8c8d4'
+        context.globalAlpha = 0.55
         // L'épaisseur est donnée en unités de carte : on la ramène à des pixels constants.
-        context.lineWidth = (editing === group ? 3 : 1.8) / span
+        context.lineWidth = 1.4 / span
         context.lineJoin = 'round'
-        context.stroke(path)
+        context.stroke(wallPath)
       }
       context.restore()
       context.globalAlpha = 1
@@ -1107,6 +1135,7 @@ export function OrganizerMap({
     islands,
     links,
     boundaryPaths,
+    wallPath,
     regionCentres,
     focusGroup,
     hoverLabel,
