@@ -102,7 +102,14 @@ export interface PostPage {
 }
 
 export type SortKey = 'saved' | 'published' | 'author' | 'platform' | 'random'
-export type GridMode = 'masonry' | 'cards'
+/**
+ * Comment la bibliothèque s'affiche.
+ *
+ * `map` est la carte sémantique : les posts placés par ressemblance au lieu de par date. Elle
+ * demande que l'analyse ait tourné — sans vecteurs, elle n'a rien à placer — d'où son état vide
+ * qui explique quoi faire plutôt qu'un cadre noir.
+ */
+export type GridMode = 'masonry' | 'cards' | 'map'
 
 export type ThemeChoice = 'system' | 'light' | 'dark'
 export type VideoQuality = '480p' | '720p' | '1080p' | 'source'

@@ -3,6 +3,7 @@ import { PLATFORMS } from '@shared/types'
 import { magpie, magpieEvents } from './bridge'
 import { Detail } from './components/Detail'
 import { Grid } from './components/Grid'
+import { LibraryMap } from './components/LibraryMap'
 import { Settings } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
@@ -15,6 +16,7 @@ export function App(): React.JSX.Element {
   const refresh = useStore((s) => s.refresh)
   const refreshPosts = useStore((s) => s.refreshPosts)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const gridMode = useStore((s) => s.gridMode)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const loadSettings = useStore((s) => s.loadSettings)
   const loadAccounts = useStore((s) => s.loadAccounts)
@@ -156,7 +158,7 @@ export function App(): React.JSX.Element {
       <Sidebar />
       <main className="main">
         <Toolbar />
-        <Grid />
+        {gridMode === 'map' ? <LibraryMap /> : <Grid />}
       </main>
       {/* Monté seulement quand un post est ouvert : sinon le composant resterait en place
           avec son état local — dont l'indicateur de fermeture, qui rendait le panneau

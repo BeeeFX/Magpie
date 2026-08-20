@@ -8,6 +8,7 @@ import { Downloads } from './Downloads'
 import { magpie } from '../bridge'
 import {
   IconCards,
+  IconCollections,
   IconCheck,
   IconFilter,
   IconMasonry,
@@ -266,6 +267,16 @@ export function Toolbar(): React.JSX.Element {
             title={t('toolbar.cards')}
           >
             <IconCards />
+          </button>
+          {/* La carte sémantique comme troisième façon de regarder : par ressemblance plutôt
+              que par date. Sa place est ici, à côté des deux autres dispositions. */}
+          <button
+            type="button"
+            className={mode === 'map' ? 'is-active' : ''}
+            onClick={() => setGridMode('map')}
+            title={t('toolbar.map')}
+          >
+            <IconCollections size={16} />
           </button>
         </div>
       </div>
