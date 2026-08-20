@@ -126,6 +126,28 @@ export function postFilter(query: PostQuery): { condition: string; params: unkno
   return { condition: where.join(' AND '), params }
 }
 
+/**
+ * Les seuls identifiants de ce que le filtre retient.
+ *
+ * La carte a besoin de la bibliothèque entière — neuf mille points — là où la grille se
+ * contente d'une tranche de trois cents. Les demander comme des posts complets ferait
+ * remonter les vignettes, les tags et les origines de chacun pour n'en garder que la clé, et
+ * traverser le pont IPC avec tout ça. Une colonne, sans jointure et sans tri : on ne construit
+ * qu'un ensemble d'appartenance, et l'ordre ne s'y voit pas.
+ *
+ * C'est ce qui manquait à l'écran carte. Il filtrait la projection sur la page chargée par la
+ * grille, or la grille n'est même pas montée dans ce mode : rien n'appelait jamais la tranche
+ * suivante, et la carte restait à trois cents points sur neuf mille sans que rien ne le dise.
+ */
+export function listPostIds(query: PostQuery): string[] {
+  const { condition, params } = postFilter(query)
+  return (
+    getDb()
+      .prepare(`SELECT p.id FROM posts p WHERE ${condition}`)
+      .all(...params) as { id: string }[]
+  ).map((row) => row.id)
+}
+
 export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): PostPage {
   const db = getDb()
   const offset = Math.max(0, Math.floor(rawOffset))

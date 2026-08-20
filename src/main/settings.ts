@@ -117,6 +117,19 @@ export function readSettings(): Settings {
   return cache
 }
 
+/**
+ * La langue de l'interface, résolue.
+ *
+ * `system` n'est pas une langue : c'est une délégation. Tout ce qui doit produire du texte —
+ * les noms de collections, et maintenant la transcription — a besoin de la réponse, pas de
+ * la question.
+ */
+export function interfaceLanguage(): 'fr' | 'en' {
+  const setting = readSettings().language
+  if (setting === 'fr' || setting === 'en') return setting
+  return app.getLocale().toLowerCase().startsWith('fr') ? 'fr' : 'en'
+}
+
 export function writeSettings(patch: Partial<Settings>): Settings {
   cache = sanitize({ ...readSettings(), ...patch })
   const temporary = `${file()}.tmp`

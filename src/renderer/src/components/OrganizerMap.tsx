@@ -14,6 +14,15 @@ import {
   type CellMesh
 } from '../map-cells'
 import { insideRing, type Vertex } from '../map-boundaries'
+import {
+  edgeKeep,
+  edgeKept,
+  REFERENCE_FRAME,
+  WEB,
+  webLoad,
+  webResolution,
+  webTuning
+} from '../map-render'
 
 /**
  * La carte sémantique.
@@ -58,35 +67,6 @@ const FOCUS_FADE = 0.86
  *  dépasserait les cent mégaoctets : on rogne alors la marge, pas la mémoire. */
 const WEB_BUDGET = 24_000_000
 
-/**
- * Rendu de la toile, réglé à l'œil sur la vraie bibliothèque.
- *
- * Deux régimes : ce que vaut chaque grandeur de loin, et ce qu'elle gagne en approchant. La
- * distinction est indispensable — le rendu qui fonctionne à l'échelle de la bibliothèque
- * entière ne fonctionne pas une fois dedans, où les arêtes se raréfient et où les points,
- * devenus gros, noieraient les fils.
- */
-const WEB = {
-  /** À zéro, la toile n'existe pas tant qu'on n'a pas commencé à zoomer. Voulu. */
-  edgeFar: 0,
-  edgeNear: 0.39,
-  lineFar: 0.5,
-  lineNear: 0.2,
-  /** De loin le halo porte tout le rendu, les fils eux-mêmes étant transparents. */
-  bloomFar: 1,
-  bloomNear: 0.25,
-  bloomWidth: 11,
-  dotFar: 0.1,
-  dotNear: 0,
-  dotGlowFar: 0,
-  dotGlowNear: 0.26,
-  dotSizeFar: 0.5,
-  dotSizeNear: 0.8,
-  /** Zoom auquel le régime « de près » est pleinement atteint. */
-  nearAt: 6,
-  /** Arêtes de référence pour l'amortissement d'opacité. */
-  reference: 60_000
-}
 /** Portée du ressort quand on tire un point : ses voisins suivent, de moins en moins. */
 
 export type ColourMode = 'group' | 'platform' | 'kind' | 'source'
@@ -114,6 +94,42 @@ interface Props {
   ownLabels?: { id: string; text: string; anchors: string[] }[]
   /** Double-clic dans le vide : l'appelant propose de nommer l'endroit. */
   onPlaceLabel?(anchors: string[]): void
+  /**
+   * Le prochain clic pose une étiquette au lieu de saisir la carte.
+   *
+   * Le geste existait — double-clic hors de toute région — et personne ne pouvait le
+   * découvrir : rien ne l'annonçait, et il s'éteignait dès qu'on affichait les frontières,
+   * puisque le pavage couvre tout et qu'aucun point de la carte n'est plus « hors région ».
+   * Un mode armé depuis un bouton le rend visible, et le rend accessible partout.
+   */
+  placingLabel?: boolean
+  /** Retirer une étiquette posée. Sans cela, une étiquette de trop restait là pour toujours. */
+  onRemoveLabel?(id: string): void
+  /**
+   * La collection regardée, peinte en chaleur.
+   *
+   * `degrees` porte **toute** la bibliothèque, pas seulement les membres : c'est ce qui permet de
+   * voir la collection *déborder* — les points juste sous le seuil sont là, éteints, et régler
+   * l'ampleur les allume. Une carte qui n'afficherait que les membres ne dirait rien de ce qu'un
+   * cran de plus attraperait.
+   *
+   * `token` identifie l'état peint. Le réseau et les points vivent dans un tampon dont la clé
+   * doit changer avec les couleurs, sinon le tampon resservirait l'ancienne teinte — c'est
+   * exactement le piège dans lequel tombe toute couleur ajoutée ici sans toucher aux deux clés.
+   */
+  heat?: {
+    token: string
+    degrees: Map<string, number>
+    reach: number
+    /**
+     * N'afficher que la collection : ni toile, ni points hors seuil.
+     *
+     * Moins de contexte, mais on voit enfin la *forme* de la collection — et c'est moins cher à
+     * peindre, la toile disparaissant avec le reste. C'est le seul réglage de cet écran qui
+     * accélère le rendu au lieu de le charger.
+     */
+    only?: boolean
+  } | null
   /** Les frontières déjà rangées en base, par groupe. Vides si la carte n'est pas figée. */
   savedBoundaries: Map<string, Vertex[][]>
   /** Une frontière vient d'être déformée : à l'appelant de la ranger et de reclasser. */
@@ -166,11 +182,48 @@ function colourOfGroup(group: string | null, groupIndex: Map<string, number>): s
   return index === undefined ? '#7b7b85' : PALETTE[index % PALETTE.length]
 }
 
+/**
+ * La rampe de chaleur : du violet sourd au jaune pâle.
+ *
+ * Séquentielle et non catégorielle — elle dit *combien*, pas *lequel*. Elle monte aussi en
+ * clarté en même temps qu'en teinte, ce qui la rend lisible même quand deux points se
+ * superposent : la toile est peinte en `lighter`, donc deux points proches s'additionnent, et
+ * une rampe qui ne varierait qu'en teinte se brouillerait à l'addition.
+ */
+const HEAT_RAMP: [number, number, number][] = [
+  [0x4c, 0x1d, 0x95],
+  [0x7c, 0x3a, 0xed],
+  [0xd9, 0x46, 0xef],
+  [0xfb, 0x71, 0x85],
+  [0xfb, 0xbf, 0x24],
+  [0xfd, 0xe6, 0x8a]
+]
+
+/** Sous le seuil : présent, mais éteint. La forme de la bibliothèque reste lisible autour. */
+const HEAT_COLD = '#1d1d26'
+
+function heatTone(degree: number, reach: number): string {
+  if (!Number.isFinite(degree) || degree < reach) return HEAT_COLD
+  /* Un écart-type et demi au-delà du seuil suffit à saturer : au-delà, ce sont quelques posts
+     isolés, et leur donner la moitié de la rampe écraserait tout le reste dans le violet. */
+  const t = Math.max(0, Math.min(1, (degree - reach) / 1.5))
+  const span = (HEAT_RAMP.length - 1) * t
+  const low = Math.min(HEAT_RAMP.length - 1, Math.floor(span))
+  const high = Math.min(HEAT_RAMP.length - 1, low + 1)
+  const mix = span - low
+  const channel = (at: number): number =>
+    Math.round(HEAT_RAMP[low][at] + (HEAT_RAMP[high][at] - HEAT_RAMP[low][at]) * mix)
+  return `rgb(${channel(0)}, ${channel(1)}, ${channel(2)})`
+}
+
 function colourFor(
   point: OrganizerMapPoint,
   mode: ColourMode,
-  groupIndex: Map<string, number>
+  groupIndex: Map<string, number>,
+  heat?: { degrees: Map<string, number>; reach: number } | null
 ): string {
+  // La chaleur prime : quand on regarde une collection, c'est elle qu'on regarde.
+  if (heat) return heatTone(heat.degrees.get(point.id) ?? Number.NEGATIVE_INFINITY, heat.reach)
   if (mode === 'platform') return point.platform === 'instagram' ? '#c9539b' : '#4a90d9'
   if (mode === 'kind') {
     return point.kind === 'video'
@@ -195,6 +248,9 @@ export function OrganizerMap({
   editMode,
   ownLabels,
   onPlaceLabel,
+  placingLabel = false,
+  onRemoveLabel,
+  heat = null,
   savedBoundaries,
   onBoundaryChange,
   onEditingChange,
@@ -248,6 +304,10 @@ export function OrganizerMap({
   /** Le trait de coupe en cours, quand on scinde une cellule. */
   const cutRef = useRef<{ from: Vertex; to: Vertex; cell: number } | null>(null)
   /** Où les noms ont été posés au dernier dessin, pour pouvoir les survoler. */
+  /** L'emprise des étiquettes personnelles, pour pouvoir en viser une et la retirer. */
+  const ownLabelBoxes = useRef<{ id: string; x: number; y: number; half: number; size: number }[]>(
+    []
+  )
   const labelBoxes = useRef<{ group: string; x: number; y: number; half: number; size: number }[]>(
     []
   )
@@ -316,6 +376,24 @@ export function OrganizerMap({
      crans s'enchaînent plus vite que ça. Pendant le geste on étire l'image déjà peinte —
      l'agrandissement d'une toile est une toile agrandie — et on ne repeint net qu'une fois
      la molette arrêtée. */
+  /**
+   * Le calque où la toile est peinte, à résolution réduite quand elle coûte trop cher.
+   *
+   * Gardé entre deux tracés : allouer un canevas de plusieurs mégapixels à chaque cran de
+   * molette suffirait à faire hoqueter le déclencheur de ramasse-miettes.
+   */
+  const webLayer = useRef<HTMLCanvasElement | null>(null)
+  /**
+   * Un affinage est-il réclamé ?
+   *
+   * Le tampon est peint à une échelle donnée ; zoomer le rend flou d'autant, et le retracer le
+   * remet net. Le retracé coûtait jusqu'à une seconde, et il tombait cent quarante millisecondes
+   * après le dernier cran de molette — c'est-à-dire pile au moment où l'on veut recommencer à
+   * bouger. On rend donc la main d'abord : la recopie étirée reste à l'écran, et l'affinage est
+   * remis à un moment d'inactivité. Si un geste arrive entre-temps, il passe devant.
+   */
+  const sharpenNow = useRef(false)
+  const sharpenAsked = useRef(false)
   const [zooming, setZooming] = useState(false)
   const zoomTimer = useRef(0)
 
@@ -373,6 +451,20 @@ export function OrganizerMap({
   const [cellMesh, setCellMesh] = useState<CellMesh | null>(null)
 
   /**
+   * Les cellules ont-elles une raison d'exister ici ?
+   *
+   * La réponse est collante, et c'est délibéré. Masquer les frontières un instant dans
+   * l'organisateur ne doit pas jeter un maillage qu'on vient de retoucher à la main : le
+   * rebâtir au retour écraserait ces retouches par le pavage par défaut. Une fois les cellules
+   * demandées, elles restent donc. Sur la carte de l'accueil les deux drapeaux sont des
+   * constantes fausses : la question n'y a qu'une réponse, et on économise le pavage entier.
+   */
+  const [needsCells, setNeedsCells] = useState(showBoundaries || editMode)
+  useEffect(() => {
+    if (showBoundaries || editMode) setNeedsCells(true)
+  }, [showBoundaries, editMode])
+
+  /**
    * Les régions, dérivées du maillage.
    *
    * Le maillage est la source de vérité, et c'est ce qui fait fonctionner le partage des
@@ -394,6 +486,13 @@ export function OrganizerMap({
   }, [cellMesh])
 
   useEffect(() => {
+    /* Rien à paver si rien ne le montre.
+       Le maillage ne sert qu'aux frontières et aux poignées d'édition : sur la carte de l'écran
+       principal, ni l'une ni l'autre. Il était pourtant construit à chaque fois — Voronoï des
+       foyers, bordure du nuage, cellules — pour être aussitôt ignoré au dessin. Sur neuf mille
+       points c'est une somme de travail synchrone, sur le thread du rendu, qui ne changeait pas
+       un pixel. */
+    if (!needsCells) return
     const members = new Map<string, { x: number; y: number }[]>()
     for (const point of data.points) {
       if (!point.group) continue
@@ -416,7 +515,7 @@ export function OrganizerMap({
     const cloud = data.points.map((point) => ({ x: point.x, y: point.y }))
     setCellMesh(buildCellMesh(seeds, outerBounds(cloud)))
 
-  }, [data.points, savedBoundaries])
+  }, [data.points, savedBoundaries, needsCells])
 
   /**
   /**
@@ -691,19 +790,30 @@ export function OrganizerMap({
 
     const size = Math.min(width, height)
     const landing = landingAt()
-    const closeness = Math.min(1, (view.scale - 1) / WEB.nearAt)
     /* L'origine du carré unité à l'écran, avant décalage du cadrage. Remontée ici parce que
        les frontières s'en servent aussi, et qu'elle ne dépend que du cadre et de l'échelle. */
     const span = size * view.scale
+    /**
+     * L'échelle apparente : de combien la carte paraît grossie, cadre compris.
+     *
+     * La règle qui sépare les deux échelles : tout ce qui *place* quelque chose passe par
+     * `view.scale`, tout ce qui *dimensionne* quelque chose à l'écran passe par `apparent`.
+     * Confondre les deux marchait tant qu'un seul cadre existait ; deux cadres de tailles très
+     * différentes — la bande de l'organisateur et la carte plein écran — et tout ce qui est
+     * dimensionné se retrouve réglé pour l'autre.
+     */
+    const apparent = span / REFERENCE_FRAME
+    /* Ce que ce tracé va coûter, et la part d'arêtes qu'on garde pour rester sous le plafond.
+       `keep` ne dépend que du nombre d'arêtes, donc il est constant pour une bibliothèque
+       donnée : il peut entrer dans la clé du tampon de courbes sans jamais l'invalider. */
+    const keep = edgeKeep(links.length)
+    const load = webLoad(links.length * keep, span, width, height)
+    const { closeness, edgeAlpha, core, bloom, dotRadius, glow } = webTuning(
+      span,
+      links.length * keep
+    )
     const originX = ((width - size) / 2) * view.scale
     const originY = ((height - size) / 2) * view.scale
-    const edgeAlpha =
-      (WEB.edgeFar + WEB.edgeNear * closeness) /
-      Math.sqrt(Math.max(1, links.length / WEB.reference))
-    const core = WEB.lineFar + WEB.lineNear * closeness
-    const bloom = WEB.bloomFar + (WEB.bloomNear - WEB.bloomFar) * closeness
-    const dotRadius = WEB.dotSizeFar + WEB.dotSizeNear * closeness
-    const glow = WEB.dotGlowFar + WEB.dotGlowNear * closeness
 
     /* Position sans le déplacement : c'est la seule chose qui change quand on fait glisser
        la carte, et la garder à part permet de peindre une fois puis de translater. */
@@ -740,7 +850,7 @@ export function OrganizerMap({
        lueur, puis le fil net. Un chemin par couleur et non par arête — cent trente mille
        appels à `stroke` était le vrai coût, pas les courbes. */
     const paintWeb = (target: CanvasRenderingContext2D): void => {
-      if (edgeAlpha <= 0.002) return
+      if (edgeAlpha <= 0.002 || heat?.only) return
       /* Ni l'échelle ni la zone visible n'entrent dans la clé, et c'est le remède au gel.
          Les courbes sont construites dans le repère de la carte — des coordonnées entre 0 et 1
          — puis mises à l'échelle au tracé. Elles ne dépendent donc plus du zoom, et chaque
@@ -751,7 +861,16 @@ export function OrganizerMap({
          irréductible. La zone y avait été mise pour éviter de bâtir cent trente mille courbes
          dont trois cents tombent dans le cadre ; le problème disparaît quand on ne les bâtit
          qu'une fois pour toute la session. */
-      const key = [landing.toFixed(3), colourMode, [...includedGroups].sort().join(',')].join(':')
+      const key = [
+        landing.toFixed(3),
+        colourMode,
+        /* La *présence* d'une chaleur, pas son contenu : entrer ou sortir du mode change la
+           teinte des fils (ils s'éteignent), régler l'ampleur ne la change pas. Mettre le jeton
+           complet ici coûtait une reconstruction des courbes par cran de curseur. */
+        heat ? 'heat' : '',
+        keep.toFixed(3),
+        [...includedGroups].sort().join(',')
+      ].join(':')
       if (pathCache.current.key !== key) {
         const built = new Map<
           string,
@@ -772,7 +891,9 @@ export function OrganizerMap({
           0.5 + (point.x - 0.5) * eased,
           0.5 + (point.y - 0.5) * eased
         ]
-        for (const [from, to] of links) {
+        for (let index = 0; index < links.length; index += 1) {
+          if (!edgeKept(index, keep)) continue
+          const [from, to] = links[index]
           const [x1, y1] = unitOf(from)
           const [x2, y2] = unitOf(to)
           /* Un fil ne prend une couleur que s'il relie deux posts de la même couleur.
@@ -786,6 +907,12 @@ export function OrganizerMap({
              groupes étaient découpés dans l'espace et donc toujours d'accord avec leurs
              voisins. Vrai dans tous les modes : deux posts de la même plateforme, du même
              type ou de la même provenance gardent leur teinte. */
+          /* Sans la chaleur, volontairement. Les fils disent la *structure*, les points disent
+             la mesure : c'est la seule répartition qui tienne, parce que la teinte d'un fil
+             entre dans la clé du tampon de courbes. Coloré par la chaleur, le moindre cran du
+             curseur d'ampleur reconstruisait les cent trente mille courbes — un gel d'une
+             seconde par cran. Et à l'œil c'est aussi mieux : la toile éteinte fait ressortir
+             les points allumés, au lieu de rivaliser avec eux. */
           const tone =
             colourFor(from, colourMode, groupIndex) === colourFor(to, colourMode, groupIndex)
               ? colourFor(from, colourMode, groupIndex)
@@ -964,7 +1091,7 @@ export function OrganizerMap({
           continue
         }
         const dimmed = point.group !== null && !includedGroups.has(point.group)
-        const tone = colourFor(point, colourMode, groupIndex)
+        const tone = colourFor(point, colourMode, groupIndex, heat)
         const bodies = dimmed ? dim : full
         let body = bodies.get(tone)
         if (!body) {
@@ -1037,11 +1164,15 @@ export function OrganizerMap({
     const frame = { width, height, scale: view.scale, x: view.x, y: view.y }
     const needed = neededArea(frame, content)
     const painted = webCache.current
-    const key = `${colourMode}|${ratio}|${[...includedGroups].sort().join(',')}`
+    const key = `${colourMode}|${ratio}|${heat?.token ?? ''}|${[...includedGroups].sort().join(',')}`
     const usable =
       painted.canvas !== null && painted.key === key && stillCovers(painted, needed, view.scale)
     // Étirer ne vaut que le temps du geste : à l'arrêt, la toile doit être nette.
-    const covers = usable && (painted.scale === view.scale || zooming)
+    const sharp = painted.scale === view.scale
+    /* On garde la recopie étirée tant qu'on n'a pas décidé d'affiner. `!usable` reste un
+       retracé immédiat : là, ce n'est plus une question de netteté mais de zone manquante, et
+       étirer laisserait du vide à l'écran. */
+    const covers = usable && (sharp || !sharpenNow.current)
 
     if (landing < 1) {
       /* Pendant l'atterrissage, les coordonnées bougent à chaque image : peindre dans un
@@ -1068,8 +1199,30 @@ export function OrganizerMap({
         if (!paint) return
         paint.setTransform(ratio, 0, 0, ratio, 0, 0)
         paint.clearRect(0, 0, bufferWidth, bufferHeight)
-        paint.translate(-area.left, -area.top)
-        paintWeb(paint)
+        /* La toile dans un calque à part, dont la résolution baisse quand elle coûte trop cher.
+           Les points, eux, restent à pleine résolution dans le tampon : ce sont eux qu'on lit,
+           la toile n'est qu'un voile — et deux de ses trois passes sont des halos larges et
+           presque transparents, que réduire puis remettre à l'échelle ne se voit pas. */
+        const resolution = webResolution(load)
+        if (resolution < 1) {
+          const layer = webLayer.current ?? document.createElement('canvas')
+          webLayer.current = layer
+          layer.width = Math.max(1, Math.ceil(bufferWidth * ratio * resolution))
+          layer.height = Math.max(1, Math.ceil(bufferHeight * ratio * resolution))
+          const layerPaint = layer.getContext('2d')
+          if (layerPaint) {
+            layerPaint.setTransform(ratio * resolution, 0, 0, ratio * resolution, 0, 0)
+            layerPaint.clearRect(0, 0, bufferWidth, bufferHeight)
+            layerPaint.translate(-area.left, -area.top)
+            paintWeb(layerPaint)
+            paint.imageSmoothingQuality = 'high'
+            paint.drawImage(layer, 0, 0, bufferWidth, bufferHeight)
+          }
+          paint.translate(-area.left, -area.top)
+        } else {
+          paint.translate(-area.left, -area.top)
+          paintWeb(paint)
+        }
         paintDots(paint, area)
         webCache.current = {
           key,
@@ -1081,6 +1234,7 @@ export function OrganizerMap({
           height: bufferHeight
         }
       }
+      sharpenNow.current = false
       const web = webCache.current
       if (web.canvas) {
         /* Recopie calée sur la grille des pixels physiques. À 125 % ou 150 % — le cas courant
@@ -1097,6 +1251,30 @@ export function OrganizerMap({
           web.width * zoom,
           web.height * zoom
         )
+      }
+
+      /**
+       * L'affinage, réclamé pour plus tard.
+       *
+       * `requestIdleCallback` est exactement l'outil : il ne se déclenche pas tant que la file
+       * de tâches est occupée, donc un cran de molette ou un déplacement passe devant. On
+       * rend la main dans l'image courante avec une recopie étirée, et la toile redevient nette
+       * dès que la main se pose. Le repli à `setTimeout` sert aux moteurs qui ne l'ont pas.
+       */
+      if (usable && !sharp && !sharpenAsked.current) {
+        sharpenAsked.current = true
+        const ask = (): void => {
+          sharpenAsked.current = false
+          sharpenNow.current = true
+          drawRef.current()
+        }
+        const idle = (
+          window as unknown as {
+            requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number
+          }
+        ).requestIdleCallback
+        if (idle) idle(ask, { timeout: 600 })
+        else window.setTimeout(ask, 260)
       }
     }
 
@@ -1183,7 +1361,7 @@ export function OrganizerMap({
         const x = ux + view.x
         const y = uy + view.y
         if (x < -8 || y < -8 || x > width + 8 || y > height + 8) continue
-        const tone = colourFor(point, colourMode, groupIndex)
+        const tone = colourFor(point, colourMode, groupIndex, heat)
         let body = bodies.get(tone)
         if (!body) {
           body = new Path2D()
@@ -1249,12 +1427,16 @@ export function OrganizerMap({
          réseau qu'il désigne et la carte se lisait comme une affiche. La toile est le sujet,
          le nom n'est qu'une légende. */
       const size =
-        Math.min(18, 10 + Math.sqrt(island.count) * 0.25) * Math.min(1.4, Math.sqrt(view.scale))
+        Math.min(18, 10 + Math.sqrt(island.count) * 0.25) * Math.min(1.4, Math.sqrt(apparent))
       /* Demi-largeur estimée sans `measureText` : la mesurer pour vingt-deux étiquettes à
          chaque image coûtait plus que de la deviner, et une approximation suffit à savoir
          que deux noms se chevauchent. */
       const half = (name.length * size) / 3.9
-      const reach = Math.sqrt(island.count) * 1.25 * Math.min(2.6, view.scale)
+      /* En pixels d'écran : c'est donc l'échelle apparente qui compte. Avec `view.scale`, la
+         portée était calculée pour un cadre de 460 px et sous-estimée de moitié sur la carte
+         plein écran — deux noms voisins ne se voyaient pas se toucher, et « cinéma et vidéo »
+         se collait à « mode ». */
+      const reach = Math.sqrt(island.count) * 1.25 * Math.min(2.6, apparent)
       /* On tente le centre, puis on s'écarte au-dessus et en dessous. La maquette ne montait
          qu'au-dessus : sur un cadre deux fois moins haut que le sien, les noms des gros amas
          sortaient par le haut — dessinés, invisibles, et le trait de rappel pointait hors
@@ -1329,31 +1511,39 @@ export function OrganizerMap({
       context.lineWidth = size / 5
       context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
       context.strokeText(name, centreX, y)
-      /* À la couleur de sa cellule, pas en blanc : c'est ce qui rattache le nom à la région
-         qu'il désigne quand une vingtaine se touchent. Sans frontières, le blanc reste le bon
-         choix — il tranche sur une toile déjà colorée. */
-      context.fillStyle = showBoundaries
-        ? colourOfGroup(island.group, groupIndex)
-        : '#ffffff'
+      /* À la couleur de son groupe, toujours. Le blanc tranchait mieux sur la toile, mais il
+         coupait le nom de ce qu'il désigne : devant vingt titres, savoir lequel va avec quel
+         amas demandait de suivre le trait de rappel à chaque fois. Le contour noir épais
+         au-dessus fait le travail de lisibilité que le blanc faisait. */
+      context.fillStyle = colourOfGroup(island.group, groupIndex)
       context.fillText(name, centreX, y)
       context.letterSpacing = '0px'
     }
     /* Les étiquettes de l'utilisateur, par-dessus. En italique et sans contour de groupe :
        elles ne désignent pas une collection mais un endroit, et il faut que la différence se
        voie sans avoir à réfléchir. */
+    const ownDrawn: { id: string; x: number; y: number; half: number; size: number }[] = []
     for (const spot of ownLabelSpots) {
       const [ux, uy] = at(spot)
       const x = ux + view.x
       const y = uy + view.y
       if (x < -80 || y < -40 || x > width + 80 || y > height + 40) continue
-      const size = 13 * Math.min(1.5, Math.sqrt(view.scale))
+      const size = 13 * Math.min(1.5, Math.sqrt(apparent))
       context.font = `italic 500 ${size.toFixed(1)}px system-ui, sans-serif`
       context.lineWidth = size / 5
       context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
       context.strokeText(spot.text, x, y)
       context.fillStyle = 'rgba(255, 255, 255, 0.82)'
       context.fillText(spot.text, x, y)
+      ownDrawn.push({
+        id: spot.id,
+        x,
+        y,
+        half: context.measureText(spot.text).width / 2,
+        size
+      })
     }
+    ownLabelBoxes.current = ownDrawn
 
     labelBoxes.current = drawn
     context.globalAlpha = 1
@@ -1363,7 +1553,7 @@ export function OrganizerMap({
       const x = ux + view.x
       const y = uy + view.y
       context.globalAlpha = 1
-      context.fillStyle = colourFor(hovered, colourMode, groupIndex)
+      context.fillStyle = colourFor(hovered, colourMode, groupIndex, heat)
       context.beginPath()
       context.arc(x, y, HOVER_DOT, 0, Math.PI * 2)
       context.fill()
@@ -1393,6 +1583,7 @@ export function OrganizerMap({
     groupNames,
     hovered,
     includedGroups,
+    heat,
     islands,
     links,
     boundaryPaths,
@@ -1480,15 +1671,24 @@ export function OrganizerMap({
               y: current.y + ((beforeHeight - h) / 2) * current.scale
             })
           }
-          /* Le point de la carte qui était au centre y reste. */
+          /* Le petit côté a changé : l'empan de la carte change avec lui, et garder le centre
+             ne suffit pas — la carte reste au bon endroit mais grossit ou rétrécit sous les
+             yeux, ce qui se lit comme un saut. Ce cas se produit sur la carte plein écran, où
+             la fenêtre est souvent plus haute que large : ouvrir le panneau prend alors sur le
+             petit côté. L'échelle compense l'empan pour que `size × scale` — la taille apparente
+             — ne bouge pas non plus. Rien ne se déplace, rien ne se redimensionne. */
+          const scale = Math.min(
+            MAX_SCALE,
+            Math.max(MIN_SCALE, (current.scale * sizeBefore) / sizeAfter)
+          )
           const mapX =
             (beforeWidth / 2 - current.x) / current.scale - (beforeWidth - sizeBefore) / 2
           const mapY =
             (beforeHeight / 2 - current.y) / current.scale - (beforeHeight - sizeBefore) / 2
           return clamped({
-            ...current,
-            x: w / 2 - ((mapX / sizeBefore) * sizeAfter + (w - sizeAfter) / 2) * current.scale,
-            y: h / 2 - ((mapY / sizeBefore) * sizeAfter + (h - sizeAfter) / 2) * current.scale
+            scale,
+            x: w / 2 - ((mapX / sizeBefore) * sizeAfter + (w - sizeAfter) / 2) * scale,
+            y: h / 2 - ((mapY / sizeBefore) * sizeAfter + (h - sizeAfter) / 2) * scale
           })
         })
       }
@@ -1730,11 +1930,58 @@ export function OrganizerMap({
     return null
   }, [])
 
+  /**
+   * Les posts auxquels une étiquette va rester accrochée.
+   *
+   * Ce sont eux qu'on retient, et non la position du curseur : une reprojection déplace les
+   * neuf mille points, et une étiquette figée en coordonnées désignerait alors autre chose.
+   * Accrochée à ses voisins, elle se repose à leur nouveau centre de gravité.
+   */
+  const anchorsAt = useCallback(
+    (clientX: number, clientY: number): string[] | null => {
+      const place = mapPointAt(clientX, clientY)
+      if (!place) return null
+      const near = data.points
+        .map((point) => ({ id: point.id, d: Math.hypot(point.x - place.x, point.y - place.y) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 24)
+        .filter((entry) => entry.d < 0.08)
+        .map((entry) => entry.id)
+      // Moins de trois voisins : on nommerait le vide, et l'étiquette n'aurait nulle part à
+      // revenir après la prochaine projection.
+      return near.length >= 3 ? near : null
+    },
+    [data.points, mapPointAt]
+  )
+
   const onPointerDown = (event: React.PointerEvent): void => {
     try {
       ;(event.target as Element).setPointerCapture?.(event.pointerId)
     } catch {
       /* Pointeur déjà relâché ou identifiant inconnu : la capture est un confort, pas un dû. */
+    }
+    /* Le mode armé passe avant tout le reste : on est venu poser un mot, pas déplacer la
+       carte ni ouvrir un post. */
+    if (placingLabel && event.button === 0) {
+      /* Viser une étiquette déjà posée la retire. C'est le même mode : on y entre pour nommer
+         un endroit, on y reste pour changer d'avis. Sans cela, une étiquette de trop ne
+         partait jamais — rien ne la désignait. */
+      const canvas = canvasRef.current
+      const rect = canvas?.getBoundingClientRect()
+      if (rect) {
+        const x = event.clientX - rect.left
+        const y = event.clientY - rect.top
+        const hit = ownLabelBoxes.current.find(
+          (box) => Math.abs(box.x + box.half - x) < box.half + 8 && Math.abs(box.y - y) < box.size
+        )
+        if (hit) {
+          onRemoveLabel?.(hit.id)
+          return
+        }
+      }
+      const anchors = anchorsAt(event.clientX, event.clientY)
+      if (anchors) onPlaceLabel?.(anchors)
+      return
     }
     if (event.shiftKey || event.button === 2) {
       lassoActiveRef.current = true
@@ -1944,7 +2191,7 @@ export function OrganizerMap({
     <div className="organizer-map" ref={wrapRef}>
       <canvas
         ref={canvasRef}
-        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}${editMode ? ' is-editing' : ''}`.trim()}
+        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}${editMode ? ' is-editing' : ''}${placingLabel ? ' is-placing' : ''}`.trim()}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -1968,18 +2215,8 @@ export function OrganizerMap({
                les plus proches — c'est à eux que l'étiquette restera accrochée, donc c'est eux
                qu'il faut retenir, pas la position du curseur. */
             if (!onPlaceLabel) return
-            const place = mapPointAt(event.clientX, event.clientY)
-            if (!place) return
-            const near = data.points
-              .map((point) => ({
-                id: point.id,
-                d: Math.hypot(point.x - place.x, point.y - place.y)
-              }))
-              .sort((a, b) => a.d - b.d)
-              .slice(0, 24)
-              .filter((entry) => entry.d < 0.08)
-              .map((entry) => entry.id)
-            if (near.length >= 3) onPlaceLabel(near)
+            const anchors = anchorsAt(event.clientX, event.clientY)
+            if (anchors) onPlaceLabel(anchors)
             return
           }
           setFocusGroup(group)
@@ -2000,7 +2237,7 @@ export function OrganizerMap({
             <div className="map-tip__who">
               <span
                 className="map-tip__swatch"
-                style={{ background: colourFor(hovered, colourMode, groupIndex) }}
+                style={{ background: colourFor(hovered, colourMode, groupIndex, heat) }}
               />
               {/* Le nom de l'amas tient lieu de titre le temps que l'auteur arrive : ouvrir sur
                   un vide, puis le remplir, faisait sauter l'infobulle sous le curseur. Une

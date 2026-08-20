@@ -33,6 +33,9 @@
     "src/renderer/src/map-boundaries.ts",
     // Idem : le maillage des cellules est de la géométrie pure, vérifiée par
     // `scripts/check-cells.ts`.
-    "src/renderer/src/map-cells.ts"
+    "src/renderer/src/map-cells.ts",
+    // Idem : le réglage de la toile n'est qu'une fonction de l'empan et du nombre d'arêtes,
+    // vérifiée par `scripts/check-map-density.ts`.
+    "src/renderer/src/map-render.ts"
   ]
 }

@@ -25,12 +25,37 @@ import { VideoPlayer } from './VideoPlayer'
 interface Props {
   postId: string | null
   onClose(): void
+  /**
+   * `inline` prend sa place à côté de la carte, `floating` se pose par-dessus.
+   *
+   * La différence n'est pas décorative. En `inline`, ouvrir le panneau reprend de la largeur à
+   * la carte, donc le canevas est redimensionné et la projection doit se recaler — supportable
+   * dans l'organisateur, où la carte est un bandeau large et bas, ingérable sur la carte plein
+   * écran, où la fenêtre est souvent plus haute que large : le petit côté change alors, et avec
+   * lui l'empan de la carte. En `floating`, la carte ne bouge pas d'un pixel, et le panneau peut
+   * glisser et se redimensionner sans rien entraîner.
+   */
+  variant?: 'inline' | 'floating'
+  /** Largeur en pixels du panneau flottant, tenue par l'appelant pour qu'elle survive à la fermeture. */
+  width?: number
+  onResize?(width: number): void
 }
 
-export function MapPostPanel({ postId, onClose }: Props): React.JSX.Element | null {
+/** Assez large pour voir, assez étroit pour laisser la carte lisible. */
+const MIN_WIDTH = 320
+const MAX_FRACTION = 0.72
+
+export function MapPostPanel({
+  postId,
+  onClose,
+  variant = 'inline',
+  width = 520,
+  onResize
+}: Props): React.JSX.Element | null {
   const t = useT()
   const [post, setPost] = useState<Post | null>(null)
   const [missing, setMissing] = useState(false)
+  const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
     if (!postId) return
@@ -67,14 +92,51 @@ export function MapPostPanel({ postId, onClose }: Props): React.JSX.Element | nu
     return () => window.removeEventListener('keydown', onKey, true)
   }, [postId, onClose])
 
-  if (!postId) return null
+  const floating = variant === 'floating'
+  /* En `inline` on démonte : il n'y a pas d'animation à jouer, et laisser une colonne vide
+     décalerait la carte. En `floating` le panneau reste monté et se retire en glissant — un
+     composant démonté n'a plus d'animation de sortie, c'est toute la raison de le garder. */
+  if (!postId && !floating) return null
 
+  const open = postId !== null
   const shown = post
   const media = shown?.media[0] ?? null
   const isVideo = media?.kind === 'video' && Boolean(media.videoUrl)
 
   return (
-    <aside className="map-panel" aria-label={t('organizer.panelTitle')}>
+    <aside
+      className={`map-panel${floating ? ' map-panel--floating' : ''}${open ? ' is-open' : ''}${
+        dragging ? ' is-dragging' : ''
+      }`}
+      style={floating ? { width: `${width}px` } : undefined}
+      aria-label={t('organizer.panelTitle')}
+      aria-hidden={floating && !open}
+    >
+      {/* La poignée, sur le bord intérieur. Pendant le glissement la transition est coupée :
+          sans cela le panneau poursuivrait la souris avec un temps de retard. */}
+      {floating && onResize ? (
+        <div
+          className="map-panel__grip"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('map.resizePanel')}
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId)
+            setDragging(true)
+          }}
+          onPointerMove={(event) => {
+            if (!dragging) return
+            const wanted = window.innerWidth - event.clientX
+            onResize(
+              Math.max(MIN_WIDTH, Math.min(window.innerWidth * MAX_FRACTION, Math.round(wanted)))
+            )
+          }}
+          onPointerUp={() => setDragging(false)}
+          onPointerCancel={() => setDragging(false)}
+          /* Double-clic : retour à la moitié de l'écran, sans avoir à viser. */
+          onDoubleClick={() => onResize(Math.round(window.innerWidth / 2))}
+        />
+      ) : null}
       <header className="map-panel__head">
         <PlatformIcon platform={shown?.platform ?? 'instagram'} />
         <span className="map-panel__who">

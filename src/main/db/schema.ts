@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 17
+export const SCHEMA_VERSION = 20
 
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
@@ -190,6 +190,116 @@ CREATE TABLE IF NOT EXISTS map_labels (
 );
 `
 
+/**
+ * Compter les tentatives de transcription, et rendre leur chance aux abandonnées.
+ *
+ * `transcript = ''` voulait dire deux choses à la fois : « écouté, il n'y avait rien à en
+ * tirer » et « la lecture a échoué ». Les deux menaient au même endroit — un post que plus
+ * aucune passe ne reprendrait jamais. Or l'échec est fréquent et réparable : quand le clip
+ * n'est pas encore en cache, l'audio est tiré de l'URL de la plateforme, et une URL de CDN
+ * expire. Relevé sur la bibliothèque de référence, vingt posts marqués vides au hasard :
+ * treize étaient de la musique sans parole — le verdict était juste —, deux n'avaient aucune
+ * piste audio, et cinq portaient une phrase entière que l'application avait perdue.
+ *
+ * D'où une colonne de tentatives, sur le modèle de `media.thumb_attempts` : un échec ne
+ * conclut plus rien, il compte. Trois échecs valent renoncement, ce qui borne la file sans
+ * condamner un clip pour une URL périmée. `''` retrouve alors son seul sens : écouté, rien
+ * dedans.
+ *
+ * Et les vides déjà en base repartent à zéro. Ils ont été écrits par le code qui confondait
+ * les deux cas ; les garder, c'est garder la perte. Rien ne se relance tout seul pour autant
+ * — la transcription ne démarre que sur demande, l'étape annoncera simplement de nouveau
+ * son compte.
+ */
+export const MIGRATION_18_SQL = /* sql */ `
+ALTER TABLE posts ADD COLUMN transcript_attempts INTEGER NOT NULL DEFAULT 0;
+UPDATE posts SET transcript = NULL WHERE transcript = '';
+`
+
+/**
+ * Une collection cesse d'être une liste et devient une requête.
+ *
+ * Ce qu'elle porte désormais : une phrase, deux vecteurs, une ampleur. La phrase est ce que
+ * l'utilisateur écrit — « production musicale » — et SigLIP la place dans le même repère que
+ * les images, ce qui fait qu'un mot peut noter neuf mille posts. L'ampleur est le seuil, en
+ * écarts-types de la distribution de cette collection : elle se lit toujours de la même façon,
+ * quel que soit le nombre de collections voisines.
+ *
+ * L'ampleur est un **nombre de posts**, et non un seuil de confiance. Ce n'est pas un choix de
+ * commodité : mesuré, une phrase étrangère à la bibliothèque note aussi haut qu'une phrase
+ * centrale — « comptabilité fiscale » culmine plus haut que « 3D et rendu ». Un seuil de
+ * confiance aurait donc inventé quatre cents membres à n'importe quoi. L'ordre, lui, est juste ;
+ * on garde donc les N premiers, N étant choisi à vue par la personne qui regarde.
+ *
+ * `collection_posts` reste la vérité pour tout le reste de l'application — la mosaïque, les
+ * comptes, l'export. Elle n'est plus saisie à la main mais **recalculée** à partir de la
+ * requête, avec le degré d'appartenance à côté de chaque ligne. C'est ce qui permet de tout
+ * changer ici sans rien casser ailleurs : en aval, une collection reste une liste de posts.
+ *
+ * Et `collection_feedback` garde les verdicts. Un « oui » ou un « non » ne se contente pas de
+ * déplacer le prototype : il force aussi l'appartenance du post concerné. Sans cela, cliquer
+ * « non » sur un post qui reste au-dessus du seuil ne changerait rien de visible, et l'interface
+ * mentirait sur l'effet du geste.
+ */
+export const MIGRATION_19_SQL = /* sql */ `
+ALTER TABLE collections ADD COLUMN query TEXT;
+ALTER TABLE collections ADD COLUMN prototype_text BLOB;
+ALTER TABLE collections ADD COLUMN prototype_meaning BLOB;
+ALTER TABLE collections ADD COLUMN target_size INTEGER NOT NULL DEFAULT 300;
+ALTER TABLE collection_posts ADD COLUMN degree REAL;
+
+CREATE TABLE IF NOT EXISTS collection_feedback (
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  verdict       INTEGER NOT NULL,
+  at            INTEGER NOT NULL,
+  PRIMARY KEY (collection_id, post_id)
+);
+`
+
+/**
+ * Le nom d'une collection et sa définition cessent d'être la même chose.
+ *
+ * Une phrase unique était un raccourci commode et une limite dure : renommer redéfinissait, et
+ * « Production musicale » ne pouvait pas vouloir dire *aussi* « ableton », « synthétiseur »,
+ * « mixage ». Or c'est exactement ainsi qu'on pense une catégorie — par une poignée de mots dont
+ * **un seul suffit**, pas par leur moyenne. La moyenne dilue : ajouter « ableton » à un thème
+ * large déplaçait tout le thème au lieu d'y faire entrer les posts Ableton.
+ *
+ * D'où des mots-clés, chacun avec son poids. Le score d'un post est le **meilleur** de ses
+ * `poids × ressemblance` : une union pondérée, pas un centre de gravité. Un mot fort attire, un
+ * mot faible complète, et retirer un mot ne déforme pas les autres.
+ *
+ * `kind` sépare deux natures de collections qui n'ont pas à se ressembler. Une collection
+ * `query` est définie par ses mots et recalculée ; une collection `manual` est une liste de
+ * posts, posée à la main ou par un rangement rapide, que rien ne recalcule. Les deux vivent
+ * ensemble dans `collection_posts` — c'est ce qui permet à la mosaïque de continuer à ne
+ * connaître que des listes.
+ */
+export const MIGRATION_20_SQL = /* sql */ `
+ALTER TABLE collections ADD COLUMN kind TEXT NOT NULL DEFAULT 'manual';
+
+CREATE TABLE IF NOT EXISTS collection_keywords (
+  collection_id   INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  word            TEXT NOT NULL,
+  weight          REAL NOT NULL DEFAULT 1,
+  vector_text     BLOB,
+  vector_meaning  BLOB,
+  sort_index      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (collection_id, word)
+);
+
+-- Les collections nées d'une phrase deviennent des collections à mots-clés, avec cette phrase
+-- pour premier mot. Rien n'est perdu et rien ne bouge : un mot unique donne le même résultat
+-- qu'une phrase unique.
+UPDATE collections SET kind = 'query' WHERE query IS NOT NULL;
+
+INSERT OR IGNORE INTO collection_keywords
+  (collection_id, word, weight, vector_text, vector_meaning, sort_index)
+SELECT id, query, 1, prototype_text, prototype_meaning, 0
+  FROM collections WHERE query IS NOT NULL AND trim(query) <> '';
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -204,6 +314,7 @@ CREATE TABLE IF NOT EXISTS posts (
   -- Transcription locale de l'audio. C'est souvent le seul texte d'un Reel : sur la
   -- bibliothèque de référence, un quart des vidéos n'ont aucune prose exploitable.
   transcript      TEXT,
+  transcript_attempts INTEGER NOT NULL DEFAULT 0,
   kind            TEXT NOT NULL,
   media_count     INTEGER NOT NULL DEFAULT 0,
   width           INTEGER,
@@ -307,7 +418,14 @@ CREATE TABLE IF NOT EXISTS collections (
   cover_post_id TEXT REFERENCES posts(id) ON DELETE SET NULL,
   source        TEXT NOT NULL DEFAULT 'local',
   color         TEXT,
-  sort_index    INTEGER NOT NULL DEFAULT 0
+  sort_index    INTEGER NOT NULL DEFAULT 0,
+  -- La phrase qui définit la collection, et le prototype qu'elle produit. Voir MIGRATION_19.
+  query         TEXT,
+  prototype_text    BLOB,
+  prototype_meaning BLOB,
+  target_size   INTEGER NOT NULL DEFAULT 300,
+  -- « query » = définie par ses mots-clés et recalculée ; « manual » = une liste qu'on ne touche pas.
+  kind          TEXT NOT NULL DEFAULT 'manual'
 );
 
 -- La clé primaire composite rend le doublon structurellement impossible : c'est ce qui
@@ -316,6 +434,26 @@ CREATE TABLE IF NOT EXISTS collection_posts (
   collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
   post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   added_at      INTEGER NOT NULL,
+  -- À quel point ce post appartient, en écarts-types. Nul pour une appartenance posée à la main.
+  degree        REAL,
+  PRIMARY KEY (collection_id, post_id)
+);
+
+CREATE TABLE IF NOT EXISTS collection_keywords (
+  collection_id   INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  word            TEXT NOT NULL,
+  weight          REAL NOT NULL DEFAULT 1,
+  vector_text     BLOB,
+  vector_meaning  BLOB,
+  sort_index      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (collection_id, word)
+);
+
+CREATE TABLE IF NOT EXISTS collection_feedback (
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  verdict       INTEGER NOT NULL,
+  at            INTEGER NOT NULL,
   PRIMARY KEY (collection_id, post_id)
 );
 

@@ -47,11 +47,26 @@ Magpie can compare captions, hashtags, tags, creators and local visual signature
 
 Magpie also *looks* at your posts. Two local vision models read every thumbnail — and three frames from each cached video, because the cover of a clip rarely says what the clip is about. A third of a typical library has no usable caption; measured on a 9,600-post library, filing rose from 1,299 to 2,445 of those posts once the images had a say.
 
+And it *listens*. Whisper transcribes the speech in your videos on your machine, which is often a reel's only real text. Each clip is transcribed in the language it is actually spoken in, guessed from its caption and from the library around it — a French reel heard as English does not come out approximate, it comes out invented.
+
 Nothing is filed without your approval: rename a category, exclude it, or merge related suggestions before creating the collections.
 
 ### A map of what you saved
 
-The organiser draws your library as a map: one dot per post, placed so that distance *is* similarity. Collections appear as islands with drawn boundaries, and you can click a name to isolate one, open a post beside the map instead of in a browser, and reshape a boundary by dragging its points — posts inside it join the collection. Once you have drawn a boundary the map freezes, and posts arriving on later syncs are placed against it, so they file themselves into the region they land in.
+Magpie draws your whole library as a map: one dot per post, placed so that distance *is* similarity. It is a third way to look at what you saved, next to the wall and the cards — the one that shows *what goes with what*. Click any point to open the post in a resizable panel beside the map, name a dense area yourself, and let the island titles tell you where you are.
+
+The map is deliberately stable: positions are frozen once computed, so posts arriving on later syncs are placed against the existing map instead of rearranging it. A place you remember stays where you left it.
+
+### Collections are queries, not folders
+
+A collection is **a name, a few words, and a reach**. Write “music production”, and Magpie scores all of your posts against it — the same local model reads words and images in one shared space, so a phrase alone can file thousands of posts. Add “ableton”, “synth”, “mixing”, each with its own weight: a post belongs if it matches *any* of them, so a narrow word brings its posts in instead of dragging the whole theme towards it.
+
+The reach is a number of posts, not a confidence score, and that is a deliberate honesty: measured on a real library, a phrase that describes nothing you ever saved scores just as high as one at the centre of your interests. Ranking is trustworthy, absolute scores are not — so you set where to stop, and the map shows you the gradient while you do it.
+
+- Selecting a collection paints the whole library as a heatmap, so you see it bleed outward and know what one more notch would catch.
+- One post can belong to several collections, because that is how meaning actually works.
+- Rename, recolour, merge or delete a collection at any time; renaming only changes the label, never what is inside.
+- Hide everything outside the collection when you want to read its shape alone.
 
 ![Magpie local collection organiser](docs/assets/magpie-organizer.png)
 
@@ -102,6 +117,11 @@ npm run check:layout
 npm run check:db
 npm run check:media
 npm run check:organizer
+npm run check:transcribe
+npm run check:map
+npm run check:map-density
+npm run check:cells
+npm run check:boundaries
 npm run build
 npm run dist:win
 ```

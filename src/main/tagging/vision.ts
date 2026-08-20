@@ -443,18 +443,35 @@ export function topicStandoff(meaning: Float32Array, topics: Float32Array[]): nu
   return sims.map((value) => (value - mean) / spread)
 }
 
-function centred(vectors: Float32Array[]): Float32Array[] {
-  if (vectors.length === 0) return []
-  const dims = vectors[0].length
+/**
+ * Le centre d'un nuage de vecteurs.
+ *
+ * Public parce qu'un prototype de collection doit être centré par **la même** moyenne que les
+ * posts qu'il va noter. Le centrage n'est pas un détail de mise en forme : c'est lui qui étale
+ * les distances dans un espace anisotrope, et deux vecteurs centrés par deux moyennes
+ * différentes ne se comparent plus.
+ */
+export function blockMean(vectors: Float32Array[]): Float64Array {
+  const dims = vectors[0]?.length ?? 0
   const mean = new Float64Array(dims)
+  if (vectors.length === 0) return mean
   for (const vector of vectors) {
     for (let i = 0; i < dims; i += 1) mean[i] += vector[i] / vectors.length
   }
-  return vectors.map((vector) => {
-    const out = new Float32Array(dims)
-    for (let i = 0; i < dims; i += 1) out[i] = vector[i] - mean[i]
-    return unit(out)
-  })
+  return mean
+}
+
+/** Retire un centre donné, puis renormalise. */
+export function centreBy(vector: Float32Array, mean: Float64Array): Float32Array {
+  const out = new Float32Array(vector.length)
+  for (let i = 0; i < vector.length; i += 1) out[i] = vector[i] - (mean[i] ?? 0)
+  return unit(out)
+}
+
+function centred(vectors: Float32Array[]): Float32Array[] {
+  if (vectors.length === 0) return []
+  const mean = blockMean(vectors)
+  return vectors.map((vector) => centreBy(vector, mean))
 }
 
 /**

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { app } from 'electron'
 import { join } from 'node:path'
+import { dataDir } from '../db'
 import {
   postEmbeddings,
   savePostEmbeddings,
@@ -95,9 +95,13 @@ async function load(): Promise<Extractor> {
   if (loading) return loading
   loading = (async () => {
     const { env, pipeline } = await import('@huggingface/transformers')
-    // Tout vit dans le dossier de données de Magpie : rien n'est écrit à côté du binaire, et
-    // désinstaller l'application emporte le modèle avec elle.
-    env.cacheDir = join(app.getPath('userData'), 'models')
+    /* Tout vit dans le dossier de données de Magpie : rien n'est écrit à côté du binaire, et
+       désinstaller l'application emporte le modèle avec elle.
+       `dataDir()` et non `app.getPath('userData')` : les deux se confondent tant que la
+       bibliothèque est à sa place par défaut, et divergent dès qu'on la déplace. Les encodeurs
+       d'images, eux, ont toujours suivi la bibliothèque — on se retrouvait donc avec deux
+       dossiers `models` à deux endroits, dont un que personne ne nettoie. */
+    env.cacheDir = join(dataDir(), 'models')
     env.allowLocalModels = false
     const pipe = await pipeline('feature-extraction', MODEL, { dtype: 'q8' })
     extractor = pipe as unknown as Extractor

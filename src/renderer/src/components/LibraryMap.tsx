@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { OrganizerMap as OrganizerMapData } from '@shared/types'
-import { magpie } from '../bridge'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { OrganizerMap as OrganizerMapData, OrganizerProgress } from '@shared/types'
+import { magpie, magpieEvents } from '../bridge'
+import type { Vertex } from '../map-boundaries'
+import { displayName } from '../format'
 import { useStore, useT } from '../store'
+import { IconClose } from './Icons'
+import { CollectionsRail } from './CollectionsRail'
 import { OrganizerMap } from './OrganizerMap'
 import { MapPostPanel } from './MapPostPanel'
 
@@ -22,34 +26,140 @@ import { MapPostPanel } from './MapPostPanel'
  * d'avoir vu à quoi sert l'application : sans les vecteurs, ce mode ne peut rien afficher, et
  * un canevas noir sans explication passerait pour une panne.
  */
+
+/**
+ * Ce que cet écran ne fait pas, hissé hors du composant.
+ *
+ * La carte d'accueil ne trace pas de frontières et ne se modifie pas : les trois rappels et la
+ * table de contours qu'elle passe quand même sont donc constants. Les écrire à l'appel les
+ * recréait à chaque rendu, et `OrganizerMap` en fait des dépendances — dont celle qui
+ * reconstruit le pavage entier, Voronoï compris. Il se refaisait à chaque vignette arrivée, sur
+ * le thread du rendu, pour un maillage que cet écran ne dessine même pas.
+ */
+const NO_BOUNDARIES: Map<string, Vertex[][]> = new Map()
+const IGNORE = (): void => {}
+
+/** Les étapes que l'analyse annonce, dans l'ordre où elle les traverse. */
+const STAGE_LABEL = {
+  preparing: 'organizer.preparing',
+  visuals: 'organizer.visualProgress',
+  embedding: 'organizer.embedding',
+  grouping: 'organizer.grouping',
+  projecting: 'organizer.projecting'
+} as const
+
 export function LibraryMap(): React.JSX.Element {
   const t = useT()
-  const posts = useStore((state) => state.posts)
+  const query = useStore((state) => state.query)
   const setOrganizerOpen = useStore((state) => state.setOrganizerOpen)
   const [data, setData] = useState<OrganizerMapData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [failure, setFailure] = useState<string | null>(null)
   const [panelPostId, setPanelPostId] = useState<string | null>(null)
   const [ownLabels, setOwnLabels] = useState<{ id: string; text: string; anchors: string[] }[]>([])
   /** Étiquette en cours de saisie : ses ancres sont déjà choisies, il manque le mot. */
   const [naming, setNaming] = useState<string[] | null>(null)
   const [draft, setDraft] = useState('')
-  /** Le regard courant. « Équilibré » est le meilleur à la mesure ; les autres servent à explorer. */
-  const [layout, setLayout] = useState<'equilibre' | 'sujet' | 'style' | 'texte'>('equilibre')
+  /** Reposer le même écran ne change aucun état : il faut un compteur pour redemander. */
+  const [attempt, setAttempt] = useState(0)
+  /** Le prochain clic pose une étiquette. Armé depuis le bouton, désarmé dès qu'on a posé. */
+  const [placing, setPlacing] = useState(false)
+  /**
+   * La largeur du panneau, gardée ici pour survivre à sa fermeture.
+   *
+   * La moitié de l'écran par défaut : c'est la taille à laquelle on voit ce qu'un post est, et
+   * c'était le reproche fait aux trois cents pixels de l'organisateur — un aperçu trop petit
+   * pour reconnaître ce qu'on vient de cliquer ne sert à rien.
+   */
+  const [panelWidth, setPanelWidth] = useState(() => Math.round(window.innerWidth / 2))
+  /* L'infobulle du survol. Elle existait dans l'organisateur et pas ici — un point survolé ne
+     disait rien de ce qu'il était, ce qui est pourtant la première question qu'on se pose devant
+     neuf mille points. Une requête par point survolé serait une requête par pixel parcouru : on
+     ne cherche que ce qui est encore sous le curseur au bout du délai, et une réponse en retard
+     est jetée. */
+  const [detail, setDetail] = useState<{ id: string; title: string; text: string } | null>(null)
+  const hoverRef = useRef(0)
+  /** La collection regardée, peinte en chaleur sur la carte. */
+  const [heat, setHeat] = useState<{
+    token: string
+    degrees: Map<string, number>
+    reach: number
+    only: boolean
+  } | null>(null)
+
+
+  /* L'analyse dit déjà où elle en est — c'est le même flux que l'organisateur écoute. Le
+     brancher ici coûte trois lignes et change tout : à froid, ouvrir cet onglet relance le
+     regroupement puis les vingt-six secondes de projection, et un rond qui tourne sans rien
+     annoncer pendant une demi-minute se lit comme un blocage. */
+  const [progress, setProgress] = useState<OrganizerProgress | null>(null)
+  useEffect(() => magpieEvents.onOrganizerProgress(setProgress), [])
+
+  /* Échap sort de la saisie et du mode, d'où que vienne le focus. Il n'était écouté que par le
+     champ lui-même : un clic ailleurs et la boîte ne se fermait plus par aucun moyen. */
+  useEffect(() => {
+    if (!naming && !placing) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      setNaming(null)
+      setPlacing(false)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [naming, placing])
 
   useEffect(() => {
-    void magpie.mapLabels().then(setOwnLabels).catch(() => {})
+    void magpie
+      .mapLabels()
+      .then(setOwnLabels)
+      // Une table absente ou illisible ne doit pas emporter l'écran, mais l'avaler en silence
+      // faisait d'une fonction morte une fonction qu'on croyait vivante.
+      .catch((error) => console.warn('[magpie] Étiquettes de carte illisibles', error))
   }, [])
+
+  /**
+   * Tout ce que le filtre retient, et non la page que la grille a chargée.
+   *
+   * C'était le défaut de cet écran. Il filtrait la projection sur `state.posts`, qui est la
+   * tranche paginée de la mosaïque — trois cents posts. Or la grille n'est pas montée dans ce
+   * mode : rien n'appelait jamais la tranche suivante. La carte restait donc à trois cents
+   * points sur neuf mille, silencieusement, en donnant tous les signes d'être complète.
+   */
+  const [visibleIds, setVisibleIds] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void magpie
+      .listPostIds(query)
+      .then((ids) => {
+        if (!cancelled) setVisibleIds(new Set(ids))
+      })
+      .catch((error) => {
+        console.warn('[magpie] Filtre de carte indisponible', error)
+        if (!cancelled) setVisibleIds(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [query])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setFailure(null)
     void magpie
-      .organizerMap(layout)
+      .organizerMap('equilibre')
       .then((next) => {
         if (!cancelled) setData(next)
       })
-      .catch(() => {
-        if (!cancelled) setData(null)
+      .catch((error: unknown) => {
+        /* Une analyse qui échoue n'est pas une bibliothèque sans vecteurs. Les confondre
+           renvoyait vers « lancer l'analyse » un écran qui venait précisément de la voir
+           échouer, et l'utilisateur relançait la même panne. */
+        console.error('[magpie] Carte indisponible', error)
+        if (cancelled) return
+        setData(null)
+        setFailure(error instanceof Error ? error.message : String(error))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -57,15 +167,15 @@ export function LibraryMap(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [layout])
+  }, [attempt])
 
   /* Les points que les filtres ont laissés. Le placement vient de la projection complète : on
      retire des points, on ne les redispose pas. */
   const shown = useMemo(() => {
     if (!data) return null
-    const kept = new Set(posts.map((post) => post.id))
-    return { ...data, points: data.points.filter((point) => kept.has(point.id)) }
-  }, [data, posts])
+    if (!visibleIds) return data
+    return { ...data, points: data.points.filter((point) => visibleIds.has(point.id)) }
+  }, [data, visibleIds])
 
   const groupNames = useMemo(
     () => new Map((data?.plan.suggestions ?? []).map((s) => [s.id, s.name.trim()])),
@@ -80,14 +190,52 @@ export function LibraryMap(): React.JSX.Element {
      interdire la carte serait pire : on annonce la durée et on laisse décider. Repère mesuré —
      26 s pour 9 740 posts, et le coût monte en n·log n, ce qui donne l'ordre de grandeur sans
      prétendre à la seconde près. */
-  const heavy = posts.length > 15_000
-  const estimate = Math.max(1, Math.round((26 * (posts.length / 9740) * Math.log2(Math.max(2, posts.length)) ) / Math.log2(9740) / 60))
+  const count = shown?.points.length ?? 0
+  const heavy = count > 15_000
+  const estimate = Math.max(
+    1,
+    Math.round((26 * (count / 9740) * Math.log2(Math.max(2, count))) / Math.log2(9740) / 60)
+  )
 
   if (loading) {
+    const label = progress?.running ? STAGE_LABEL[progress.stage as keyof typeof STAGE_LABEL] : null
     return (
       <div className="library-map__empty">
         <div className="organizer-spinner" />
-        <p>{t('map.loading')}</p>
+        <p>
+          {label
+            ? t(label, { done: progress?.done ?? 0, total: progress?.total ?? 0 })
+            : t('map.loading')}
+        </p>
+        {progress?.running && progress.total > 0 ? (
+          <div
+            className="organizer-progress"
+            role="progressbar"
+            aria-valuenow={progress.done}
+            aria-valuemin={0}
+            aria-valuemax={progress.total}
+          >
+            <span style={{ width: `${Math.min(100, (progress.done / progress.total) * 100)}%` }} />
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  /* Une analyse qui a échoué le dit, et propose de recommencer. Elle ne se déguise pas en
+     bibliothèque à analyser. */
+  if (failure) {
+    return (
+      <div className="library-map__empty">
+        <h2>{t('map.errorTitle')}</h2>
+        <p>{failure}</p>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => setAttempt((current) => current + 1)}
+        >
+          {t('map.errorRetry')}
+        </button>
       </div>
     )
   }
@@ -108,26 +256,35 @@ export function LibraryMap(): React.JSX.Element {
 
   return (
     <div className="library-map">
-      {/* Quatre regards sur le même nuage. Le premier est celui que la mesure retient ; les
-          autres rapprochent par le sujet, par l'allure, ou par le texte seul. Chacun est
-          calculé une fois puis gardé, donc la bascule est immédiate ensuite. */}
-      <div className="library-map__layouts segmented segmented--quiet">
-        {(['equilibre', 'sujet', 'style', 'texte'] as const).map((id) => (
-          <button
-            key={id}
-            type="button"
-            className={layout === id ? 'is-active' : ''}
-            onClick={() => setLayout(id)}
-          >
-            {t(`map.layout${id[0].toUpperCase()}${id.slice(1)}` as Parameters<typeof t>[0])}
-          </button>
-        ))}
+      {/* Un seul regard, et un bouton.
+          Les quatre mélanges — équilibré, sujet, style, texte — sont partis. Trois d'entre eux
+          rapprochaient sur un signal isolé, ce qui donne trois cartes moins bonnes que celle que
+          la mesure retient, et quatre onglets à essayer pour revenir au premier. Une carte qui a
+          quatre versions n'est plus un endroit : on ne peut pas s'y souvenir d'où était quelque
+          chose. Le mélange équilibré reste, seul.
+          À la place, ce qui manquait vraiment : de quoi nommer un endroit. Le geste existait
+          — double-clic — et rien ne l'annonçait. */}
+      <div className="library-map__tools">
+        <button
+          type="button"
+          className={`btn library-map__label${placing ? ' is-active' : ''}`}
+          aria-pressed={placing}
+          onClick={() => setPlacing((current) => !current)}
+        >
+          {t(placing ? 'map.placeLabelArmed' : 'map.placeLabel')}
+        </button>
+        {placing ? (
+          <span className="library-map__armed" role="status">
+            {t('map.placeLabelHint')}
+          </span>
+        ) : null}
       </div>
       {heavy ? (
         <p className="library-map__notice" role="status">
-          {t('map.heavy', { count: posts.length, minutes: estimate })}
+          {t('map.heavy', { count, minutes: estimate })}
         </p>
       ) : null}
+      <CollectionsRail onHeat={setHeat} />
       <OrganizerMap
         data={shown}
         colourMode="group"
@@ -136,19 +293,47 @@ export function LibraryMap(): React.JSX.Element {
         showLabels
         showBoundaries={false}
         editMode={false}
-        savedBoundaries={new Map()}
-        onBoundaryChange={() => {}}
-        onLasso={() => {}}
-        onHover={() => {}}
+        savedBoundaries={NO_BOUNDARIES}
+        onBoundaryChange={IGNORE}
+        onLasso={IGNORE}
+        onHover={(point) => {
+          const request = ++hoverRef.current
+          if (!point) {
+            setDetail(null)
+            return
+          }
+          if (detail?.id !== point.id) setDetail(null)
+          window.setTimeout(() => {
+            if (hoverRef.current !== request) return
+            void magpie.getPostsByIds([point.id]).then((posts) => {
+              const post = posts[0]
+              if (!post || hoverRef.current !== request) return
+              setDetail({
+                id: point.id,
+                title: displayName(post),
+                text: post.text?.slice(0, 220) ?? ''
+              })
+            })
+          }, 90)
+        }}
         /* Un clic ouvre le post dans le panneau, comme dans l'organisateur. Le détail complet
            reste accessible depuis la grille : ici on veut regarder sans quitter la carte. */
         onOpen={(point) => setPanelPostId(point.id)}
         ownLabels={ownLabels}
+        placingLabel={placing}
+        onRemoveLabel={(id) => {
+          setOwnLabels((current) => current.filter((label) => label.id !== id))
+          void magpie
+            .deleteMapLabel(id)
+            .catch((error) => console.warn('[magpie] Étiquette non retirée', error))
+        }}
+        heat={heat}
         onPlaceLabel={(anchors) => {
+          setPlacing(false)
           setNaming(anchors)
           setDraft('')
         }}
-        detail={null}
+        detail={detail}
       />
       {/* Nommer un endroit. Un champ posé sur la carte plutôt qu'une boîte du système : on
           reste devant ce qu'on nomme, et l'application garde son écran. */}
@@ -164,7 +349,9 @@ export function LibraryMap(): React.JSX.Element {
             }
             const id = `label-${Date.now()}`
             setOwnLabels((current) => [...current, { id, text, anchors: naming }])
-            void magpie.saveMapLabel(id, text, naming).catch(() => {})
+            void magpie
+              .saveMapLabel(id, text, naming)
+              .catch((error) => console.warn('[magpie] Étiquette non enregistrée', error))
             setNaming(null)
           }}
         >
@@ -180,9 +367,27 @@ export function LibraryMap(): React.JSX.Element {
           <button type="submit" className="btn btn--primary">
             {t('map.nameSave')}
           </button>
+          {/* Renoncer. Une boîte de saisie sans sortie visible est une impasse : Échap ne se
+              devine pas, et rien d'autre ne la fermait. */}
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setNaming(null)}
+            aria-label={t('organizer.cancel')}
+          >
+            <IconClose />
+          </button>
         </form>
       ) : null}
-      <MapPostPanel postId={panelPostId} onClose={() => setPanelPostId(null)} />
+      <MapPostPanel
+        postId={panelPostId}
+        onClose={() => setPanelPostId(null)}
+        /* Par-dessus, et non à côté : la carte garde sa taille, donc elle ne se recale pas à
+           l'ouverture — et le panneau peut glisser sans entraîner neuf mille points. */
+        variant="floating"
+        width={panelWidth}
+        onResize={setPanelWidth}
+      />
     </div>
   )
 }

@@ -186,6 +186,19 @@ const STOP_WORDS = new Set(
  * « Production musicale » que parce que le mot y figurait, et un post sur Bitwig ne
  * rejoignait rien. Comparer les vecteurs rattrape ce que la liste ne prévoit pas.
  */
+/**
+ * Les thèmes sous leur nom lisible, dans les deux langues.
+ *
+ * Les descripteurs à mots-clés servent à la mesure de ressemblance ; ceux-ci servent à être
+ * écrits dans une liste et relus par quelqu'un. Depuis que les thèmes sont des brouillons de
+ * collections — des phrases qu'on élague et qu'on renomme — c'est cette forme qu'il faut.
+ */
+export const TOPIC_NAMES: { id: string; en: string; fr: string }[] = TOPICS.map((topic) => ({
+  id: topic.id,
+  en: topic.en,
+  fr: topic.fr
+}))
+
 export const TOPIC_DESCRIPTORS: { id: string; text: string }[] = TOPICS.map((topic) => ({
   id: topic.id,
   text: `${topic.en}, ${topic.fr} — ${topic.keywords.slice(0, 10).join(', ')}`

@@ -167,6 +167,20 @@ export interface CollectionInfo {
   color: LabelColor | null
 }
 
+/**
+ * Le degré d'appartenance de chaque post à une collection, en écarts-types.
+ *
+ * Envoyé une fois par collection choisie, et non à chaque coup de curseur : les degrés ne
+ * dépendent pas du seuil, seul le seuil en dépend. L'écran garde donc les degrés et repeint la
+ * carte instantanément quand on règle l'ampleur, sans repasser par le processus principal.
+ */
+export interface CollectionHeat {
+  postIds: string[]
+  degrees: number[]
+  /** Combien de posts la collection retient. Un nombre, pas une confiance — voir `prototypes.ts`. */
+  size: number
+}
+
 export interface AddToCollectionResult {
   added: number
   /** Posts déjà présents dans la collection — voir SPEC.md §9 sur les doublons. */
@@ -323,6 +337,8 @@ export interface LibraryStats {
 export interface MagpieApi {
   listPosts(query: PostQuery): Promise<Post[]>
   listPostPage(query: PostQuery, offset: number, limit: number): Promise<PostPage>
+  /** Les identifiants de tout ce que le filtre retient — la carte les veut tous. */
+  listPostIds(query: PostQuery): Promise<string[]>
   getPostsByIds(ids: string[]): Promise<Post[]>
   getStats(): Promise<LibraryStats>
   toggleFavorite(id: string): Promise<boolean>
@@ -398,6 +414,24 @@ export interface MagpieApi {
   removeTag(postId: string, name: string): Promise<void>
   listCollections(): Promise<CollectionInfo[]>
   createCollection(name: string): Promise<CollectionInfo>
+  /** Crée une collection à partir d'une phrase : SigLIP la place dans le repère des images. */
+  createCollectionFromPhrase(phrase: string): Promise<number>
+  createManualCollection(name: string, postIds: string[]): Promise<number>
+  deleteCollection(collectionId: number): Promise<void>
+  mergeCollections(from: number, into: number): Promise<void>
+  collectionKeywords(collectionId: number): Promise<{ word: string; weight: number }[]>
+  addCollectionKeyword(collectionId: number, word: string): Promise<CollectionHeat | null>
+  setCollectionKeywordWeight(
+    collectionId: number,
+    word: string,
+    weight: number
+  ): Promise<CollectionHeat | null>
+  removeCollectionKeyword(collectionId: number, word: string): Promise<CollectionHeat | null>
+  renameCollection(collectionId: number, name: string): Promise<void>
+  collectionHeat(collectionId: number): Promise<CollectionHeat | null>
+  setCollectionSize(collectionId: number, size: number): Promise<number>
+  seedCollectionsFromTopics(): Promise<number>
+  contestedPosts(): Promise<{ postId: string; collectionIds: number[] }[]>
   addToCollection(collectionId: number, postIds: string[], readd?: boolean): Promise<AddToCollectionResult>
   removeFromCollection(collectionId: number, postId: string): Promise<void>
   collectionsForPost(postId: string): Promise<number[]>

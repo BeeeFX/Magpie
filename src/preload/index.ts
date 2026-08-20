@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  CollectionHeat,
   AccountInfo,
   AddToCollectionResult,
   AiCollectionApplyResult,
@@ -43,6 +44,39 @@ const api: MagpieApi = {
   listPosts: (query: PostQuery): Promise<Post[]> => ipcRenderer.invoke('posts:list', query),
   listPostPage: (query: PostQuery, offset: number, limit: number): Promise<PostPage> =>
     ipcRenderer.invoke('posts:page', query, offset, limit),
+  listPostIds: (query: PostQuery): Promise<string[]> => ipcRenderer.invoke('posts:ids', query),
+  createCollectionFromPhrase: (phrase: string): Promise<number> =>
+    ipcRenderer.invoke('collections:createPhrase', phrase),
+  createManualCollection: (name: string, postIds: string[]): Promise<number> =>
+    ipcRenderer.invoke('collections:createManual', name, postIds),
+  deleteCollection: (collectionId: number): Promise<void> =>
+    ipcRenderer.invoke('collections:delete', collectionId),
+  mergeCollections: (from: number, into: number): Promise<void> =>
+    ipcRenderer.invoke('collections:merge', from, into),
+  collectionKeywords: (collectionId: number): Promise<{ word: string; weight: number }[]> =>
+    ipcRenderer.invoke('collections:keywords', collectionId),
+  addCollectionKeyword: (collectionId: number, word: string): Promise<CollectionHeat | null> =>
+    ipcRenderer.invoke('collections:addKeyword', collectionId, word),
+  setCollectionKeywordWeight: (
+    collectionId: number,
+    word: string,
+    weight: number
+  ): Promise<CollectionHeat | null> =>
+    ipcRenderer.invoke('collections:keywordWeight', collectionId, word, weight),
+  removeCollectionKeyword: (
+    collectionId: number,
+    word: string
+  ): Promise<CollectionHeat | null> =>
+    ipcRenderer.invoke('collections:removeKeyword', collectionId, word),
+  renameCollection: (collectionId: number, name: string): Promise<void> =>
+    ipcRenderer.invoke('collections:rename', collectionId, name),
+  collectionHeat: (collectionId: number): Promise<CollectionHeat | null> =>
+    ipcRenderer.invoke('collections:heat', collectionId),
+  setCollectionSize: (collectionId: number, size: number): Promise<number> =>
+    ipcRenderer.invoke('collections:size', collectionId, size),
+  seedCollectionsFromTopics: (): Promise<number> => ipcRenderer.invoke('collections:seed'),
+  contestedPosts: (): Promise<{ postId: string; collectionIds: number[] }[]> =>
+    ipcRenderer.invoke('collections:contested'),
   getPostsByIds: (ids: string[]): Promise<Post[]> => ipcRenderer.invoke('posts:byIds', ids),
   getStats: (): Promise<LibraryStats> => ipcRenderer.invoke('stats:get'),
   toggleFavorite: (id: string): Promise<boolean> => ipcRenderer.invoke('posts:toggleFavorite', id),

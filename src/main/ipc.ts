@@ -41,6 +41,7 @@ import {
   getStats,
   lastOrganizerApplication,
   listCollections,
+  listPostIds,
   listPostPage,
   listPosts,
   readAccount,
@@ -70,6 +71,21 @@ import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
 import { checkForUpdates, getUpdateState, installUpdate } from './updater'
 import { exportDir, exportLibrary, systemPrompt } from './export'
+import {
+  addKeyword,
+  contested,
+  createFromPhrase,
+  createManual,
+  heatOf,
+  keywordsOf,
+  merge as mergeCollections,
+  remove as removeCollection,
+  removeKeyword,
+  rename as renameCollection,
+  seedFromTopics,
+  setKeywordWeight,
+  setSize as setCollectionSize
+} from './tagging/collections'
 import {
   freezeMap, buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
 import {
@@ -227,6 +243,7 @@ export function registerIpc({
     }
     return listPostPage(postQueryValue(query), offset, limit)
   })
+  ipcMain.handle('posts:ids', (_event, query: PostQuery) => listPostIds(postQueryValue(query)))
   ipcMain.handle('posts:byIds', (_event, ids: string[]) => {
     if (
       !Array.isArray(ids) ||
@@ -408,6 +425,47 @@ export function registerIpc({
     stopTranscribing()
     return backgroundTasks.current()
   })
+
+  /* Les collections comme requêtes. Un seul recalcul par geste, et il réécrit
+     `collection_posts` : tout le reste de l'application continue de lire une liste de posts. */
+  ipcMain.handle('collections:createPhrase', (_event, phrase: string) =>
+    createFromPhrase(String(phrase))
+  )
+  ipcMain.handle('collections:createManual', (_event, name: string, postIds: string[]) =>
+    createManual(String(name), (postIds ?? []).map(String))
+  )
+  ipcMain.handle('collections:keywords', (_event, id: number) => keywordsOf(Number(id)))
+  ipcMain.handle('collections:addKeyword', async (_event, id: number, word: string) => {
+    await addKeyword(Number(id), String(word))
+    return heatOf(Number(id))
+  })
+  ipcMain.handle(
+    'collections:keywordWeight',
+    (_event, id: number, word: string, weight: number) => {
+      setKeywordWeight(Number(id), String(word), Number(weight))
+      return heatOf(Number(id))
+    }
+  )
+  ipcMain.handle('collections:removeKeyword', (_event, id: number, word: string) => {
+    removeKeyword(Number(id), String(word))
+    return heatOf(Number(id))
+  })
+  ipcMain.handle('collections:rename', (_event, id: number, name: string) =>
+    renameCollection(Number(id), String(name))
+  )
+  ipcMain.handle('collections:heat', (_event, id: number) => heatOf(Number(id)))
+  ipcMain.handle('collections:size', (_event, id: number, size: number) => {
+    const next = setCollectionSize(Number(id), Number(size))
+    return next ? next.members.length : 0
+  })
+  ipcMain.handle('collections:delete', (_event, id: number) => {
+    removeCollection(Number(id))
+  })
+  ipcMain.handle('collections:merge', (_event, from: number, into: number) => {
+    mergeCollections(Number(from), Number(into))
+  })
+  ipcMain.handle('collections:seed', () => seedFromTopics())
+  ipcMain.handle('collections:contested', () => contested())
 
   ipcMain.handle('organizer:map', (_event, layout?: string) =>
     buildOrganizerMap(layout as never)

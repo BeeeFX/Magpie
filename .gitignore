@@ -17,3 +17,4 @@ magpie.db*
 fixtures/media/
 fixtures/preview/
 .recipe-cache/
+.bench-phrases/

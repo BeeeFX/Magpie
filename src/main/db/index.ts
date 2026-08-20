@@ -22,13 +22,27 @@ import {
   MIGRATION_15_SQL,
   MIGRATION_16_SQL,
   MIGRATION_17_SQL,
+  MIGRATION_18_SQL,
+  MIGRATION_19_SQL,
+  MIGRATION_20_SQL,
   SCHEMA_SQL,
   SCHEMA_VERSION
 } from './schema'
 
 let db: Database.Database | null = null
 
+/**
+ * Où vit la bibliothèque, par défaut.
+ *
+ * `MAGPIE_DATA_DIR` passe devant, et ce n'est pas un réglage : c'est ce qui permet aux bancs et
+ * aux diagnostics de faire tourner le vrai code sur une **copie** de la vraie base, sans
+ * Electron autour. Sans cette porte, un banc n'a que deux choix — réécrire la couche base pour
+ * lui seul, ce que faisait `scripts/library-path.ts`, ou écrire dans la bibliothèque de
+ * quelqu'un. La condition est évaluée avant `app`, donc elle fonctionne là où `app` n'existe pas.
+ */
 function defaultDataDir(): string {
+  const forced = process.env.MAGPIE_DATA_DIR
+  if (forced && forced.trim()) return forced
   return app.getPath('userData')
 }
 
@@ -353,6 +367,15 @@ const MIGRATIONS: Record<number, (conn: Database.Database) => void> = {
   },
   17: (conn) => {
     conn.exec(MIGRATION_17_SQL)
+  },
+  18: (conn) => {
+    conn.exec(MIGRATION_18_SQL)
+  },
+  19: (conn) => {
+    conn.exec(MIGRATION_19_SQL)
+  },
+  20: (conn) => {
+    conn.exec(MIGRATION_20_SQL)
   }
 }
 

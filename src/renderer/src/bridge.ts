@@ -132,6 +132,20 @@ const previewApi: MagpieApi = {
     const page = posts.slice(offset, offset + limit)
     return { posts: page, total: posts.length, offset, hasMore: offset + page.length < posts.length }
   },
+  listPostIds: async () => (await previewPosts()).map((post) => post.id),
+  createCollectionFromPhrase: async () => 0,
+  createManualCollection: async () => 0,
+  deleteCollection: async () => {},
+  mergeCollections: async () => {},
+  collectionKeywords: async () => [],
+  addCollectionKeyword: async () => null,
+  setCollectionKeywordWeight: async () => null,
+  removeCollectionKeyword: async () => null,
+  renameCollection: async () => {},
+  collectionHeat: async () => null,
+  setCollectionSize: async () => 0,
+  seedCollectionsFromTopics: async () => 0,
+  contestedPosts: async () => [],
   getPostsByIds: async (ids) => {
     const wanted = new Set(ids)
     return (await previewPosts()).filter((post) => wanted.has(post.id))
