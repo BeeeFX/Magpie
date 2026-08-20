@@ -8,8 +8,8 @@ import {
   collectionSeeds,
   meshWalls,
   moveMeshVertex,
+  outerBounds,
   ringArea,
-  seedReach,
   type CellMesh
 } from '../map-cells'
 import { insideRing, type Vertex } from '../map-boundaries'
@@ -355,13 +355,12 @@ export function OrganizerMap({
        lui donnent une cellule à chacun de ses endroits au lieu d'une seule à l'autre bout. */
     const seeds = [...members]
       .filter(([, points]) => points.length >= 3)
-      .flatMap(([group, points]) => {
-        const foci = collectionSeeds(points)
-        /* La portée borne la cellule à son île : sans elle, le Voronoï découpe le carré entier
-           et les cellules du bord s'étendent jusqu'aux angles, en rectangles vides. */
-        return foci.map((at, index) => ({ group, at, reach: seedReach(foci, points, index) }))
-      })
-    setCellMesh(buildCellMesh(seeds))
+      .flatMap(([group, points]) => collectionSeeds(points).map((at) => ({ group, at })))
+    /* Une bordure unique, tirée du nuage entier : le pavage s'arrête où s'arrête la
+       bibliothèque, et les jonctions restent partagées parce que la même ligne coupe tout le
+       monde. Une bordure par cellule les désolidarisait. */
+    const cloud = data.points.map((point) => ({ x: point.x, y: point.y }))
+    setCellMesh(buildCellMesh(seeds, outerBounds(cloud)))
 
   }, [data.points, savedBoundaries])
 
@@ -974,12 +973,28 @@ export function OrganizerMap({
         context.fill(entry.path)
       }
       if (wallPath) {
-        context.strokeStyle = '#c8c8d4'
-        context.globalAlpha = 0.55
+        /* En édition, les parois s'allument et chaque sommet montre sa poignée. Sans ce retour,
+           on appuyait sur la carte sans savoir qu'il y avait quoi que ce soit à saisir — c'est
+           le reproche le plus juste qu'on ait pu me faire sur ce mode. */
+        context.strokeStyle = editMode ? '#ffffff' : '#c8c8d4'
+        context.globalAlpha = editMode ? 0.95 : 0.55
         // L'épaisseur est donnée en unités de carte : on la ramène à des pixels constants.
-        context.lineWidth = 1.4 / span
+        context.lineWidth = (editMode ? 2.2 : 1.4) / span
         context.lineJoin = 'round'
         context.stroke(wallPath)
+      }
+      if (editMode && cellMesh) {
+        const radius = 5 / span
+        context.globalAlpha = 1
+        for (const vertex of cellMesh.vertices) {
+          context.beginPath()
+          context.arc(vertex.x, vertex.y, radius, 0, Math.PI * 2)
+          context.fillStyle = '#ffffff'
+          context.fill()
+          context.lineWidth = 1.6 / span
+          context.strokeStyle = 'rgba(0, 0, 0, 0.65)'
+          context.stroke()
+        }
       }
       context.restore()
       context.globalAlpha = 1
@@ -1190,6 +1205,8 @@ export function OrganizerMap({
     links,
     boundaryPaths,
     cellLabels,
+    cellMesh,
+    editMode,
     wallPath,
     regionCentres,
     focusGroup,

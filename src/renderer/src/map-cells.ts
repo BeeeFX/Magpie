@@ -68,15 +68,14 @@ function clip(polygon: Vertex[], plane: HalfPlane): Vertex[] {
  * carte. On prend donc les cases les plus fournies, en s'interdisant deux germes voisins —
  * sans quoi les vingt germes d'un même amas dense se partageraient un confetti chacun.
  *
- * Deux au plus, et séparés d'au moins un quart de la carte. À quatre germes espacés de 0,14,
- * vingt-quatre collections produisaient près de quatre-vingt-dix cellules : la carte devenait
- * une mosaïque où l'on ne retrouvait plus ses collections. Un deuxième foyer ne doit
- * apparaître que si la collection est vraiment coupée en deux, à l'autre bout de la carte — ce
- * que 94 % de compacité rend rare, et c'est bien pour cela qu'on a mesuré cette compacité.
+ * **Un seul par défaut.** Une collection est une zone, pas quinze : plusieurs germes rendaient
+ * la carte illisible et le rapport entre une collection et sa cellule incompréhensible. Le
+ * paramètre reste, parce qu'une collection franchement coupée en deux peut mériter deux
+ * cellules, mais ce n'est pas le comportement normal.
  */
 export function collectionSeeds(
   points: Vertex[],
-  most = 2,
+  most = 1,
   cell = 0.08,
   apart = 0.28
 ): Vertex[] {
@@ -124,7 +123,8 @@ export function collectionSeeds(
  * existe.
  */
 export function buildCellMesh(
-  seeds: { group: string; at: Vertex; reach?: number }[],
+  seeds: { group: string; at: Vertex }[],
+  bounds?: Vertex[],
   weld = 1e-4
 ): CellMesh {
   const vertices: Vertex[] = []
@@ -140,7 +140,13 @@ export function buildCellMesh(
     return vertices.length - 1
   }
 
-  const square: Vertex[] = [
+  /* La bordure est **commune à toutes les cellules**, et c'est indispensable.
+     Borner chaque cellule par son propre cercle coupait la paroi que deux voisines partagent à
+     deux endroits différents : leurs jonctions ne se rencontraient plus, et le partage des
+     parois — la raison d'être de ce module — ne fonctionnait plus du tout. Mesuré : un seul
+     sommet partagé sur cent quarante-quatre. Une seule bordure, découpée identiquement pour
+     tout le monde, laisse les jonctions intérieures intactes. */
+  const square: Vertex[] = bounds && bounds.length >= 3 ? bounds : [
     { x: 0, y: 0 },
     { x: 1, y: 0 },
     { x: 1, y: 1 },
@@ -162,26 +168,6 @@ export function buildCellMesh(
         c: other.at.x ** 2 + other.at.y ** 2 - seed.at.x ** 2 - seed.at.y ** 2
       })
       if (polygon.length === 0) break
-    }
-    /* Et on borne la cellule autour de son foyer.
-       Sans cela le Voronoï découpe le carré entier : les cellules du bord s'étendent jusqu'aux
-       angles et la carte se termine par un rectangle de couleur qui ne contient rien. La portée
-       vient des posts de la collection, pas d'une constante — une cellule doit s'arrêter là où
-       s'arrête ce qu'elle contient. Approchée par un polygone à seize côtés : au-delà on ne
-       distingue plus le cercle, en deçà les coins se voient. */
-    if (seed.reach && seed.reach > 0) {
-      const SIDES = 16
-      for (let i = 0; i < SIDES; i += 1) {
-        const angle = (i / SIDES) * Math.PI * 2
-        const a = Math.cos(angle)
-        const b = Math.sin(angle)
-        polygon = clip(polygon, {
-          a,
-          b,
-          c: a * seed.at.x + b * seed.at.y + seed.reach
-        })
-        if (polygon.length === 0) break
-      }
     }
     if (polygon.length < 3) continue
     cells.push({ group: seed.group, loop: polygon.map(share) })
@@ -275,4 +261,51 @@ export function meshWalls(mesh: CellMesh): { from: number; to: number; groups: s
     }
   }
   return [...walls.values()]
+}
+
+
+/**
+ * La bordure du pavage : l'enveloppe du nuage, dilatée d'une marge.
+ *
+ * Sans elle, le Voronoï découpe le carré entier et les cellules du bord filent jusqu'aux
+ * angles, en grands aplats qui ne contiennent rien. Avec elle, le pavage s'arrête où s'arrête
+ * la bibliothèque.
+ *
+ * Une seule bordure pour toutes les cellules — jamais une par cellule. C'est ce qui préserve
+ * les jonctions : deux voisines coupées par la même ligne se rencontrent encore dessus.
+ */
+export function outerBounds(points: Vertex[], margin = 0.02): Vertex[] {
+  if (points.length < 3) return []
+  // Enveloppe convexe, par balayage de Graham sur les points triés.
+  const sorted = [...points].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x))
+  const cross = (o: Vertex, a: Vertex, b: Vertex): number =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+  const half = (list: Vertex[]): Vertex[] => {
+    const out: Vertex[] = []
+    for (const point of list) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], point) <= 0) {
+        out.pop()
+      }
+      out.push(point)
+    }
+    return out
+  }
+  const lower = half(sorted)
+  const upper = half([...sorted].reverse())
+  const hull = [...lower.slice(0, -1), ...upper.slice(0, -1)]
+  if (hull.length < 3) return []
+  let cx = 0
+  let cy = 0
+  for (const point of hull) {
+    cx += point.x / hull.length
+    cy += point.y / hull.length
+  }
+  /* Dilatée depuis le centre : la bordure passe un peu au large des points extrêmes, sinon les
+     cellules du pourtour seraient tranchées au ras de leurs propres posts. */
+  return hull.map((point) => {
+    const dx = point.x - cx
+    const dy = point.y - cy
+    const length = Math.hypot(dx, dy) || 1
+    return { x: point.x + (dx / length) * margin, y: point.y + (dy / length) * margin }
+  })
 }

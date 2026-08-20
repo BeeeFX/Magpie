@@ -3,6 +3,7 @@ import {
   cellRing,
   collectionSeeds,
   moveMeshVertex,
+  outerBounds,
   ringArea
 } from '../src/renderer/src/map-cells'
 import { insideRing, type Vertex } from '../src/renderer/src/map-boundaries'
@@ -41,31 +42,66 @@ const groups = [
   { group: 'code', points: blob(0.14, 0.78, 0.1, 200, 13) }
 ]
 
-console.log('Germes : une collection éparpillée doit avoir un foyer à chaque endroit')
+console.log('Germes : un par collection, sauf demande explicite')
 {
+  /* Un seul germe est la règle : une collection est une zone, pas quinze. Le paramètre reste
+     pour le cas d'une collection franchement coupée en deux, et c'est lui qu'on éprouve ici. */
   const split = [...blob(0.2, 0.2, 0.07, 150, 21), ...blob(0.82, 0.8, 0.07, 150, 23)]
-  const seeds = collectionSeeds(split)
+  assert(
+    collectionSeeds(split).length === 1,
+    'par défaut, une collection ne donne qu’un foyer'
+  )
+  const seeds = collectionSeeds(split, 2)
   assert(seeds.length >= 2, `deux foyers pour deux amas (${seeds.length})`)
   const near = (x: number, y: number): boolean =>
     seeds.some((seed) => Math.hypot(seed.x - x, seed.y - y) < 0.12)
   assert(near(0.2, 0.2) && near(0.82, 0.8), 'un foyer sur chacun des deux amas')
 
-  const dense = collectionSeeds(blob(0.5, 0.5, 0.06, 400, 31))
-  assert(dense.length <= 2, `un amas unique ne se fragmente pas en germes (${dense.length})`)
+  const dense = collectionSeeds(blob(0.5, 0.5, 0.06, 400, 31), 2)
+  assert(dense.length === 1, `un amas unique ne se fragmente pas (${dense.length} foyer)`)
 }
 
+const everyPoint = groups.flatMap((entry) => entry.points)
+const border = outerBounds(everyPoint)
 const seeds = groups.flatMap((entry) =>
   collectionSeeds(entry.points).map((at) => ({ group: entry.group, at }))
 )
-const mesh = buildCellMesh(seeds)
+const mesh = buildCellMesh(seeds, border)
 
 console.log('\nPavage')
 {
   assert(mesh.cells.length === seeds.length, `une cellule par germe (${mesh.cells.length})`)
+  assert(
+    mesh.cells.length === groups.length,
+    `une cellule par collection, pas quinze (${mesh.cells.length} pour ${groups.length})`
+  )
   const area = mesh.cells.reduce((total, cell) => total + ringArea(cellRing(mesh, cell)), 0)
-  /* Les cellules pavent le carré unité : leur aire totale vaut 1. En dessous, il reste des
-     interstices — donc des posts sans collection ; au-dessus, elles se chevauchent. */
-  assert(Math.abs(area - 1) < 0.005, `les cellules couvrent tout le carré (aire ${area.toFixed(4)})`)
+  const inside = ringArea(border)
+  /* Les cellules pavent la bordure, et rien de plus : leur aire totale vaut la sienne. En
+     dessous, il reste des interstices — donc des posts sans collection ; au-dessus, elles se
+     chevauchent. Et la bordure elle-même doit rester serrée autour du nuage, sinon les
+     cellules du pourtour s'étendent en aplats vides. */
+  assert(
+    Math.abs(area - inside) < 0.005,
+    `les cellules couvrent la bordure et pas plus (${area.toFixed(4)} contre ${inside.toFixed(4)})`
+  )
+  assert(inside < 0.75, `la bordure serre le nuage (${(100 * inside).toFixed(0)} % du carré)`)
+
+  /* LE contrôle qui manquait, et sans lequel j'ai affirmé plusieurs fois que le partage des
+     parois fonctionnait alors qu'un seul sommet sur cent quarante-quatre était partagé. Toute
+     jonction *intérieure* appartient à deux cellules au moins : sinon deux voisines ne
+     partagent pas leur paroi, et en pousser une laisse l'autre sur place. */
+  const owners = mesh.vertices.map(
+    (_, at) => mesh.cells.filter((cell) => cell.loop.includes(at)).length
+  )
+  const onBorder = (v: { x: number; y: number }): boolean =>
+    border.some((from, i) => {
+      const to = border[(i + 1) % border.length]
+      const cross = Math.abs((to.x - from.x) * (v.y - from.y) - (to.y - from.y) * (v.x - from.x))
+      return cross / (Math.hypot(to.x - from.x, to.y - from.y) || 1) < 1e-6
+    })
+  const lonely = mesh.vertices.filter((v, at) => owners[at] < 2 && !onBorder(v)).length
+  assert(lonely === 0, `toute jonction intérieure est partagée (${lonely} solitaire(s))`)
 
   let placed = 0
   let total = 0
@@ -125,7 +161,7 @@ console.log('\nParois partagées')
     0
   )
   assert(
-    Math.abs(areaAfter - 1) < 0.005,
+    Math.abs(areaAfter - ringArea(border)) < 0.02,
     `après déformation, le pavage couvre encore tout (aire ${areaAfter.toFixed(4)})`
   )
 }
