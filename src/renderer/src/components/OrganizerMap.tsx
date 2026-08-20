@@ -14,6 +14,7 @@ import {
   type CellMesh
 } from '../map-cells'
 import { insideRing, type Vertex } from '../map-boundaries'
+import * as perf from '../perf'
 import { edgeKeep, edgeKept, REFERENCE_FRAME, WEB, webTuning } from '../map-render'
 
 /**
@@ -328,7 +329,6 @@ export function OrganizerMap({
     anchors: string[] | null
   } | null>(null)
 
-  const [litGroup, setLitGroup] = useState<string | null>(null)
   /** Amas retenu au clic : tout le reste s'efface tant qu'il l'est. Le survol reste par-dessus. */
   const [focusGroup, setFocusGroup] = useState<string | null>(null)
   /** Nom survolé, pour lui donner l'aspect d'un bouton — et au curseur la forme qui va avec. */
@@ -939,6 +939,7 @@ export function OrganizerMap({
     const canvas = canvasRef.current
     const context = canvas?.getContext('2d')
     if (!canvas || !context) return
+    perf.openFrame()
     const ratio = window.devicePixelRatio || 1
     const width = canvas.width / ratio
     const height = canvas.height / ratio
@@ -1040,6 +1041,7 @@ export function OrganizerMap({
         keep.toFixed(3),
         [...includedGroups].sort().join(',')
       ].join(':')
+      perf.begin('courbes')
       if (pathCache.current.key !== key) {
         const built = new Map<
           string,
@@ -1131,6 +1133,7 @@ export function OrganizerMap({
         }
         pathCache.current = { key, paths: built, list: [...built.values()] }
       }
+      perf.end()
       target.globalCompositeOperation = 'lighter'
       /* Les courbes vivent entre 0 et 1 : c'est la transformation qui les porte à l'échelle,
          et les épaisseurs se divisent d'autant pour rester constantes à l'écran. */
@@ -1182,47 +1185,6 @@ export function OrganizerMap({
     /** Toute la toile d'un coup. Pour l'atterrissage, et pour le premier tracé. */
     const paintWeb = (target: CanvasRenderingContext2D): void => {
       paintWebFrom(target, 0, null)
-    }
-
-    /* Survoler éclaire l'amas désigné au lieu d'éteindre les autres : la toile complète doit
-       rester lisible en permanence, c'est tout son intérêt. Repeint par-dessus l'image en
-       cache — repeindre le tampon entier pour un survol coûterait 220 ms par mouvement. */
-    const lightUp = (group: string): void => {
-      if (edgeAlpha <= 0.002 || pathCache.current.key === '') return
-      context.save()
-      /**
-       * Le repère de la carte, comme le tracé principal.
-       *
-       * Ces deux calques translataient du déplacement et rien de plus. C'était juste quand les
-       * courbes étaient construites en pixels d'écran ; depuis qu'elles vivent entre 0 et 1 —
-       * ce qui a supprimé leur reconstruction à chaque cran de molette — un tracé sans mise à
-       * l'échelle les écrase toutes dans un carré d'un pixel. Isoler un groupe éteignait donc
-       * la carte sans jamais rallumer le groupe : c'était le calque qu'on ne voyait pas.
-       *
-       * L'étirement du geste de zoom n'a plus à être appliqué : `span` suit déjà l'échelle
-       * courante, et la recopie étirée du fond montre la carte exactement là où cette
-       * transformation la met.
-       */
-      context.translate(originX + view.x, originY + view.y)
-      context.scale(span, span)
-      /* Pendant un geste de zoom, le fond est une recopie *étirée* du tampon : aucun retracé
-         n'a eu lieu, donc `pathCache` tient encore les courbes de l'échelle précédente. Les
-         dessiner telles quelles les décalait du fond — c'était le calque qui glissait sous
-         les points pendant qu'on zoomait. On leur applique le même étirement qu'à l'image. */
-      context.globalCompositeOperation = 'lighter'
-      for (const entry of pathCache.current.paths.values()) {
-        if (entry.group !== group) continue
-        context.strokeStyle = entry.tone
-        context.lineWidth = (core * Math.max(1.5, WEB.bloomWidth / 2.3)) / span
-        context.globalAlpha = Math.min(0.5, edgeAlpha * 2.5)
-        context.stroke(entry.path)
-        context.lineWidth = core / span
-        context.globalAlpha = Math.min(0.75, edgeAlpha * 4.5)
-        context.stroke(entry.path)
-      }
-      context.globalCompositeOperation = 'source-over'
-      context.globalAlpha = 1
-      context.restore()
     }
 
     /**
@@ -1468,12 +1430,22 @@ export function OrganizerMap({
         /* Six millisecondes par image : de quoi avancer franchement en laissant respirer le
            reste — les points, les étiquettes, et surtout les événements de la souris. */
         const deadline = mustFinishNow ? null : performance.now() + 6
+        perf.begin('toile')
         job.at = paintWebFrom(job.paint, job.at, deadline)
+        perf.end()
+        perf.note('paquets', `${job.at}/${pathCache.current.list.length}`)
         const webDone = job.at >= pathCache.current.list.length
         if (webDone && !job.dotsDone) {
           /* Les points en une fois : neuf mille pastilles groupées par teinte, c'est deux ou
              trois millisecondes — le découpage n'y gagnerait rien et compliquerait la reprise. */
-          paintDots(job.paint, { left: job.left, top: job.top, right: job.left + job.width, bottom: job.top + job.height })
+          perf.begin('points')
+          paintDots(job.paint, {
+            left: job.left,
+            top: job.top,
+            right: job.left + job.width,
+            bottom: job.top + job.height
+          })
+          perf.end()
           job.dotsDone = true
         }
 
@@ -1507,6 +1479,7 @@ export function OrganizerMap({
            l'écran, et la recopie rééchantillonne : la toile deviendrait floue au déplacement,
            alors qu'elle est nette au premier tracé. */
         const zoom = web.scale > 0 ? view.scale / web.scale : 1
+        perf.begin('recopie')
         const snap = (value: number): number => Math.round(value * ratio) / ratio
         context.drawImage(
           web.canvas,
@@ -1515,6 +1488,7 @@ export function OrganizerMap({
           web.width * zoom,
           web.height * zoom
         )
+        perf.end()
       }
 
       /**
@@ -1612,6 +1586,7 @@ export function OrganizerMap({
        retirer l'alpha laisse le fond réel transparaître, quel qu'il soit.
        Les points sont dans le tampon, avec la toile : les griser un par un demanderait de
        retracer les 133 810 arêtes à chaque clic. On efface tout, puis on remet le groupe. */
+    perf.begin('isolement')
     if (focusGroup) {
       /**
        * Isoler, qu'il s'agisse d'un amas ou d'une collection.
@@ -1657,6 +1632,8 @@ export function OrganizerMap({
       context.globalAlpha = 1
     }
 
+    perf.end()
+
     if (cutRef.current) {
       const cut = cutRef.current
       const [ax, ay] = at(cut.from)
@@ -1673,7 +1650,6 @@ export function OrganizerMap({
       context.restore()
     }
 
-    if (litGroup) lightUp(litGroup)
 
     /* Chaque amas doit porter son nom, y compris quand deux étiquettes se gênent : la plus
        petite s'écarte de son amas avec un trait de rappel, au lieu de disparaître.
@@ -1701,6 +1677,10 @@ export function OrganizerMap({
      * c'est ce qui permet à une collection d'apparaître ici avec la couleur que l'utilisateur
      * lui a donnée, sans que la boucle ait à savoir de quelle famille elle vient.
      */
+    perf.note('empan', Math.round(span))
+    perf.note('aretes', pathCache.current.list.length)
+    perf.note('tampon', covers ? 'recopie' : paintJob.current ? 'en cours' : 'pose')
+    perf.begin('noms')
     const groupTitles = (showBoundaries ? cellLabels : islands).map((island) => ({
       key: island.group,
       text: groupNames.get(island.group)?.trim().toLocaleLowerCase() ?? '',
@@ -1844,6 +1824,7 @@ export function OrganizerMap({
       })
     }
     ownLabelBoxes.current = ownDrawn
+    perf.end()
 
     labelBoxes.current = drawn
     context.globalAlpha = 1
@@ -1876,6 +1857,7 @@ export function OrganizerMap({
       context.setLineDash([])
     }
     context.globalAlpha = 1
+    perf.closeFrame()
   }, [
     colourMode,
     data.points,
@@ -1884,6 +1866,11 @@ export function OrganizerMap({
     hovered,
     includedGroups,
     heat,
+    collectionTint,
+    collectionSpots,
+    showCollectionNames,
+    showOwnLabels,
+    tintToken,
     islands,
     links,
     boundaryPaths,
@@ -1895,7 +1882,6 @@ export function OrganizerMap({
     regionCentres,
     focusGroup,
     hoverLabel,
-    litGroup,
     showBoundaries,
     showLabels,
     view,
@@ -2391,11 +2377,20 @@ export function OrganizerMap({
       setHovered(found)
       onHover(found)
     }
-    /* Survoler un nom éclaire son amas, comme un point : c'est souvent le nom qu'on vise,
-       et il est bien plus facile à viser qu'une pastille d'un demi-pixel. */
+    /**
+     * Le survol n'allume plus l'amas.
+     *
+     * Il le faisait pour tout point survolé, et c'était deux problèmes en un. À l'œil, la carte
+     * clignotait sans arrêt : le curseur passe sur un point sans le vouloir, et tout son groupe
+     * s'embrasait. Au chronomètre, c'était pire — surexposer un amas retrace ses paquets en
+     * trois passes, **à chaque image**, et le curseur est justement sur la carte quand on
+     * tourne la molette. Chaque image de zoom repeignait donc un groupe entier par-dessus.
+     *
+     * Désigner un amas reste possible, et c'est le clic sur son nom qui le fait : un geste
+     * demandé, pas un effet de bord du passage de la souris. Le nom, lui, garde sa pastille au
+     * survol — c'est un retour local, qui ne coûte rien.
+     */
     if (overLabel !== hoverLabel) setHoverLabel(overLabel)
-    const lit = found?.group ?? overLabel
-    if (lit !== litGroup) setLitGroup(lit)
     cursorRef.current = { x: event.clientX, y: event.clientY }
     if (found) placeTip(event.clientX, event.clientY)
   }
@@ -2550,7 +2545,6 @@ export function OrganizerMap({
         onPointerUp={onPointerUp}
         onPointerLeave={() => {
           setHovered(null)
-          setLitGroup(null)
           setHoverLabel(null)
           onHover(null)
           draggingRef.current = null

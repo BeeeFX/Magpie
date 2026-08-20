@@ -6381,3 +6381,92 @@ html.window-is-moving .app *::after {
 .map-menu button:disabled {
   color: var(--faint);
 }
+
+/**
+ * Le relevé du dessin. `Ctrl` + `Maj` + `P`.
+ *
+ * Volontairement dense et sans fioriture : c'est un instrument de mesure, pas un écran. Il se
+ * copie en texte plutôt que de se photographier — un relevé se lit, il ne se devine pas.
+ */
+.map-perf {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 9;
+  width: 268px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  background: rgb(8 8 11 / 0.92);
+  backdrop-filter: blur(14px);
+  color: var(--muted);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.map-perf header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  color: var(--text);
+}
+
+.map-perf header strong {
+  flex: 1;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.map-perf header button {
+  padding: 1px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+}
+
+.map-perf header button:hover {
+  color: var(--text);
+  background: rgb(255 255 255 / 0.09);
+}
+
+.map-perf__head {
+  margin: 0 0 5px;
+  color: var(--text);
+}
+
+.map-perf__head .is-late {
+  color: #fda4af;
+}
+
+.map-perf ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.map-perf li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-perf__worst {
+  color: var(--faint);
+  min-width: 38px;
+  text-align: right;
+}
+
+.map-perf__notes {
+  margin: 5px 0 0;
+  padding-top: 5px;
+  border-top: 1px solid var(--hairline);
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}

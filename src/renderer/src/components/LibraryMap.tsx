@@ -11,6 +11,7 @@ import { useStore, useT } from '../store'
 import { IconClose } from './Icons'
 import { swatchOf } from '../collection-colours'
 import { CollectionsRail } from './CollectionsRail'
+import { MapPerf } from './MapPerf'
 import { OrganizerMap, type ColourMode } from './OrganizerMap'
 import { MapPostPanel } from './MapPostPanel'
 
@@ -444,6 +445,7 @@ export function LibraryMap(): React.JSX.Element {
           </button>
         </form>
       ) : null}
+      <MapPerf />
       <MapPostPanel
         postId={panelPostId}
         onClose={() => setPanelPostId(null)}
