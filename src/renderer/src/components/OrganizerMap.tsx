@@ -245,7 +245,19 @@ export function OrganizerMap({
   const clickedRef = useRef<OrganizerMapPoint | null>(null)
   const pathCache = useRef<{
     key: string
-    paths: Map<string, { path: Path2D; tone: string; group: string | null }>
+    paths: Map<
+      string,
+      {
+        path: Path2D
+        tone: string
+        group: string | null
+        /** Emprise du paquet, en coordonnées de carte, pour l'écarter quand il est hors cadre. */
+        left: number
+        top: number
+        right: number
+        bottom: number
+      }
+    >
   }>({ key: '', paths: new Map() })
   /** La toile et les points déjà peints, l'échelle à laquelle ils l'ont été, et la zone de
    *  la carte qu'ils couvrent — en coordonnées de cette échelle. */
@@ -645,7 +657,18 @@ export function OrganizerMap({
          qu'une fois pour toute la session. */
       const key = [landing.toFixed(3), colourMode, [...includedGroups].sort().join(',')].join(':')
       if (pathCache.current.key !== key) {
-        const built = new Map<string, { path: Path2D; tone: string; group: string | null }>()
+        const built = new Map<
+          string,
+          {
+            path: Path2D
+            tone: string
+            group: string | null
+            left: number
+            top: number
+            right: number
+            bottom: number
+          }
+        >()
         /* L'atterrissage tire les points depuis le centre ; on garde le même adoucissement,
            mais en coordonnées de carte, pour que les courbes soient indépendantes du zoom. */
         const eased = 1 - Math.pow(1 - landing, 3)
@@ -675,12 +698,36 @@ export function OrganizerMap({
           /* Un chemin par couple groupe/teinte. La teinte seule suffirait à peindre, mais pas
              à éclairer un amas au survol : dans les modes autres que « par groupe », vingt
              amas partagent la même couleur. */
-          const bucket = `${shared ?? ''}|${tone}`
+          /* Un paquet par tuile, en plus de la couleur.
+             Le tracé des cent trente mille arêtes est le coût qui reste — la construction, elle,
+             ne se refait plus. Zoomé, l'écran n'en montre qu'une poignée, mais on les traçait
+             toutes : le canvas les écartait une à une, ce qui coûte presque autant que de les
+             peindre. Découpées en tuiles, on n'appelle `stroke` que sur les paquets qui touchent
+             le cadre. Huit par côté : assez fin pour que le zoom en écarte l'essentiel, assez
+             large pour que le nombre d'appels reste petit une fois dézoomé. */
+          const TILES = 8
+          const tileX = Math.min(TILES - 1, Math.max(0, Math.floor(((x1 + x2) / 2) * TILES)))
+          const tileY = Math.min(TILES - 1, Math.max(0, Math.floor(((y1 + y2) / 2) * TILES)))
+          const bucket = `${tileX}:${tileY}|${shared ?? ''}|${tone}`
           let entry = built.get(bucket)
           if (!entry) {
-            entry = { path: new Path2D(), tone, group: shared }
+            entry = {
+              path: new Path2D(),
+              tone,
+              group: shared,
+              left: Infinity,
+              top: Infinity,
+              right: -Infinity,
+              bottom: -Infinity
+            }
             built.set(bucket, entry)
           }
+          /* L'emprise réelle du paquet, et non celle de la tuile : une arête déborde de la
+             sienne, et l'écarter sur la tuile ferait clignoter des fils au bord du cadre. */
+          entry.left = Math.min(entry.left, x1, x2)
+          entry.top = Math.min(entry.top, y1, y2)
+          entry.right = Math.max(entry.right, x1, x2)
+          entry.bottom = Math.max(entry.bottom, y1, y2)
           const path = entry.path
           path.moveTo(x1, y1)
           path.quadraticCurveTo(
@@ -698,7 +745,23 @@ export function OrganizerMap({
       target.save()
       target.translate(originX, originY)
       target.scale(span, span)
-      for (const { path, tone } of pathCache.current.paths.values()) {
+      /* Le cadre, ramené en coordonnées de carte. La marge absorbe le débord du halo, qui est
+         large : un fil juste hors cadre y projette encore de la lueur. */
+      const slack = (core * WEB.bloomWidth) / span + 0.01
+      const seenLeft = (-originX - view.x) / span - slack
+      const seenTop = (-originY - view.y) / span - slack
+      const seenRight = (width - originX - view.x) / span + slack
+      const seenBottom = (height - originY - view.y) / span + slack
+      for (const entry of pathCache.current.paths.values()) {
+        const { path, tone } = entry
+        if (
+          entry.right < seenLeft ||
+          entry.left > seenRight ||
+          entry.bottom < seenTop ||
+          entry.top > seenBottom
+        ) {
+          continue
+        }
         target.strokeStyle = tone
         if (bloom > 0.02) {
           target.lineWidth = (core * WEB.bloomWidth) / span
