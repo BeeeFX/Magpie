@@ -66,6 +66,13 @@ export function LibraryMap(): React.JSX.Element {
     [data]
   )
 
+  /* Prévenir, jamais refuser. Une grande bibliothèque coûte du temps de projection, mais lui
+     interdire la carte serait pire : on annonce la durée et on laisse décider. Repère mesuré —
+     26 s pour 9 740 posts, et le coût monte en n·log n, ce qui donne l'ordre de grandeur sans
+     prétendre à la seconde près. */
+  const heavy = posts.length > 15_000
+  const estimate = Math.max(1, Math.round((26 * (posts.length / 9740) * Math.log2(Math.max(2, posts.length)) ) / Math.log2(9740) / 60))
+
   if (loading) {
     return (
       <div className="library-map__empty">
@@ -91,6 +98,11 @@ export function LibraryMap(): React.JSX.Element {
 
   return (
     <div className="library-map">
+      {heavy ? (
+        <p className="library-map__notice" role="status">
+          {t('map.heavy', { count: posts.length, minutes: estimate })}
+        </p>
+      ) : null}
       <OrganizerMap
         data={shown}
         colourMode="group"

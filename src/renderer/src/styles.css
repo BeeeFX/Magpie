@@ -2353,6 +2353,26 @@ h1, h2, h3 {
   height: auto;
 }
 
+/* Un avertissement, pas un refus : on annonce le coût et on laisse décider. */
+.library-map__notice {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: var(--pill);
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.library-map {
+  position: relative;
+}
+
 .library-map__empty {
   display: flex;
   flex-direction: column;

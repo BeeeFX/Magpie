@@ -281,6 +281,8 @@ const fr = {
   'map.emptyText':
     'Elle place vos posts par ressemblance, ce qui suppose de les avoir lus une fois. L’analyse tourne en local et se reprend là où elle s’arrête.',
   'map.emptyAction': 'Lancer l’analyse',
+  'map.heavy':
+    '{count} posts sur cette carte. Un recalcul complet prend environ {minutes} min — les nouveaux posts, eux, s’ajoutent sans rien déplacer.',
   'organizer.tabMap': 'Carte',
   'organizer.tabList': 'Liste · {count}',
   'organizer.edgeEdit': 'Modifier les frontières',
@@ -835,6 +837,8 @@ const en: Record<TranslationKey, string> = {
   'map.emptyText':
     'It places your posts by resemblance, which means reading them once. The analysis runs locally and resumes where it stopped.',
   'map.emptyAction': 'Run the analysis',
+  'map.heavy':
+    '{count} posts on this map. A full recompute takes about {minutes} min — new posts, on the other hand, are added without moving anything.',
   'organizer.tabMap': 'Map',
   'organizer.tabList': 'List · {count}',
   'organizer.edgeEdit': 'Edit boundaries',
