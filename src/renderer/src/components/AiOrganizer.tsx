@@ -13,7 +13,7 @@ import { redistributeOrganizerRoutes } from '@shared/organizer'
 import { magpie, magpieEvents } from '../bridge'
 import { displayName, formatDateTime } from '../format'
 import { useStore, useT } from '../store'
-import { IconChevronRight, IconClose } from './Icons'
+import { IconChevronRight, IconClock, IconClose, IconCollections } from './Icons'
 import { MapPostPanel } from './MapPostPanel'
 import { OrganizerMap, type ColourMode } from './OrganizerMap'
 import type { Vertex } from '../map-boundaries'
@@ -40,7 +40,18 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const autoOrganizeEnabled = useStore((state) => state.autoOrganizeEnabled)
   const stepsRunning = useStore((state) => state.stepsRunning)
   const [organizerProgress, setOrganizerProgress] = useState<OrganizerProgress | null>(null)
-  const [phase, setPhase] = useState<'intro' | 'loading' | 'review' | 'applying' | 'done'>('intro')
+  const [phase, setPhase] = useState<
+    'choose' | 'intro' | 'loading' | 'review' | 'applying' | 'done'
+  >('choose')
+  /**
+   * Rapide ou approfondi. Choisi à l'ouverture, retenu jusqu'à la fin.
+   *
+   * Ce n'est pas un réglage de plus : c'est la question qui commande tout le reste. Le rangement
+   * rapide ne lit ni les images ni le son — il va vite et se trompe davantage, et il s'arrête à
+   * une liste. L'approfondi lit tout, sur la machine, et c'est le seul qui produise de quoi
+   * dessiner la carte sémantique : d'où le bouton qui y mène quand il a fini.
+   */
+  const [depth, setDepth] = useState<'quick' | 'deep'>('deep')
   const [plan, setPlan] = useState<AiCollectionPlan | null>(null)
   const [suggestions, setSuggestions] = useState<EditableSuggestion[]>([])
   /** Dernière fusion, pour pouvoir la défaire. Une seule profondeur suffit : au-delà, on
@@ -57,6 +68,9 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
      une boîte de dialogue du système, avec son titre « magpie » et ses boutons OK / Cancel,
      est un corps étranger au milieu d'un écran soigné. */
   const [leaving, setLeaving] = useState(false)
+  const setStepChoices = useStore((state) => state.setStepChoices)
+  const setOrganizeMode = useStore((state) => state.setOrganizeMode)
+  const setGridMode = useStore((state) => state.setGridMode)
   const setStepsRunning = useStore((state) => state.setStepsRunning)
   const setStepStates = useStore((state) => state.setStepStates)
   const cancelSync = useStore((state) => state.cancelSync)
@@ -117,7 +131,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
     if (!open) return
     // Rouvrir pendant une préparation doit retrouver l'écran tel qu'il était, pas le vider.
     if (useStore.getState().stepsRunning) return
-    setPhase('intro')
+    setPhase('choose')
     setPlan(null)
     setSuggestions([])
     setLastMerge(null)
@@ -423,6 +437,9 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
       await loadSettings()
       await refresh()
       setLastApplication(await magpie.lastOrganizerApplication().catch(() => null))
+      /* Retenu seulement maintenant : le noter au lancement dirait que la carte est prête
+         alors que l'analyse vient de commencer. */
+      void setOrganizeMode(depth)
       setPhase('done')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -490,6 +507,56 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
         </header>
 
         <div className="modal__body ai-organizer__body">
+          {phase === 'choose' ? (
+            <div className="organizer-choose">
+              <h3>{t('organizer.chooseTitle')}</h3>
+              <p>{t('organizer.chooseText')}</p>
+              <div className="organizer-choose__cards">
+                {/* Deux cartes, pas une liste d'options : le choix est franc, et chacune dit ce
+                    qu'elle coûte *et* ce qu'elle vaut. Annoncer la vitesse sans annoncer la
+                    perte serait un mensonge par omission. */}
+                <button
+                  type="button"
+                  className="organizer-card"
+                  onClick={() => {
+                    /* Ni images ni transcription : c'est exactement ce qui fait la différence
+                       de durée, et de justesse. */
+                    setDepth('quick')
+                    setStepChoices(['sync', 'thumbnails'])
+                    setPhase('intro')
+                  }}
+                >
+                  <span className="organizer-card__icon" aria-hidden="true">
+                    <IconClock size={22} />
+                  </span>
+                  <strong>{t('organizer.quickTitle')}</strong>
+                  <em>{t('organizer.quickTime')}</em>
+                  <span className="organizer-card__text">{t('organizer.quickText')}</span>
+                  <span className="organizer-card__warn">{t('organizer.quickLoss')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="organizer-card organizer-card--deep"
+                  onClick={() => {
+                    setDepth('deep')
+                    setStepChoices(['sync', 'thumbnails', 'clips', 'images', 'transcribe'])
+                    setPhase('intro')
+                  }}
+                >
+                  <span className="organizer-card__icon" aria-hidden="true">
+                    <IconCollections size={22} />
+                  </span>
+                  <strong>{t('organizer.deepTitle')}</strong>
+                  <em>{t('organizer.deepTime')}</em>
+                  <span className="organizer-card__text">{t('organizer.deepText')}</span>
+                  <span className="organizer-card__good">{t('organizer.deepGain')}</span>
+                </button>
+              </div>
+              <small>{t('organizer.costNote')}</small>
+              {undoPanel()}
+            </div>
+          ) : null}
+
           {phase === 'intro' ? (
             <div className="organizer-intro">
               <div className="organizer-orbit" aria-hidden="true"><span /><span /><span /></div>
@@ -976,7 +1043,28 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
               {rememberChoices ? <p>{t('organizer.rememberDone')}</p> : null}
               {error ? <p className="organizer-error">{error}</p> : null}
               {undoPanel()}
-              <button type="button" className="btn btn--primary" onClick={onClose}>{t('organizer.close')}</button>
+              {/* La récompense du chemin long. La carte n'existe que parce que l'analyse
+                  approfondie a eu lieu : c'est le moment de la montrer, et le seul endroit où
+                  l'on sait qu'elle vient d'être méritée. */}
+              {depth === 'deep' ? (
+                <button
+                  type="button"
+                  className="btn btn--primary organizer-done__map"
+                  onClick={() => {
+                    setGridMode('map')
+                    onClose()
+                  }}
+                >
+                  {t('organizer.openMap')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={depth === 'deep' ? 'btn' : 'btn btn--primary'}
+                onClick={onClose}
+              >
+                {t('organizer.close')}
+              </button>
             </div>
           ) : null}
         </div>

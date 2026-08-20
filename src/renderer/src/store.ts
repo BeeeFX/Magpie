@@ -187,6 +187,7 @@ interface State {
   aiEndpoint: string
   autoTagEnabled: boolean
   autoOrganizeEnabled: boolean
+  organizeMode: 'quick' | 'deep' | null
   aiProgress: AiTagProgress | null
   onboardingDone: boolean
   /** Vrai tant que les réglages n'ont pas été lus : évite d'afficher la présentation
@@ -235,6 +236,7 @@ interface State {
   setSyncOnLaunch: (enabled: boolean) => Promise<void>
   setSyncSchedule: (schedule: SyncSchedule) => Promise<void>
   setAutoOrganizeEnabled: (enabled: boolean) => Promise<void>
+  setOrganizeMode: (mode: 'quick' | 'deep') => Promise<void>
   setAiSettings: (patch: Partial<Pick<State, 'aiProvider' | 'aiModel' | 'aiEndpoint' | 'autoTagEnabled'>>) => Promise<void>
   setAiProgress: (progress: AiTagProgress | null) => void
   finishOnboarding: () => Promise<void>
@@ -323,6 +325,7 @@ export const useStore = create<State>()(
       aiEndpoint: '',
       autoTagEnabled: false,
       autoOrganizeEnabled: false,
+      organizeMode: null,
       aiProgress: null,
       // Vrai par défaut, corrigé dès la lecture des réglages : mieux vaut afficher
       // brièvement l'application vide que de faire clignoter la présentation à chaque
@@ -549,6 +552,7 @@ export const useStore = create<State>()(
           aiEndpoint: settings.aiEndpoint,
           autoTagEnabled: settings.autoTagEnabled,
           autoOrganizeEnabled: settings.autoOrganizeEnabled,
+          organizeMode: settings.organizeMode,
           onboardingDone: settings.onboardingDone,
           settingsLoading: false
         })
@@ -636,6 +640,13 @@ export const useStore = create<State>()(
       setAutoOrganizeEnabled: async (autoOrganizeEnabled) => {
         set({ autoOrganizeEnabled })
         await magpie.setSettings({ autoOrganizeEnabled })
+      },
+
+      /* Écrit seulement quand un rangement est allé au bout. Le noter au lancement dirait que
+         la carte est prête alors que l'analyse vient à peine de commencer. */
+      setOrganizeMode: async (organizeMode) => {
+        set({ organizeMode })
+        await magpie.setSettings({ organizeMode })
       },
 
       setAiSettings: async (patch) => {

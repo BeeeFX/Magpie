@@ -7,7 +7,6 @@ import { useStore, useT } from '../store'
 import { IconCheck,
   IconChevronRight,
   IconClock,
-  IconCollections,
   IconImage,
   IconMic,
   IconPlus,
@@ -29,7 +28,6 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
   const accounts = useStore((s) => s.accounts)
   const startSync = useStore((s) => s.startSync)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setOrganizerOpen = useStore((s) => s.setOrganizerOpen)
   const autoOrganizeEnabled = useStore((s) => s.autoOrganizeEnabled)
   const setAutoOrganizeEnabled = useStore((s) => s.setAutoOrganizeEnabled)
   const setExportOpen = useStore((s) => s.setExportOpen)
@@ -51,14 +49,7 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
 
   return (
     <>
-      <button type="button" role="menuitem" onClick={run(() => setOrganizerOpen(true))}>
-        <IconCollections size={15} />
-        <span>
-          <strong>{t('actions.organize')}</strong>
-          <em>{t('actions.organizeHint')}</em>
-        </span>
-      </button>
-
+      {/* Ranger a son propre bouton dans la barre : il n'a plus à se cacher ici. */}
       {/* Ranger tout seul après chaque synchronisation. Sa place est ici, à côté de l'action
           qu'il automatise, plutôt que perdu dans les réglages : c'est en lançant un rangement
           qu'on se demande s'il faut le refaire à la main la prochaine fois. Avec des

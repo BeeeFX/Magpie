@@ -158,6 +158,17 @@ export interface Settings {
   autoTagEnabled: boolean
   /** Range les nouveaux contenus après chaque synchronisation selon les choix locaux mémorisés. */
   autoOrganizeEnabled: boolean
+  /**
+   * La dernière façon de ranger qui soit allée au bout.
+   *
+   * `null` = jamais rangé. `quick` = un rangement rapide, sans lire les images ni écouter les
+   * clips. `deep` = l'analyse complète, la seule qui donne de quoi dessiner la carte
+   * sémantique — d'où le verrou sur ce mode et non sur un simple drapeau « déjà lancé ».
+   *
+   * Sert deux fois : à savoir si la carte a de quoi s'afficher, et à refaire tout seul, après
+   * chaque synchronisation, le rangement qu'on avait choisi la dernière fois.
+   */
+  organizeMode: 'quick' | 'deep' | null
 }
 
 export interface CollectionInfo {

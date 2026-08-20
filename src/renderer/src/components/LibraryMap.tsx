@@ -58,6 +58,7 @@ export function LibraryMap(): React.JSX.Element {
   const t = useT()
   const query = useStore((state) => state.query)
   const setOrganizerOpen = useStore((state) => state.setOrganizerOpen)
+  const organizeMode = useStore((state) => state.organizeMode)
   const [data, setData] = useState<OrganizerMapData | null>(null)
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
@@ -241,6 +242,29 @@ export function LibraryMap(): React.JSX.Element {
     1,
     Math.round((26 * (count / 9740) * Math.log2(Math.max(2, count))) / Math.log2(9740) / 60)
   )
+
+  /**
+   * La carte demande l'analyse approfondie, et le dit avant de charger quoi que ce soit.
+   *
+   * Le rangement rapide ne lit ni les images ni le son : il ne produit pas la matière dont la
+   * projection a besoin. Ouvrir cet onglet aurait donc lancé une analyse complète à l'insu de
+   * la personne — une heure de calcul pour avoir cliqué sur un onglet. Un verrou qui explique et
+   * qui propose vaut mieux qu'une attente qu'on n'a pas demandée.
+   *
+   * Le fond est un décor, pas des données : un semis de points qui suggère ce qui viendra, sans
+   * prétendre montrer une carte qui n'existe pas encore.
+   */
+  if (organizeMode !== 'deep') {
+    return (
+      <div className="library-map__empty library-map__locked">
+        <h2>{t('map.lockedTitle')}</h2>
+        <p>{t('map.lockedText')}</p>
+        <button type="button" className="btn btn--primary" onClick={() => setOrganizerOpen(true)}>
+          {t('map.lockedAction')}
+        </button>
+      </div>
+    )
+  }
 
   if (loading) {
     const label = progress?.running ? STAGE_LABEL[progress.stage as keyof typeof STAGE_LABEL] : null

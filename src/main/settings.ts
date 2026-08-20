@@ -22,7 +22,8 @@ const DEFAULTS: Settings = {
   aiModel: 'gpt-4.1-mini',
   aiEndpoint: '',
   autoTagEnabled: false,
-  autoOrganizeEnabled: false
+  autoOrganizeEnabled: false,
+  organizeMode: null
 }
 
 let cache: Settings | null = null
@@ -103,7 +104,9 @@ function sanitize(raw: unknown): Settings {
     // The cloud-LLM organizer is intentionally unavailable for now. Always
     // disable a value left behind by an older Magpie installation as well.
     autoTagEnabled: false,
-    autoOrganizeEnabled: value.autoOrganizeEnabled === true
+    autoOrganizeEnabled: value.autoOrganizeEnabled === true,
+    organizeMode:
+      value.organizeMode === 'quick' || value.organizeMode === 'deep' ? value.organizeMode : null
   }
 }
 

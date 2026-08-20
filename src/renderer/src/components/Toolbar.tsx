@@ -3,6 +3,7 @@ import type { PostKind, SortKey } from '@shared/types'
 import type { TranslationKey } from '../i18n'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Popover } from './Popover'
+import { OrganizeButton } from './OrganizeButton'
 import { SyncButton } from './SyncButton'
 import { Downloads } from './Downloads'
 import { magpie } from '../bridge'
@@ -146,6 +147,7 @@ export function Toolbar(): React.JSX.Element {
           <span>{t('bulk.select')}</span>
         </button>
         <SyncButton />
+        <OrganizeButton />
         {/* Un seul bouton pour demander un préchargement et pour voir où il en est. */}
         <Downloads />
         <div className="divider" />

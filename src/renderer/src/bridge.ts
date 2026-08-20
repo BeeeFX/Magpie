@@ -85,6 +85,8 @@ const PREVIEW_DEFAULTS: Settings = {
   aiEndpoint: '',
   autoTagEnabled: false,
   autoOrganizeEnabled: false,
+  /* L'aperçu montre la carte : il se présente donc comme une bibliothèque déjà analysée. */
+  organizeMode: 'deep',
   // L'aperçu sert à juger l'application, pas à rejouer l'accueil à chaque rechargement.
   onboardingDone: true
 }

@@ -6470,3 +6470,158 @@ html.window-is-moving .app *::after {
   color: var(--faint);
   overflow-wrap: anywhere;
 }
+
+/* Ranger, au même rang que synchroniser. Deux boutons côte à côte, pas un sous-menu. */
+.organize-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: var(--pill);
+  border: 1px solid var(--hairline);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 12.5px;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.organize-control:hover {
+  background: var(--field-hover);
+}
+
+/**
+ * Le choix des deux chemins.
+ *
+ * Deux cartes franches plutôt qu'une liste d'options : le geste est un choix, pas un réglage.
+ * Chacune annonce ce qu'elle coûte **et** ce qu'elle vaut — dire la vitesse sans dire la perte
+ * serait un mensonge par omission.
+ */
+.organizer-choose {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.organizer-choose h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.organizer-choose > p {
+  margin: 0;
+  max-width: 52ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.organizer-choose__cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: 100%;
+  margin: 4px 0;
+}
+
+.organizer-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  background: var(--field);
+  color: var(--text);
+  text-align: left;
+  transition:
+    transform var(--fast) var(--spring),
+    border-color var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+
+.organizer-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  background: var(--field-hover);
+}
+
+.organizer-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 3px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.07);
+  color: var(--muted);
+}
+
+.organizer-card--deep .organizer-card__icon {
+  background: var(--accent-gradient, var(--accent));
+  color: #fff;
+}
+
+.organizer-card strong {
+  font-size: 15px;
+}
+
+.organizer-card em {
+  color: var(--faint);
+  font-size: 11.5px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.organizer-card__text {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Ce qu'on perd, et ce qu'on gagne. Les deux sont dits, et de la même façon. */
+.organizer-card__warn {
+  margin-top: 3px;
+  color: #fda4af;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.organizer-card__good {
+  margin-top: 3px;
+  color: #86efac;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.organizer-done__map {
+  margin-bottom: 6px;
+}
+
+/* Le verrou de la carte. Un semis décoratif derrière le message : il suggère ce qui viendra,
+   sans prétendre montrer une carte qui n'existe pas encore. */
+.library-map__locked {
+  position: relative;
+  isolation: isolate;
+}
+
+.library-map__locked::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.5;
+  background-image:
+    radial-gradient(circle at 22% 34%, rgb(167 139 250 / 0.5) 0 1.4px, transparent 1.6px),
+    radial-gradient(circle at 63% 21%, rgb(56 189 248 / 0.45) 0 1.2px, transparent 1.4px),
+    radial-gradient(circle at 78% 62%, rgb(251 113 133 / 0.4) 0 1.5px, transparent 1.7px),
+    radial-gradient(circle at 38% 74%, rgb(74 222 128 / 0.4) 0 1.2px, transparent 1.4px),
+    radial-gradient(circle at 52% 47%, rgb(255 217 61 / 0.35) 0 1.3px, transparent 1.5px);
+  background-size: 190px 170px, 230px 210px, 170px 250px, 260px 190px, 150px 160px;
+  mask-image: radial-gradient(ellipse at center, #000 20%, transparent 72%);
+}
