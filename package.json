@@ -35,7 +35,8 @@
     "bench:recipes": "tsx --tsconfig tsconfig.node.json scripts/bench-recipes.mts",
     "bench:map-zoom": "tsx --tsconfig tsconfig.web.json scripts/bench-map-zoom.mts",
     "bench:map-islands": "tsx --tsconfig tsconfig.node.json scripts/bench-map-islands.mts",
-    "check:boundaries": "tsx --tsconfig tsconfig.node.json scripts/check-boundaries.ts"
+    "check:boundaries": "tsx --tsconfig tsconfig.node.json scripts/check-boundaries.ts",
+    "check:cells": "tsx --tsconfig tsconfig.node.json scripts/check-cells.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

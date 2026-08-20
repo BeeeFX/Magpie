@@ -30,6 +30,9 @@
     "src/renderer/src/map-coverage.ts",
     // Même cas encore : les contours de collections sont de la géométrie pure, vérifiée par
     // `scripts/check-boundaries.ts`.
-    "src/renderer/src/map-boundaries.ts"
+    "src/renderer/src/map-boundaries.ts",
+    // Idem : le maillage des cellules est de la géométrie pure, vérifiée par
+    // `scripts/check-cells.ts`.
+    "src/renderer/src/map-cells.ts"
   ]
 }
