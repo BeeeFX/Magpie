@@ -2,18 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { OrganizerMap as MapData, OrganizerMapPoint } from '@shared/types'
 import { useT } from '../store'
 import { neededArea, paintArea, stillCovers, ZOOM_HEADROOM } from '../map-coverage'
-import {
-  carveOutside,
-  fieldFromMask,
-  insideRing,
-  isoContour,
-  ownershipMasks,
-  ringToCurves,
-  simplifyRing,
-  stitchRings,
-  MASK_LEVEL,
-  type Vertex
-} from '../map-boundaries'
+import { buildCellMesh, cellRing, collectionSeeds } from '../map-cells'
+import { carveOutside, insideRing, ringToCurves, type Vertex } from '../map-boundaries'
 
 /**
  * La carte sémantique.
@@ -54,29 +44,6 @@ const MAX_SCALE = 60
 /** Part de l'image effacée pour les groupes qu'on ne regarde pas. Assez pour qu'ils s'éteignent,
  *  pas au point de perdre le contexte : on doit encore voir *où* le groupe se situe. */
 const FOCUS_FADE = 0.86
-/**
- * Écart toléré en simplifiant un contour, en unités de carte.
- *
- * C'est ce réglage qui donne aux régions leur allure. Les carrés marchants rendent un sommet
- * par case traversée — trois cents pour une région — et une région à trois cents sommets
- * ondule : elle ressemble à une bulle, pas à une cellule. Simplifier redresse les parois et
- * marque les jonctions, ce qui est l'aspect qu'on cherche : une mousse, des cloisons partagées.
- *
- * Balayé sur quatre régions voisines — « contenus » est la part des posts qui restent dans leur
- * propre région, la seule chose qu'on ne peut pas se permettre de perdre :
- *
- *   0,004 — 26 sommets par région, 97,6 % contenus · ondule
- *   0,008 — 16 sommets, 98,0 %
- *   0,012 — 13 sommets, 97,7 %   ← retenu, les parois se lisent droites
- *   0,020 —  9 sommets, 96,5 %
- *   0,050 —  7 sommets, 96,5 %
- *
- * Simplifier trois fois plus qu'avant ne coûte rien en justesse — 97,7 contre 97,6 — et c'est
- * ce qui fait passer d'une bulle à une cellule. Au-delà, on commence à rogner les coins et à
- * perdre un post sur trente.
- */
-const RING_TOLERANCE = 0.006
-
 /**
  * Rondeur des jonctions entre deux parois.
  *
@@ -350,25 +317,28 @@ export function OrganizerMap({
       if (list) list.push({ x: point.x, y: point.y })
       else members.set(point.group, [{ x: point.x, y: point.y }])
     }
-    /* Les régions se découpent les unes contre les autres, jamais chacune dans son coin :
-       les collections s'interpénètrent, et seuiller séparément faisait revendiquer presque
-       toute la carte à chacune — vingt contours superposés, illisibles. */
-    const owned = ownershipMasks(
-      [...members]
-        .filter(([, points]) => points.length >= 3)
-        .map(([group, points]) => ({ group, points }))
-    )
+    /* Un pavage, et non plus des contours calculés chacun dans son coin. La ligne de niveau
+       d'un champ de densité laissait des interstices — donc des posts dans aucune collection —
+       et une forme qui ondulait sans jamais se refermer sur sa voisine. Le maillage part d'un
+       Voronoï des foyers de chaque collection : la surface est couverte par construction, les
+       cellules ont des parois droites qui se rejoignent, et plusieurs germes par collection
+       lui donnent une cellule à chacun de ses endroits au lieu d'une seule à l'autre bout. */
+    const seeds = [...members]
+      .filter(([, points]) => points.length >= 3)
+      .flatMap(([group, points]) => collectionSeeds(points).map((at) => ({ group, at })))
+    const mesh = buildCellMesh(seeds)
     const next = new Map<string, Vertex[][]>()
-    for (const [group, mask] of owned) {
-      const stored = savedBoundaries.get(group)
-      if (stored && stored.length > 0) {
-        next.set(group, stored)
-        continue
-      }
-      const rings = stitchRings(isoContour(fieldFromMask(mask), MASK_LEVEL))
-        .map((ring) => simplifyRing(ring, RING_TOLERANCE))
-        .filter((ring) => ring.length >= 6)
-      if (rings.length > 0) next.set(group, rings)
+    for (const cell of mesh.cells) {
+      const ring = cellRing(mesh, cell)
+      if (ring.length < 3) continue
+      const rings = next.get(cell.group)
+      if (rings) rings.push(ring)
+      else next.set(cell.group, [ring])
+    }
+    /* Une frontière posée à la main l'emporte sur celle qu'on vient de calculer : c'est tout
+       l'intérêt de l'avoir tracée. */
+    for (const [group, stored] of savedBoundaries) {
+      if (stored.length > 0) next.set(group, stored)
     }
     setRegions(next)
   }, [data.points, savedBoundaries])
