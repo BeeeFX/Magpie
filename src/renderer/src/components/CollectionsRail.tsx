@@ -81,6 +81,14 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [merging, setMerging] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  /**
+   * Le rail est replié au départ.
+   *
+   * Il occupait le quart de la carte en permanence, pour un écran où l'on vient surtout
+   * *regarder*. Une poignée verticale suffit à dire qu'il est là, et la carte reprend sa
+   * place. Une fois ouvert il le reste — on n'édite pas une collection en trois secondes.
+   */
+  const [open, setOpen] = useState(false)
   const commitRef = useRef<number | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -243,7 +251,8 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
   const selectedInfo = collections.find((entry) => entry.id === selected) ?? null
 
   return (
-    <aside className="rail" aria-label={t('collections.title')}>
+    <div className={`rail-dock${open ? ' is-open' : ''}`}>
+    <aside className="rail" aria-label={t('collections.title')} aria-hidden={!open}>
       <header className="rail__head">
         <h2>{t('collections.title')}</h2>
         {selected !== null ? (
@@ -507,5 +516,22 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
         })}
       </ul>
     </aside>
+      {/* La poignée. Après le rail dans le DOM, donc à sa droite : replier translate l'ensemble
+          vers la gauche de la largeur du rail, et c'est la poignée qui vient se poser au bord.
+          Une seule transformation, rien à réagencer — et la carte, qui n'est pas dans ce
+          conteneur, ne bouge pas d'un pixel. */}
+      <button
+        type="button"
+        className="rail-dock__handle"
+        aria-expanded={open}
+        aria-label={t(open ? 'collections.hide' : 'collections.show')}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="rail-dock__label">{t('collections.title')}</span>
+        {collections.length > 0 ? (
+          <span className="rail-dock__badge">{collections.length}</span>
+        ) : null}
+      </button>
+    </div>
   )
 }

@@ -5,7 +5,6 @@ import {
   REFERENCE_FRAME,
   WEB_TARGET_LOAD,
   webLoad,
-  webResolution,
   webTuning
 } from '../src/renderer/src/map-render'
 
@@ -104,30 +103,34 @@ console.log('\nL’enveloppe de coût')
   /* Le coût d'un tracé, c'est la longueur de courbe à rasteriser : trois passes dont deux
      halos larges, sur des arêtes qui mesurent `LINK_RADIUS × empan` pixels. Il grandit donc
      avec l'empan — et c'est pour cela que la même carte gelait une seconde en plein écran là
-     où elle coûtait le quart dans la bande de l'organisateur. */
+     où elle coûtait le quart dans la bande de l'organisateur.
+
+     Ce coût ne se paie plus en netteté. Il a été payé un temps en résolution — la toile peinte
+     dans un calque plus petit dès que la vue coûtait cher — et c'était le mauvais remède : la
+     charge est maximale précisément une fois dézoomé, donc la vue la plus regardée était la
+     plus floue. Il se paie désormais en **temps étalé**, six millisecondes par image dans un
+     second tampon, ce qui ne coûte aucun pixel. */
   const band = webLoad(LINKS, 920, 800, 460)
   const fullscreen = webLoad(LINKS, 2000, 1400, 1000)
+  assert(
+    Math.abs(band - WEB_TARGET_LOAD) < 1,
+    'la bande de l’organisateur est bien le repère'
+  )
   assert(
     fullscreen > band * 1.5,
     `le plein écran coûte plus cher (×${(fullscreen / band).toFixed(2)})`
   )
 
-  assert(webResolution(band) === 1, 'la bande de l’organisateur garde la pleine résolution')
-  assert(webResolution(band * 0.5) === 1, 'et tout ce qui coûte moins aussi')
-
-  /* L'invariant : au-delà du repère, la résolution ramène le coût à celui du repère. Le coût
-     suit le carré de la résolution, donc `charge × résolution²` doit rester constant. */
-  for (const factor of [1.5, 2, 4]) {
-    const load = WEB_TARGET_LOAD * factor
-    const resolution = webResolution(load)
-    assert(
-      Math.abs(load * resolution * resolution - WEB_TARGET_LOAD) < WEB_TARGET_LOAD * 0.01,
-      `à ×${factor} de charge, le coût reste celui du repère (résolution ${resolution.toFixed(3)})`
-    )
-  }
-  assert(webResolution(WEB_TARGET_LOAD * 1000) === 0.4, 'et le plancher tient à 0,4')
+  /* Zoomer *dans* la carte coûte moins cher que la regarder en entier : le découpage en tuiles
+     écarte ce qui tombe hors cadre. C'est contre-intuitif et c'est ce qui rend le zoom profond
+     confortable — si cette assertion tombe, c'est que le culling ne culle plus. */
+  const deep = webLoad(LINKS, 20_000, 1400, 1000)
+  assert(
+    deep < fullscreen,
+    `zoomé, il y a moins à tracer (${Math.round(deep / 1e6)} Mpx contre ${Math.round(fullscreen / 1e6)})`
+  )
+  assert(webLoad(LINKS, 0, 1400, 1000) === 0, 'un empan nul ne coûte rien')
 }
-
 console.log('\nLe plafond d’arêtes')
 {
   assert(edgeKeep(LINKS) === 1, 'la bibliothèque de référence n’est pas échantillonnée')

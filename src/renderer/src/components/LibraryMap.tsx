@@ -6,7 +6,7 @@ import { displayName } from '../format'
 import { useStore, useT } from '../store'
 import { IconClose } from './Icons'
 import { CollectionsRail } from './CollectionsRail'
-import { OrganizerMap } from './OrganizerMap'
+import { OrganizerMap, type ColourMode } from './OrganizerMap'
 import { MapPostPanel } from './MapPostPanel'
 
 /**
@@ -64,6 +64,15 @@ export function LibraryMap(): React.JSX.Element {
   const [attempt, setAttempt] = useState(0)
   /** Le prochain clic pose une étiquette. Armé depuis le bouton, désarmé dès qu'on a posé. */
   const [placing, setPlacing] = useState(false)
+  /**
+   * Ce que la couleur raconte.
+   *
+   * La carte n'en disait qu'une chose — la collection — alors que les mêmes points ont plusieurs
+   * lectures : d'où ils viennent, ce qu'ils sont, comment ils sont arrivés. C'est le même nuage
+   * relu quatre fois, et c'est là que la carte devient un instrument plutôt qu'une image. La
+   * chaleur d'une collection, elle, passe devant dès qu'on en choisit une : on l'a demandée.
+   */
+  const [colourMode, setColourMode] = useState<ColourMode>('group')
   /**
    * La largeur du panneau, gardée ici pour survivre à sa fermeture.
    *
@@ -265,6 +274,23 @@ export function LibraryMap(): React.JSX.Element {
           À la place, ce qui manquait vraiment : de quoi nommer un endroit. Le geste existait
           — double-clic — et rien ne l'annonçait. */}
       <div className="library-map__tools">
+        {/* Quatre lectures du même nuage. Le groupe d'abord : c'est celle qu'on vient voir. */}
+        <div className="segmented segmented--quiet library-map__colours">
+          {(['group', 'platform', 'kind', 'source'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={colourMode === mode ? 'is-active' : ''}
+              onClick={() => setColourMode(mode)}
+            >
+              {t(
+                `organizer.colour${mode[0].toUpperCase()}${mode.slice(1)}` as Parameters<
+                  typeof t
+                >[0]
+              )}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           className={`btn library-map__label${placing ? ' is-active' : ''}`}
@@ -287,7 +313,7 @@ export function LibraryMap(): React.JSX.Element {
       <CollectionsRail onHeat={setHeat} />
       <OrganizerMap
         data={shown}
-        colourMode="group"
+        colourMode={colourMode}
         includedGroups={includedGroups}
         groupNames={groupNames}
         showLabels

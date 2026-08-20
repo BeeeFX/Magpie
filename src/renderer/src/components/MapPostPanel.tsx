@@ -56,6 +56,16 @@ export function MapPostPanel({
   const [post, setPost] = useState<Post | null>(null)
   const [missing, setMissing] = useState(false)
   const [dragging, setDragging] = useState(false)
+  /**
+   * L'image en pleine résolution, quand la plateforme veut bien la donner.
+   *
+   * Le panneau n'affichait que la vignette du cache — 480 pixels de large. Tant qu'il faisait
+   * trois cents pixels, personne ne le voyait ; à la moitié de l'écran, une vignette de 480 px
+   * occupe le quart de la place et le reste est du vide. Même escalade que `Detail` : la
+   * vignette d'abord, parce qu'elle est déjà sur le disque et s'affiche à l'instant, puis la
+   * vraie image dès que son URL revient.
+   */
+  const [fullImage, setFullImage] = useState<string | null>(null)
 
   useEffect(() => {
     if (!postId) return
@@ -78,6 +88,29 @@ export function MapPostPanel({
       cancelled = true
     }
   }, [postId])
+
+  const image = post?.media[0] ?? null
+  const isImage = image?.kind === 'image' || (image?.kind === 'video' && !image.videoUrl)
+
+  useEffect(() => {
+    if (!post || !image || !isImage) {
+      setFullImage(null)
+      return
+    }
+    let cancelled = false
+    setFullImage(image.thumbUrl)
+    void magpie
+      .getMediaPlaybackUrl(post.id, image.idx, 'image', 'auto')
+      .then((url) => {
+        if (!cancelled && url) setFullImage(url)
+      })
+      .catch(() => {
+        // La vignette reste : elle est petite, mais elle est là.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [post?.id, image?.idx, image?.thumbUrl, isImage])
 
   useEffect(() => {
     if (!postId) return
@@ -170,8 +203,13 @@ export function MapPostPanel({
                    c'est tout l'intérêt du panneau. */
                 onToggleFullscreen={() => Promise.resolve()}
               />
-            ) : media?.thumbUrl ? (
-              <img src={media.thumbUrl} alt={shown?.text ?? ''} />
+            ) : fullImage ?? media?.thumbUrl ? (
+              <img
+                src={fullImage ?? media?.thumbUrl ?? ''}
+                alt={shown?.text ?? ''}
+                /* Si la pleine résolution ne se charge pas, on retombe sur la vignette. */
+                onError={() => setFullImage(media?.thumbUrl ?? null)}
+              />
             ) : (
               <div className="map-panel__nomedia">{t('organizer.panelNoMedia')}</div>
             )}

@@ -289,6 +289,8 @@ const fr = {
   'map.nameSave': 'Poser',
   'collections.title': 'Collections',
   'collections.unselect': 'Ne plus regarder cette collection',
+  'collections.show': 'Ouvrir les collections',
+  'collections.hide': 'Replier les collections',
   'collections.describe': 'Décrivez une collection…',
   'collections.emptyText':
     'Une collection est une phrase. Écrivez-en une, ou partez des vingt-sept propositions — elles ne sont que des brouillons, à renommer et à élaguer.',
@@ -876,6 +878,8 @@ const en: Record<TranslationKey, string> = {
   'map.nameSave': 'Place',
   'collections.title': 'Collections',
   'collections.unselect': 'Stop looking at this collection',
+  'collections.show': 'Open collections',
+  'collections.hide': 'Collapse collections',
   'collections.describe': 'Describe a collection…',
   'collections.emptyText':
     'A collection is a phrase. Write one, or start from the twenty-seven suggestions — they are only drafts, to rename and prune.',

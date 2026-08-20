@@ -113,29 +113,18 @@ export function webLoad(links: number, span: number, width: number, height: numb
 }
 
 /**
- * Le coût qu'on s'autorise : celui du réglage d'origine.
+ * Le coût du réglage d'origine, comme repère de lecture.
  *
  * Repère : la bande de l'organisateur — 800 × 460 points, empan 920 — et les 133 810 arêtes de
- * la bibliothèque de référence. C'est là que la toile a été réglée à l'œil et jugée bonne, donc
- * c'est là qu'on plafonne. Toute vue plus large ne paiera pas plus cher qu'elle ; elle paiera la
- * même chose, en peignant la toile dans un calque de résolution moindre.
+ * la bibliothèque de référence. C'est là que la toile a été réglée à l'œil et jugée bonne.
+ *
+ * Il a servi un temps à *réduire la résolution* de la toile quand la vue coûtait plus cher, et
+ * c'était le mauvais remède : la charge est maximale précisément une fois dézoomé, donc la vue
+ * la plus regardée était la plus floue. Le coût se paie maintenant en **temps étalé** — six
+ * millisecondes par image dans un second tampon — et non en netteté. Le repère reste, pour dire
+ * ce qu'un tracé coûte.
  */
 export const WEB_TARGET_LOAD = webLoad(133_810, 920, 800, 460)
-
-/**
- * La résolution du calque de toile, de 1 (pleine) à 0,4.
- *
- * La toile est un voile : deux de ses trois passes sont des halos larges et très transparents,
- * donc la réduire puis la remettre à l'échelle ne se voit presque pas — alors que le coût, lui,
- * suit le carré. Les points, eux, restent à pleine résolution : ce sont eux qu'on lit.
- *
- * Le plancher à 0,4 existe pour que les fils nets ne deviennent jamais une bouillie, même sur
- * une bibliothèque de soixante mille posts.
- */
-export function webResolution(load: number): number {
-  if (load <= WEB_TARGET_LOAD) return 1
-  return Math.max(0.4, Math.sqrt(WEB_TARGET_LOAD / load))
-}
 
 /**
  * Plafond d'arêtes tracées, pour que le coût ne dépende pas de la taille de la bibliothèque.

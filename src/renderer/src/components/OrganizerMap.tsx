@@ -14,15 +14,7 @@ import {
   type CellMesh
 } from '../map-cells'
 import { insideRing, type Vertex } from '../map-boundaries'
-import {
-  edgeKeep,
-  edgeKept,
-  REFERENCE_FRAME,
-  WEB,
-  webLoad,
-  webResolution,
-  webTuning
-} from '../map-render'
+import { edgeKeep, edgeKept, REFERENCE_FRAME, WEB, webTuning } from '../map-render'
 
 /**
  * La carte sémantique.
@@ -360,7 +352,52 @@ export function OrganizerMap({
         bottom: number
       }
     >
-  }>({ key: '', paths: new Map() })
+    /**
+     * La même chose, en liste.
+     *
+     * Peindre la toile par tranches demande de reprendre à un indice précis d'une image à la
+     * suivante, et l'itérateur d'une `Map` ne se reprend pas. La liste est construite une fois
+     * avec la table ; elles ne divergent jamais.
+     */
+    list: {
+      path: Path2D
+      tone: string
+      group: string | null
+      left: number
+      top: number
+      right: number
+      bottom: number
+    }[]
+  }>({ key: '', paths: new Map(), list: [] })
+
+  /**
+   * Le tracé en cours, étalé sur plusieurs images.
+   *
+   * C'est le remède au gel. Le tampon était peint d'un bloc — cent trente mille courbes en
+   * trois passes, jusqu'à une seconde sur la carte plein écran — et la main ne revenait qu'après.
+   * On peint désormais six millisecondes par image dans un **second** tampon, en continuant
+   * d'afficher le premier étiré : le déplacement et le zoom ne s'interrompent jamais, et la
+   * toile se pose nette quelques images plus tard.
+   *
+   * Deux tampons, donc, qui échangent leurs rôles à chaque tracé terminé — celui qu'on montre
+   * ne peut pas être celui qu'on peint sans laisser voir un dessin à moitié fait.
+   */
+  const paintJob = useRef<{
+    key: string
+    scale: number
+    canvas: HTMLCanvasElement
+    paint: CanvasRenderingContext2D
+    left: number
+    top: number
+    width: number
+    height: number
+    /** Prochain paquet de courbes à tracer. */
+    at: number
+    /** Les points sont peints en dernier, une fois la toile finie. */
+    dotsDone: boolean
+  } | null>(null)
+  /** Le tampon libre, prêt à recevoir le prochain tracé. */
+  const spareBuffer = useRef<HTMLCanvasElement | null>(null)
   /** La toile et les points déjà peints, l'échelle à laquelle ils l'ont été, et la zone de
    *  la carte qu'ils couvrent — en coordonnées de cette échelle. */
   const webCache = useRef<{
@@ -376,13 +413,6 @@ export function OrganizerMap({
      crans s'enchaînent plus vite que ça. Pendant le geste on étire l'image déjà peinte —
      l'agrandissement d'une toile est une toile agrandie — et on ne repeint net qu'une fois
      la molette arrêtée. */
-  /**
-   * Le calque où la toile est peinte, à résolution réduite quand elle coûte trop cher.
-   *
-   * Gardé entre deux tracés : allouer un canevas de plusieurs mégapixels à chaque cran de
-   * molette suffirait à faire hoqueter le déclencheur de ramasse-miettes.
-   */
-  const webLayer = useRef<HTMLCanvasElement | null>(null)
   /**
    * Un affinage est-il réclamé ?
    *
@@ -807,7 +837,6 @@ export function OrganizerMap({
        `keep` ne dépend que du nombre d'arêtes, donc il est constant pour une bibliothèque
        donnée : il peut entrer dans la clé du tampon de courbes sans jamais l'invalider. */
     const keep = edgeKeep(links.length)
-    const load = webLoad(links.length * keep, span, width, height)
     const { closeness, edgeAlpha, core, bloom, dotRadius, glow } = webTuning(
       span,
       links.length * keep
@@ -849,8 +878,18 @@ export function OrganizerMap({
     /* La toile, en trois passes par couleur : deux tracés larges et très faibles qui font la
        lueur, puis le fil net. Un chemin par couleur et non par arête — cent trente mille
        appels à `stroke` était le vrai coût, pas les courbes. */
-    const paintWeb = (target: CanvasRenderingContext2D): void => {
-      if (edgeAlpha <= 0.002 || heat?.only) return
+    /**
+     * Trace la toile depuis un paquet donné, et rend la main à l'échéance.
+     *
+     * Rend l'indice atteint. `deadline` à `null` trace tout d'un coup — l'atterrissage en a
+     * besoin, ses coordonnées changeant à chaque image, il n'y a rien à reprendre.
+     */
+    const paintWebFrom = (
+      target: CanvasRenderingContext2D,
+      from: number,
+      deadline: number | null
+    ): number => {
+      if (edgeAlpha <= 0.002 || heat?.only) return Number.MAX_SAFE_INTEGER
       /* Ni l'échelle ni la zone visible n'entrent dans la clé, et c'est le remède au gel.
          Les courbes sont construites dans le repère de la carte — des coordonnées entre 0 et 1
          — puis mises à l'échelle au tracé. Elles ne dépendent donc plus du zoom, et chaque
@@ -960,7 +999,7 @@ export function OrganizerMap({
             y2
           )
         }
-        pathCache.current = { key, paths: built }
+        pathCache.current = { key, paths: built, list: [...built.values()] }
       }
       target.globalCompositeOperation = 'lighter'
       /* Les courbes vivent entre 0 et 1 : c'est la transformation qui les porte à l'échelle,
@@ -975,7 +1014,13 @@ export function OrganizerMap({
       const seenTop = (-originY - view.y) / span - slack
       const seenRight = (width - originX - view.x) / span + slack
       const seenBottom = (height - originY - view.y) / span + slack
-      for (const entry of pathCache.current.paths.values()) {
+      const entries = pathCache.current.list
+      let at = Math.max(0, from)
+      for (; at < entries.length; at += 1) {
+        const entry = entries[at]
+        /* L'échéance n'est consultée qu'un paquet sur trente-deux : `performance.now()` est
+           bon marché, mais pas au point d'être appelé cent trente mille fois. */
+        if (deadline !== null && (at & 31) === 31 && performance.now() >= deadline) break
         const { path, tone } = entry
         if (
           entry.right < seenLeft ||
@@ -1001,6 +1046,12 @@ export function OrganizerMap({
       target.restore()
       target.globalCompositeOperation = 'source-over'
       target.globalAlpha = 1
+      return at
+    }
+
+    /** Toute la toile d'un coup. Pour l'atterrissage, et pour le premier tracé. */
+    const paintWeb = (target: CanvasRenderingContext2D): void => {
+      paintWebFrom(target, 0, null)
     }
 
     /* Survoler éclaire l'amas désigné au lieu d'éteindre les autres : la toile complète doit
@@ -1192,49 +1243,88 @@ export function OrganizerMap({
         const area = paintArea(frame, content, budget, ZOOM_HEADROOM, WEB_MARGIN)
         const bufferWidth = Math.max(1, Math.ceil(area.right - area.left))
         const bufferHeight = Math.max(1, Math.ceil(area.bottom - area.top))
-        const buffer = painted.canvas ?? document.createElement('canvas')
-        buffer.width = Math.ceil(bufferWidth * ratio)
-        buffer.height = Math.ceil(bufferHeight * ratio)
-        const paint = buffer.getContext('2d')
-        if (!paint) return
-        paint.setTransform(ratio, 0, 0, ratio, 0, 0)
-        paint.clearRect(0, 0, bufferWidth, bufferHeight)
-        /* La toile dans un calque à part, dont la résolution baisse quand elle coûte trop cher.
-           Les points, eux, restent à pleine résolution dans le tampon : ce sont eux qu'on lit,
-           la toile n'est qu'un voile — et deux de ses trois passes sont des halos larges et
-           presque transparents, que réduire puis remettre à l'échelle ne se voit pas. */
-        const resolution = webResolution(load)
-        if (resolution < 1) {
-          const layer = webLayer.current ?? document.createElement('canvas')
-          webLayer.current = layer
-          layer.width = Math.max(1, Math.ceil(bufferWidth * ratio * resolution))
-          layer.height = Math.max(1, Math.ceil(bufferHeight * ratio * resolution))
-          const layerPaint = layer.getContext('2d')
-          if (layerPaint) {
-            layerPaint.setTransform(ratio * resolution, 0, 0, ratio * resolution, 0, 0)
-            layerPaint.clearRect(0, 0, bufferWidth, bufferHeight)
-            layerPaint.translate(-area.left, -area.top)
-            paintWeb(layerPaint)
-            paint.imageSmoothingQuality = 'high'
-            paint.drawImage(layer, 0, 0, bufferWidth, bufferHeight)
+
+        /* Rien à montrer en attendant : il faut peindre maintenant, sinon l'écran garderait un
+           trou. C'est le premier tracé, et les déplacements qui sortent de la zone peinte — que
+           la marge est justement là pour rendre rares. Partout ailleurs on étale. */
+        const mustFinishNow = painted.canvas === null
+
+        let job = paintJob.current
+        const stale =
+          job !== null &&
+          (job.key !== key ||
+            job.scale !== view.scale ||
+            job.width !== bufferWidth ||
+            job.height !== bufferHeight ||
+            Math.abs(job.left - area.left) > 0.5 ||
+            Math.abs(job.top - area.top) > 0.5)
+        if (stale) job = null
+
+        if (!job) {
+          /* Le tampon libre, jamais celui qu'on affiche : peindre dans l'image montrée
+             laisserait voir un dessin à moitié fait. */
+          const canvas =
+            spareBuffer.current && spareBuffer.current !== painted.canvas
+              ? spareBuffer.current
+              : document.createElement('canvas')
+          spareBuffer.current = canvas
+          canvas.width = Math.ceil(bufferWidth * ratio)
+          canvas.height = Math.ceil(bufferHeight * ratio)
+          const paint = canvas.getContext('2d')
+          if (!paint) return
+          paint.setTransform(ratio, 0, 0, ratio, 0, 0)
+          paint.clearRect(0, 0, bufferWidth, bufferHeight)
+          paint.translate(-area.left, -area.top)
+          job = {
+            key,
+            scale: view.scale,
+            canvas,
+            paint,
+            left: area.left,
+            top: area.top,
+            width: bufferWidth,
+            height: bufferHeight,
+            at: 0,
+            dotsDone: false
           }
-          paint.translate(-area.left, -area.top)
+          paintJob.current = job
+        }
+
+        /* Six millisecondes par image : de quoi avancer franchement en laissant respirer le
+           reste — les points, les étiquettes, et surtout les événements de la souris. */
+        const deadline = mustFinishNow ? null : performance.now() + 6
+        job.at = paintWebFrom(job.paint, job.at, deadline)
+        const webDone = job.at >= pathCache.current.list.length
+        if (webDone && !job.dotsDone) {
+          /* Les points en une fois : neuf mille pastilles groupées par teinte, c'est deux ou
+             trois millisecondes — le découpage n'y gagnerait rien et compliquerait la reprise. */
+          paintDots(job.paint, { left: job.left, top: job.top, right: job.left + job.width, bottom: job.top + job.height })
+          job.dotsDone = true
+        }
+
+        if (job.dotsDone) {
+          /* Terminé : les deux tampons échangent leurs rôles. L'ancien devient le brouillon
+             du prochain tracé, ce qui évite de rallouer plusieurs mégapixels par cran. */
+          spareBuffer.current = painted.canvas
+          webCache.current = {
+            key,
+            canvas: job.canvas,
+            scale: job.scale,
+            left: job.left,
+            top: job.top,
+            width: job.width,
+            height: job.height
+          }
+          paintJob.current = null
+          sharpenNow.current = false
         } else {
-          paint.translate(-area.left, -area.top)
-          paintWeb(paint)
+          /* Pas fini : on reprendra à l'image suivante, et l'écran montre en attendant la
+             recopie étirée du tracé précédent. */
+          window.requestAnimationFrame(() => drawRef.current())
         }
-        paintDots(paint, area)
-        webCache.current = {
-          key,
-          canvas: buffer,
-          scale: view.scale,
-          left: area.left,
-          top: area.top,
-          width: bufferWidth,
-          height: bufferHeight
-        }
+      } else {
+        sharpenNow.current = false
       }
-      sharpenNow.current = false
       const web = webCache.current
       if (web.canvas) {
         /* Recopie calée sur la grille des pixels physiques. À 125 % ou 150 % — le cas courant
