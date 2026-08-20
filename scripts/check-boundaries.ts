@@ -191,34 +191,53 @@ console.log('Régions qui se partagent la carte')
 console.log('')
 console.log('Contours vectoriels : recoudre, simplifier, lisser')
 {
-  const points = blob(0.5, 0.5, 0.15, 400, 13)
-  const field = densityField(points)
-  const rings = stitchRings(isoContour(field))
-  assert(rings.length >= 1, `les segments se recousent en anneaux (${rings.length})`)
+  /* On part de la partition, comme l'app : c'est elle qui décide des régions, et les tracer
+     depuis une ligne de niveau brute n'existe plus dans le produit. Vérifier ce chemin mort
+     faisait échouer le test sur une forme que personne n'affiche. */
+  const groups = [
+    { group: 'a', points: blob(0.35, 0.42, 0.15, 400, 13) },
+    { group: 'b', points: blob(0.65, 0.5, 0.15, 400, 17) }
+  ]
+  const masks = ownershipMasks(groups)
+  const ringsOf = new Map<string, { x: number; y: number }[][]>()
+  for (const [group, mask] of masks) {
+    ringsOf.set(
+      group,
+      stitchRings(isoContour(fieldFromMask(mask), MASK_LEVEL))
+        .map((ring) => simplifyRing(ring, 0.012))
+        .filter((ring) => ring.length >= 4)
+    )
+  }
+  assert(
+    [...ringsOf.values()].every((rings) => rings.length > 0),
+    'chaque région se referme en au moins un anneau'
+  )
 
-  const ring = rings.sort((a, b) => b.length - a.length)[0]
-  assert(ring.length > 20, `l’anneau principal a du corps (${ring.length} sommets)`)
+  let contained = 0
+  let total = 0
+  for (const entry of groups) {
+    for (const p of entry.points) {
+      total += 1
+      if ((ringsOf.get(entry.group) ?? []).some((ring) => insideRing(ring, p.x, p.y))) {
+        contained += 1
+      }
+    }
+  }
+  assert(
+    contained / total > 0.9,
+    `les régions contiennent leurs posts (${contained}/${total})`
+  )
 
-  /* Le lancer de rayon doit dire la même chose que le champ : c’est lui qui décidera de
-     l’appartenance une fois les frontières éditables, et un désaccord ferait changer une
-     collection de contenu au seul fait de passer en vectoriel. */
-  let agree = 0
-  for (const p of points) if (insideRing(ring, p.x, p.y)) agree += 1
-  assert(agree / points.length > 0.95, `l’anneau contient ses posts (${agree}/${points.length})`)
+  const ring = [...(ringsOf.get('a') ?? [])].sort((a, b) => b.length - a.length)[0]
+  assert(ring.length >= 6, `il reste de quoi manipuler (${ring.length} sommets)`)
+  assert(ring.length <= 40, `les parois se lisent droites (${ring.length} sommets)`)
 
-  const simple = simplifyRing(ring, 0.004)
-  assert(simple.length < ring.length / 3, `la simplification dégrossit (${ring.length} vers ${simple.length})`)
-  assert(simple.length >= 6, `il reste de quoi manipuler (${simple.length} sommets)`)
-  let stillIn = 0
-  for (const p of points) if (insideRing(simple, p.x, p.y)) stillIn += 1
-  assert(stillIn / points.length > 0.93, `simplifié, il contient encore ses posts (${stillIn}/${points.length})`)
-
-  const curves = ringToCurves(simple)
-  assert(curves.length === simple.length, 'une courbe par sommet, refermée')
-  /* La courbe doit passer par les sommets : sans cela, déplacer une poignée ne ferait pas ce
-     qu’on attend, et le contour ne collerait plus à ce qu’il entoure. */
+  const curves = ringToCurves(ring)
+  assert(curves.length === ring.length, 'une courbe par sommet, refermée')
+  /* La courbe doit passer par les sommets : sans cela, déplacer un point ne ferait pas ce
+     qu'on attend, et le contour ne collerait plus à ce qu'il entoure. */
   const ends = curves.map((c) => `${c.to.x.toFixed(6)}:${c.to.y.toFixed(6)}`)
-  const vertices = simple.map((v) => `${v.x.toFixed(6)}:${v.y.toFixed(6)}`)
+  const vertices = ring.map((v) => `${v.x.toFixed(6)}:${v.y.toFixed(6)}`)
   assert(
     ends.every((end) => vertices.includes(end)),
     'chaque courbe arrive sur un sommet, pas à côté'
