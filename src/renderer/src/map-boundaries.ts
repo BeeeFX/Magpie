@@ -26,18 +26,21 @@ export const FIELD_SIZE = 192
  * C'est lui qui décide de la souplesse du contour : trop petit, la collection se hache en
  * archipel autour de chaque post ; trop grand, tout se rejoint en une seule masse.
  *
- * Balayé sur la vraie bibliothèque, une fois les régions rendues exclusives — « attribué »
- * est la part de la carte qui revient à une collection :
+ * Balayé sur la vraie bibliothèque, la partition en place. « Attribué » est la part de la carte
+ * qui revient à une collection, et la dernière colonne compte celles qui n'obtiennent
+ * **aucun** territoire — le défaut le plus grave, puisqu'une collection sans région ne peut
+ * plus être ni vue ni retouchée :
  *
- *   rayon 12 — 7,2 % attribué
- *   rayon 16 — 10,0 %   ← retenu
- *   rayon 22 — 14,2 %
+ *   rayon 12 — 11,1 % attribué, 0 collection vide   ← retenu
+ *   rayon 16 — 14,3 %,          1 collection vide
+ *   rayon 22 — 19,1 %,          1 collection vide
  *
- * Seize donne aux régions de quoi se voir sans les faire déborder sur le vide. La marge de
- * litige, elle, ne change presque rien (6,4 % à 1,25 contre 7,2 % à 1,0) : c'est le rayon qui
- * commande, pas elle.
+ * Un rayon large donne des cellules plus grasses, mais les grosses collections finissent par
+ * étouffer les petites. Douze les laisse toutes exister, et couvre désormais plus que seize ne
+ * couvrait avant que le plancher ne soit levé — c'était le plancher qui creusait les trous, pas
+ * le rayon.
  */
-export const FIELD_RADIUS = 16
+export const FIELD_RADIUS = 12
 
 /**
  * Niveau du tracé, en unités de densité — donc en nombre de bosses qui se recouvrent.
@@ -56,6 +59,16 @@ export const FIELD_RADIUS = 16
  * 1,4 est le seul point qui écarte le bruit sans rogner les amas maigres.
  */
 export const FIELD_LEVEL = 1.4
+
+/**
+ * Plancher de la partition : au-dessous, plus aucune collection ne revendique la case.
+ *
+ * Presque nul, et à dessein. Il ne sert plus à décider qui gagne — la domination s'en charge —
+ * mais seulement à donner un bord à la carte : au-delà du rayon d'influence de tout post, il
+ * n'y a rien à attribuer. Le mettre à 1,4 laissait des trous partout entre les régions, et des
+ * milliers de posts hors de toute collection.
+ */
+export const PARTITION_FLOOR = 0.02
 
 export interface FieldPoint {
   x: number
@@ -295,14 +308,23 @@ export const MASK_LEVEL = 0.5
  * construction, et deux voisines partagent une frontière commune plutôt que deux traits qui
  * se croisent.
  *
- * `margin` écarte les cases disputées : sous ce rapport entre la première et la deuxième
- * densité, on préfère ne rien attribuer. C'est ce qui laisse une respiration entre deux
- * régions au lieu d'une frontière arbitraire au milieu d'un mélange.
+ * Les régions se **touchent**, et c'est le point important. Deux réglages produisaient des
+ * interstices : un plancher de densité, sous lequel une zone clairsemée n'appartenait à
+ * personne, et une marge de litige qui laissait vides les cases contestées. Les deux visaient
+ * des îlots nets, mais ils laissaient des milliers de posts dans aucune région — donc dans
+ * aucune collection, ce qui est le contraire du but. Une case revient donc à qui y domine, dès
+ * qu'une collection y pèse quoi que ce soit, et deux voisines partagent leur paroi comme les
+ * cellules d'une mousse.
+ *
+ * Le plancher ne sert plus qu'à border l'ensemble : au-delà du rayon d'influence de tout post,
+ * plus rien n'est attribué, et la carte garde un bord au lieu de s'étendre indéfiniment.
+ *
+ * `margin` reste réglable pour les bancs — à 1, aucune case n'est écartée.
  */
 export function ownershipMasks(
   groups: { group: string; points: FieldPoint[] }[],
-  level = FIELD_LEVEL,
-  margin = 1.1,
+  level = PARTITION_FLOOR,
+  margin = 1,
   size = FIELD_SIZE,
   radius = FIELD_RADIUS
 ): Map<string, Uint8Array> {

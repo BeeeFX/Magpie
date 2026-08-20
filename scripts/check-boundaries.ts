@@ -6,6 +6,7 @@ import {
   isoContour,
   maskFromField,
   ownershipMasks,
+  PARTITION_FLOOR,
   paintMask,
   ringToCurves,
   simplifyRing,
@@ -222,6 +223,47 @@ console.log('Contours vectoriels : recoudre, simplifier, lisser')
     ends.every((end) => vertices.includes(end)),
     'chaque courbe arrive sur un sommet, pas à côté'
   )
+}
+
+console.log('')
+console.log('Partition : les régions se touchent, et personne n’est laissé dehors')
+{
+  /* Le vrai critère, et celui qui manquait : un post hors de toute région est un post hors de
+     toute collection. Des îlots nets séparés par des interstices en laissaient des milliers. */
+  const groups = [
+    { group: 'a', points: blob(0.35, 0.4, 0.16, 300, 3) },
+    { group: 'b', points: blob(0.62, 0.42, 0.16, 300, 5) },
+    { group: 'c', points: blob(0.48, 0.68, 0.16, 300, 9) }
+  ]
+  const every = groups.flatMap((g) => g.points)
+
+  const masks = ownershipMasks(groups)
+  let orphans = 0
+  let doubled = 0
+  for (const p of every) {
+    let owners = 0
+    for (const mask of masks.values()) if (insideMask(mask, p.x, p.y)) owners += 1
+    if (owners === 0) orphans += 1
+    if (owners > 1) doubled += 1
+  }
+  assert(doubled === 0, 'aucun post dans deux régions à la fois')
+  assert(
+    orphans / every.length < 0.02,
+    `presque aucun post hors de toute région (${orphans}/${every.length})`
+  )
+
+  /* Les parois se touchent : entre deux amas voisins, la ligne médiane doit appartenir à
+     quelqu’un. Avec un plancher de densité elle restait vide, et c’est ce qui creusait les
+     interstices visibles à l’écran. */
+  const between = { x: 0.485, y: 0.41 }
+  let ownersBetween = 0
+  for (const mask of masks.values()) if (insideMask(mask, between.x, between.y)) ownersBetween += 1
+  assert(ownersBetween === 1, 'la frontière entre deux amas appartient à l’un des deux')
+
+  // Et le plancher garde son role : le grand vide au bord reste hors de toute region.
+  let ownersFar = 0
+  for (const mask of masks.values()) if (insideMask(mask, 0.02, 0.98)) ownersFar += 1
+  assert(ownersFar === 0, `le vide du bord reste vide (plancher ${PARTITION_FLOOR})`)
 }
 
 console.log('\nTout est vert.')

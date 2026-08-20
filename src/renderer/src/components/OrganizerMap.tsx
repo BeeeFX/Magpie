@@ -57,11 +57,35 @@ const FOCUS_FADE = 0.86
 /**
  * Écart toléré en simplifiant un contour, en unités de carte.
  *
- * Les carrés marchants rendent un sommet par case traversée — trois cents pour une région,
- * alignés par petits paquets. On ne pose pas de poignées sur trois cents sommets. À 0,004,
- * mesuré, il en reste une vingtaine et la forme contient toujours 100 % de ses posts.
+ * C'est ce réglage qui donne aux régions leur allure. Les carrés marchants rendent un sommet
+ * par case traversée — trois cents pour une région — et une région à trois cents sommets
+ * ondule : elle ressemble à une bulle, pas à une cellule. Simplifier redresse les parois et
+ * marque les jonctions, ce qui est l'aspect qu'on cherche : une mousse, des cloisons partagées.
+ *
+ * Balayé sur quatre régions voisines — « contenus » est la part des posts qui restent dans leur
+ * propre région, la seule chose qu'on ne peut pas se permettre de perdre :
+ *
+ *   0,004 — 26 sommets par région, 97,6 % contenus · ondule
+ *   0,008 — 16 sommets, 98,0 %
+ *   0,012 — 13 sommets, 97,7 %   ← retenu, les parois se lisent droites
+ *   0,020 —  9 sommets, 96,5 %
+ *   0,050 —  7 sommets, 96,5 %
+ *
+ * Simplifier trois fois plus qu'avant ne coûte rien en justesse — 97,7 contre 97,6 — et c'est
+ * ce qui fait passer d'une bulle à une cellule. Au-delà, on commence à rogner les coins et à
+ * perdre un post sur trente.
  */
-const RING_TOLERANCE = 0.004
+const RING_TOLERANCE = 0.012
+
+/**
+ * Rondeur des jonctions entre deux parois.
+ *
+ * 1/6 est la conversion exacte d'une spline en Bézier : la courbe passe alors « au large » des
+ * sommets et le contour redevient une bulle, ce que la simplification venait justement de
+ * corriger. Un sixième de cette valeur ne fait qu'adoucir l'angle — les parois se lisent
+ * droites, les jonctions ne piquent pas.
+ */
+const WALL_TENSION = 1 / 36
 /** Plafond du tampon, en pixels physiques. Sur un grand écran à 200 %, le cadre plus sa marge
  *  dépasserait les cent mégaoctets : on rogne alors la marge, pas la mémoire. */
 const WEB_BUDGET = 24_000_000
@@ -389,7 +413,7 @@ export function OrganizerMap({
       for (const ring of rings) {
         if (ring.length < 3) continue
         path.moveTo(ring[0].x, ring[0].y)
-        for (const curve of ringToCurves(ring)) {
+        for (const curve of ringToCurves(ring, WALL_TENSION)) {
           path.bezierCurveTo(curve.c1.x, curve.c1.y, curve.c2.x, curve.c2.y, curve.to.x, curve.to.y)
         }
         path.closePath()
