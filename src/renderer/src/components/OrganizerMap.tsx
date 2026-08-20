@@ -109,6 +109,14 @@ interface Props {
   onBoundaryChange(group: string, rings: Vertex[][], inside: string[]): void
   /** Quelle frontière est en cours de retouche, pour que l'écran puisse le dire. */
   onEditingChange?(group: string | null): void
+  /**
+   * Deux collections à réunir, désignées par la paroi qui les sépare.
+   *
+   * Effacer une paroi, c'est fusionner : le geste dit exactement ce qu'il fait, et il tombe
+   * naturellement sur l'objet déjà manipulable du maillage. La fusion elle-même passe par le
+   * même chemin que celle de la liste — annulable, et éprouvée.
+   */
+  onMergeGroups?(from: string, to: string): void
   onLasso(ids: string[]): void
   onHover(point: OrganizerMapPoint | null): void
   /** Clic sur un point : ouvrir le post qu'il représente. */
@@ -170,6 +178,7 @@ export function OrganizerMap({
   savedBoundaries,
   onBoundaryChange,
   onEditingChange,
+  onMergeGroups,
   onLasso,
   onHover,
   onOpen,
@@ -1519,6 +1528,45 @@ export function OrganizerMap({
     [cellMesh, mapPointAt, view.scale]
   )
 
+  /**
+   * La paroi sous le curseur, et les deux collections qu'elle sépare.
+   *
+   * On cherche le segment le plus proche, pas un sommet : une paroi se vise sur toute sa
+   * longueur, alors qu'un sommet est un point. Les deux gestes cohabitent donc — le sommet
+   * déforme, la paroi fusionne — et le sommet gagne quand on est dessus, puisqu'il est plus
+   * précis à atteindre.
+   */
+  const wallAt = useCallback(
+    (clientX: number, clientY: number): { from: string; to: string } | null => {
+      const canvas = canvasRef.current
+      if (!cellMesh || !canvas) return null
+      const place = mapPointAt(clientX, clientY)
+      if (!place) return null
+      const rect = canvas.getBoundingClientRect()
+      const size = Math.min(rect.width, rect.height)
+      const tolerance = 14 / (size * view.scale)
+      let best: { from: string; to: string } | null = null
+      let bestDistance = tolerance
+      for (const wall of meshWalls(cellMesh)) {
+        if (wall.groups.length < 2) continue
+        const a = cellMesh.vertices[wall.from]
+        const b = cellMesh.vertices[wall.to]
+        if (!a || !b) continue
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const length = dx * dx + dy * dy
+        const t = length > 0 ? Math.max(0, Math.min(1, ((place.x - a.x) * dx + (place.y - a.y) * dy) / length)) : 0
+        const distance = Math.hypot(place.x - (a.x + dx * t), place.y - (a.y + dy * t))
+        if (distance < bestDistance) {
+          bestDistance = distance
+          best = { from: wall.groups[1], to: wall.groups[0] }
+        }
+      }
+      return best
+    },
+    [cellMesh, mapPointAt, view.scale]
+  )
+
   /** Déplace le sommet saisi. Toutes les cellules qui le désignent suivent. */
   const moveVertex = useCallback(
     (clientX: number, clientY: number): void => {
@@ -1588,10 +1636,20 @@ export function OrganizerMap({
          point. C'est ce qui manquait : la retouche s'ouvrait par un double-clic dans une région
          et ne se voyait nulle part, donc personne ne la trouvait. */
       if (editMode) {
+        /* Le sommet d'abord : il est plus précis à viser, et c'est le geste qu'on fait le plus.
+           Puis la paroi, avec Alt ou le bouton droit — effacer une paroi réunit ses deux
+           collections, et il ne faut pas que ça se produise en voulant déformer. */
         const grabbed = meshVertexAt(event.clientX, event.clientY)
         if (grabbed !== null) {
           draggedVertexRef.current = grabbed
           return
+        }
+        if (event.altKey || event.button === 2) {
+          const wall = wallAt(event.clientX, event.clientY)
+          if (wall && wall.from !== wall.to) {
+            onMergeGroups?.(wall.from, wall.to)
+            return
+          }
         }
       }
       const overLabel = labelAt(event.clientX, event.clientY)

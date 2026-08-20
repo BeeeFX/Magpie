@@ -679,6 +679,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                       savedBoundaries={savedBoundaries}
                       onBoundaryChange={onBoundaryChange}
                       onEditingChange={setEditingBoundary}
+                      onMergeGroups={(from, to) => merge(from, to)}
                   includedGroups={
                         new Set(suggestions.filter((s) => s.included).map((s) => s.id))
                       }
@@ -711,6 +712,11 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                     />
                     <MapPostPanel postId={panelPostId} onClose={() => setPanelPostId(null)} />
                     </div>
+                    {editMode ? (
+                      <div className="organizer-lasso" role="status">
+                        <span>{t('organizer.edgeMergeHint')}</span>
+                      </div>
+                    ) : null}
                     {editingBoundary ? (
                       <div className="organizer-lasso" role="status">
                         <span>
