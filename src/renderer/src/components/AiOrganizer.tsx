@@ -103,6 +103,8 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [confirmRegen, setConfirmRegen] = useState(false)
   /** Mode édition des frontières. Explicite, parce qu'un geste qui déforme ne doit pas surprendre. */
   const [editMode, setEditMode] = useState(false)
+  /** Onglet ouvert : la carte, ou la liste des catégories. Le même état derrière les deux. */
+  const [tab, setTab] = useState<'map' | 'list'>('map')
   /** Le post ouvert dans le panneau latéral, à côté de la carte. */
   const [panelPostId, setPanelPostId] = useState<string | null>(null)
   const [lastApplication, setLastApplication] = useState<OrganizerApplicationSummary | null>(null)
@@ -570,14 +572,37 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                   <span className="switch__knob" />
                 </button>
               </div>
-              {/* La carte est la vue par défaut : voir pourquoi l'algorithme a groupé ce
-                  qu'il a groupé vaut mieux que le croire sur parole, et zéro collection
-                  n'avait jamais été créée depuis la seule liste. La liste reste à un clic
-                  pour renommer et cocher en série, ce qu'une carte fait mal. */}
-              {/* Pas d'onglets Carte / Liste : la carte est la vue, et les catégories se
-                  listent dessous pour renommer et cocher. Deux onglets pour deux moitiés du
-                  même écran faisaient chercher où était passé le reste. */}
+              {/* Deux onglets, et c'est un retour en arrière assumé.
+                  Tout tenait sur un seul écran : la carte, ses sept boutons, puis la liste des
+                  catégories dessous. À mesure que la carte gagnait des commandes — couleurs,
+                  noms, frontières, édition — la barre du haut est devenue un fourre-tout et la
+                  carte n'a plus eu de place. Les deux vues montrent le même état : cocher dans
+                  la liste change la carte, déplacer une frontière change la liste. La carte
+                  donne plus de latitude, la liste reste meilleure pour renommer et cocher en
+                  série — ce qu'une carte fait mal. */}
+              <div className="organizer-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'map'}
+                  className={tab === 'map' ? 'is-active' : ''}
+                  onClick={() => setTab('map')}
+                >
+                  {t('organizer.tabMap')}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === 'list'}
+                  className={tab === 'list' ? 'is-active' : ''}
+                  onClick={() => setTab('list')}
+                >
+                  {t('organizer.tabList', { count: suggestions.length })}
+                </button>
+              </div>
 
+              {tab === 'map' ? (
+              <>
               <div className="organizer-views">
                 <div className="segmented segmented--quiet">
                   {(['group', 'platform', 'kind', 'source'] as const).map((mode) => (
@@ -755,7 +780,10 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                   <p>{t('organizer.projecting')}</p>
                 </div>
               )}
+              </>
+              ) : null}
 
+              {tab === 'list' ? (
               <div className="organizer-list">
                 {suggestions.map((suggestion) => {
                   const effectivePostIds = suggestion.included
@@ -891,6 +919,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                   )
                 })}
               </div>
+              ) : null}
               {suggestions.length === 0 ? <p className="organizer-empty">{t('organizer.empty')}</p> : null}
               {error ? <p className="organizer-error">{error}</p> : null}
             </>

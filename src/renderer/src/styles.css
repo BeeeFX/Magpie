@@ -2335,6 +2335,35 @@ h1, h2, h3 {
    qu'on vient de cliquer. */
 /* --- Carte sémantique ------------------------------------------------------ */
 
+/* Les deux vues du même état. Un soulignement plutôt qu'un groupe segmenté : ce sont deux
+   moitiés d'écran, pas deux réglages, et le segmenté est déjà pris par les modes de couleur. */
+.organizer-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.organizer-tabs button {
+  padding: 8px 14px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--faint);
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+.organizer-tabs button:hover {
+  color: var(--text);
+}
+
+.organizer-tabs button.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent, #7c6cf0);
+}
+
 .organizer-views {
   display: flex;
   align-items: center;
