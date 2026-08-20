@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 16
+export const SCHEMA_VERSION = 17
 
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
@@ -148,6 +148,13 @@ CREATE TABLE IF NOT EXISTS post_image_embeddings (
  * de contrôle de la courbe qu'on trace.
  */
 export const MIGRATION_16_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS map_labels (
+  id         TEXT PRIMARY KEY,
+  text       TEXT NOT NULL,
+  anchors    TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS post_positions (
   post_id TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
   x       REAL NOT NULL,
@@ -158,6 +165,28 @@ CREATE TABLE IF NOT EXISTS collection_boundaries (
   name       TEXT PRIMARY KEY,
   shape      TEXT NOT NULL,
   updated_at INTEGER NOT NULL
+);
+`
+
+/**
+ * Les étiquettes que l'utilisateur pose lui-même sur la carte.
+ *
+ * Un titre visuel, pour nommer un endroit dense que l'analyse n'a pas nommé. La carte en a
+ * besoin : elle place les posts sans jamais dire ce qu'est cet amas lumineux entre deux
+ * collections.
+ *
+ * `anchors` retient **les posts qui l'entouraient**, pas une position. C'est la différence qui
+ * compte : une reprojection déplace les neuf mille points, et une étiquette figée en
+ * coordonnées désignerait alors autre chose — exactement le défaut qu'on a payé sur les
+ * frontières. Accrochée à ses voisins, elle se repose à leur nouveau centre de gravité et
+ * continue de nommer ce qu'elle nommait.
+ */
+export const MIGRATION_17_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS map_labels (
+  id         TEXT PRIMARY KEY,
+  text       TEXT NOT NULL,
+  anchors    TEXT NOT NULL,
+  created_at INTEGER NOT NULL
 );
 `
 

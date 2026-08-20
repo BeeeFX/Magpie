@@ -87,6 +87,11 @@ const api: MagpieApi = {
   clearOrganizerBoundaries: (): Promise<boolean> =>
     ipcRenderer.invoke('organizer:clearBoundaries'),
   hasFrozenMap: (): Promise<boolean> => ipcRenderer.invoke('organizer:hasFrozenMap'),
+  mapLabels: (): Promise<{ id: string; text: string; anchors: string[] }[]> =>
+    ipcRenderer.invoke('map:labels'),
+  saveMapLabel: (id: string, text: string, anchors: string[]): Promise<boolean> =>
+    ipcRenderer.invoke('map:saveLabel', id, text, anchors),
+  deleteMapLabel: (id: string): Promise<boolean> => ipcRenderer.invoke('map:deleteLabel', id),
   lastOrganizerApplication: (): Promise<OrganizerApplicationSummary | null> =>
     ipcRenderer.invoke('organizer:lastApplication'),
   undoOrganizerApplication: (): Promise<OrganizerUndoResult> =>

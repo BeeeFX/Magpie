@@ -103,6 +103,16 @@ interface Props {
   showBoundaries: boolean
   /** En édition, un appui saisit la paroi la plus proche au lieu de déplacer la carte. */
   editMode: boolean
+  /**
+   * Étiquettes posées à la main, accrochées à des posts.
+   *
+   * Elles ne portent pas de position : on la recalcule au centre de gravité de leurs ancres.
+   * C'est ce qui leur permet de survivre à une reprojection en continuant de nommer le même
+   * contenu — une étiquette figée en coordonnées désignerait le voisin.
+   */
+  ownLabels?: { id: string; text: string; anchors: string[] }[]
+  /** Double-clic dans le vide : l'appelant propose de nommer l'endroit. */
+  onPlaceLabel?(anchors: string[]): void
   /** Les frontières déjà rangées en base, par groupe. Vides si la carte n'est pas figée. */
   savedBoundaries: Map<string, Vertex[][]>
   /** Une frontière vient d'être déformée : à l'appelant de la ranger et de reclasser. */
@@ -175,6 +185,8 @@ export function OrganizerMap({
   showLabels,
   showBoundaries,
   editMode,
+  ownLabels,
+  onPlaceLabel,
   savedBoundaries,
   onBoundaryChange,
   onEditingChange,
@@ -459,6 +471,33 @@ export function OrganizerMap({
     }
     return centres
   }, [regions])
+
+  /**
+   * Où poser chaque étiquette personnelle : au centre de gravité de ses ancres.
+   *
+   * Recalculé à partir des points, jamais rangé : c'est ainsi qu'une étiquette suit le contenu
+   * qu'elle nomme quand la carte est reprojetée. Une étiquette figée en coordonnées désignerait
+   * le voisin dès la première reprojection — le défaut qu'on a payé sur les frontières.
+   */
+  const ownLabelSpots = useMemo(() => {
+    if (!ownLabels || ownLabels.length === 0) return []
+    const at = new Map(data.points.map((point) => [point.id, point]))
+    return ownLabels.flatMap((label) => {
+      let x = 0
+      let y = 0
+      let seen = 0
+      for (const anchor of label.anchors) {
+        const point = at.get(anchor)
+        if (!point) continue
+        x += point.x
+        y += point.y
+        seen += 1
+      }
+      // Toutes les ancres disparues : l'étiquette n'a plus rien à nommer, on ne la pose pas.
+      if (seen === 0) return []
+      return [{ id: label.id, text: label.text, x: x / seen, y: y / seen }]
+    })
+  }, [ownLabels, data.points])
 
   /**
    * Les chemins prêts à tracer, refaits seulement quand une région change.
@@ -1235,6 +1274,23 @@ export function OrganizerMap({
       context.fillText(name, centreX, y)
       context.letterSpacing = '0px'
     }
+    /* Les étiquettes de l'utilisateur, par-dessus. En italique et sans contour de groupe :
+       elles ne désignent pas une collection mais un endroit, et il faut que la différence se
+       voie sans avoir à réfléchir. */
+    for (const spot of ownLabelSpots) {
+      const [ux, uy] = at(spot)
+      const x = ux + view.x
+      const y = uy + view.y
+      if (x < -80 || y < -40 || x > width + 80 || y > height + 40) continue
+      const size = 13 * Math.min(1.5, Math.sqrt(view.scale))
+      context.font = `italic 500 ${size.toFixed(1)}px system-ui, sans-serif`
+      context.lineWidth = size / 5
+      context.strokeStyle = 'rgba(0, 0, 0, 0.85)'
+      context.strokeText(spot.text, x, y)
+      context.fillStyle = 'rgba(255, 255, 255, 0.82)'
+      context.fillText(spot.text, x, y)
+    }
+
     labelBoxes.current = drawn
     context.globalAlpha = 1
 
@@ -1277,6 +1333,7 @@ export function OrganizerMap({
     links,
     boundaryPaths,
     cellLabels,
+    ownLabelSpots,
     cellMesh,
     editMode,
     wallPath,
@@ -1802,7 +1859,25 @@ export function OrganizerMap({
              disparaissait à l'instant où l'on affichait ce qu'on voulait retoucher. La
              région, elle, est toujours là. */
           const group = regionAt(event.clientX, event.clientY)
-          if (!group) return
+          if (!group) {
+            /* Hors de toute région : on propose de nommer l'endroit. Les ancres sont les posts
+               les plus proches — c'est à eux que l'étiquette restera accrochée, donc c'est eux
+               qu'il faut retenir, pas la position du curseur. */
+            if (!onPlaceLabel) return
+            const place = mapPointAt(event.clientX, event.clientY)
+            if (!place) return
+            const near = data.points
+              .map((point) => ({
+                id: point.id,
+                d: Math.hypot(point.x - place.x, point.y - place.y)
+              }))
+              .sort((a, b) => a.d - b.d)
+              .slice(0, 24)
+              .filter((entry) => entry.d < 0.08)
+              .map((entry) => entry.id)
+            if (near.length >= 3) onPlaceLabel(near)
+            return
+          }
           setFocusGroup(group)
           setEditing((current) => (current === group ? null : group))
         }}

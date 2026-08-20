@@ -353,6 +353,9 @@ export interface MagpieApi {
   saveOrganizerBoundary(name: string, shape: string, postIds: string[]): Promise<number>
   clearOrganizerBoundaries(): Promise<boolean>
   hasFrozenMap(): Promise<boolean>
+  mapLabels(): Promise<{ id: string; text: string; anchors: string[] }[]>
+  saveMapLabel(id: string, text: string, anchors: string[]): Promise<boolean>
+  deleteMapLabel(id: string): Promise<boolean>
   lastOrganizerApplication(): Promise<OrganizerApplicationSummary | null>
   undoOrganizerApplication(): Promise<OrganizerUndoResult>
   copyToClipboard(text: string): Promise<void>

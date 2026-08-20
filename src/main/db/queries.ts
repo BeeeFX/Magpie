@@ -1948,3 +1948,49 @@ export function hasFrozenMap(): boolean {
     ((getDb().prepare('SELECT COUNT(*) n FROM post_positions').get() as { n: number }).n ?? 0) > 0
   )
 }
+
+/** Une étiquette posée à la main sur la carte, accrochée aux posts qui l'entouraient. */
+export interface MapLabel {
+  id: string
+  text: string
+  anchors: string[]
+}
+
+/**
+ * Range une étiquette.
+ *
+ * `anchors` plutôt qu'une position, et c'est tout l'intérêt : une reprojection déplace les neuf
+ * mille points, donc une étiquette figée en coordonnées finirait par désigner autre chose.
+ * Accrochée à ses voisins, elle les suit.
+ */
+export function saveMapLabel(label: MapLabel): void {
+  getDb()
+    .prepare(
+      'INSERT INTO map_labels (id, text, anchors, created_at) VALUES (?, ?, ?, ?)\n' +
+        '  ON CONFLICT(id) DO UPDATE SET text = excluded.text, anchors = excluded.anchors'
+    )
+    .run(label.id, label.text, JSON.stringify(label.anchors), Date.now())
+}
+
+export function mapLabels(): MapLabel[] {
+  return (
+    getDb().prepare('SELECT id, text, anchors FROM map_labels ORDER BY created_at').all() as {
+      id: string
+      text: string
+      anchors: string
+    }[]
+  ).flatMap((row) => {
+    try {
+      const anchors = JSON.parse(row.anchors) as string[]
+      return Array.isArray(anchors) ? [{ id: row.id, text: row.text, anchors }] : []
+    } catch {
+      // Une étiquette illisible ne doit pas emporter la carte : on la laisse de côté.
+      console.warn('[magpie] Étiquette de carte illisible, ignorée :', row.id)
+      return []
+    }
+  })
+}
+
+export function deleteMapLabel(id: string): void {
+  getDb().prepare('DELETE FROM map_labels WHERE id = ?').run(id)
+}

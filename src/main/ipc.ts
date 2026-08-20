@@ -26,6 +26,9 @@ import {
   addTag,
   addToCollection,
   collectionBoundaries,
+  mapLabels,
+  saveMapLabel,
+  deleteMapLabel,
   saveCollectionBoundary,
   clearFrozenMap,
   hasFrozenMap,
@@ -423,6 +426,15 @@ export function registerIpc({
     return true
   })
   ipcMain.handle('organizer:hasFrozenMap', () => hasFrozenMap())
+  ipcMain.handle('map:labels', () => mapLabels())
+  ipcMain.handle('map:saveLabel', (_event, id: string, text: string, anchors: string[]) => {
+    saveMapLabel({ id: String(id), text: String(text).slice(0, 120), anchors })
+    return true
+  })
+  ipcMain.handle('map:deleteLabel', (_event, id: string) => {
+    deleteMapLabel(String(id))
+    return true
+  })
   ipcMain.handle('organizer:lastApplication', () => lastOrganizerApplication())
   ipcMain.handle('organizer:undo', () => revertOrganizerApplication())
 

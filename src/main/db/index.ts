@@ -21,6 +21,7 @@ import {
   MIGRATION_14_SQL,
   MIGRATION_15_SQL,
   MIGRATION_16_SQL,
+  MIGRATION_17_SQL,
   SCHEMA_SQL,
   SCHEMA_VERSION
 } from './schema'
@@ -349,6 +350,9 @@ const MIGRATIONS: Record<number, (conn: Database.Database) => void> = {
   },
   16: (conn) => {
     conn.exec(MIGRATION_16_SQL)
+  },
+  17: (conn) => {
+    conn.exec(MIGRATION_17_SQL)
   }
 }
 

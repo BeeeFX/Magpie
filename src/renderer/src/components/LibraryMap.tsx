@@ -29,6 +29,14 @@ export function LibraryMap(): React.JSX.Element {
   const [data, setData] = useState<OrganizerMapData | null>(null)
   const [loading, setLoading] = useState(true)
   const [panelPostId, setPanelPostId] = useState<string | null>(null)
+  const [ownLabels, setOwnLabels] = useState<{ id: string; text: string; anchors: string[] }[]>([])
+  /** Étiquette en cours de saisie : ses ancres sont déjà choisies, il manque le mot. */
+  const [naming, setNaming] = useState<string[] | null>(null)
+  const [draft, setDraft] = useState('')
+
+  useEffect(() => {
+    void magpie.mapLabels().then(setOwnLabels).catch(() => {})
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -118,8 +126,45 @@ export function LibraryMap(): React.JSX.Element {
         /* Un clic ouvre le post dans le panneau, comme dans l'organisateur. Le détail complet
            reste accessible depuis la grille : ici on veut regarder sans quitter la carte. */
         onOpen={(point) => setPanelPostId(point.id)}
+        ownLabels={ownLabels}
+        onPlaceLabel={(anchors) => {
+          setNaming(anchors)
+          setDraft('')
+        }}
         detail={null}
       />
+      {/* Nommer un endroit. Un champ posé sur la carte plutôt qu'une boîte du système : on
+          reste devant ce qu'on nomme, et l'application garde son écran. */}
+      {naming ? (
+        <form
+          className="library-map__naming"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const text = draft.trim()
+            if (!text) {
+              setNaming(null)
+              return
+            }
+            const id = `label-${Date.now()}`
+            setOwnLabels((current) => [...current, { id, text, anchors: naming }])
+            void magpie.saveMapLabel(id, text, naming).catch(() => {})
+            setNaming(null)
+          }}
+        >
+          <input
+            autoFocus
+            value={draft}
+            placeholder={t('map.namePlaceholder')}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setNaming(null)
+            }}
+          />
+          <button type="submit" className="btn btn--primary">
+            {t('map.nameSave')}
+          </button>
+        </form>
+      ) : null}
       <MapPostPanel postId={panelPostId} onClose={() => setPanelPostId(null)} />
     </div>
   )

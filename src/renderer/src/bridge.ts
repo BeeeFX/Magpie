@@ -215,6 +215,9 @@ const previewApi: MagpieApi = {
   saveOrganizerBoundary: async (): Promise<number> => 0,
   clearOrganizerBoundaries: async (): Promise<boolean> => true,
   hasFrozenMap: async (): Promise<boolean> => false,
+  mapLabels: async (): Promise<{ id: string; text: string; anchors: string[] }[]> => [],
+  saveMapLabel: async (): Promise<boolean> => true,
+  deleteMapLabel: async (): Promise<boolean> => true,
   organizerMap: async (): Promise<OrganizerMap> => {
     const posts = await previewPosts().catch(() => [])
     const islands = [
