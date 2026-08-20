@@ -79,7 +79,8 @@ const api: MagpieApi = {
   stopImageReading: (): Promise<BackgroundState> => ipcRenderer.invoke('images:stop'),
   startTranscription: (): Promise<BackgroundState> => ipcRenderer.invoke('transcribe:start'),
   stopTranscription: (): Promise<BackgroundState> => ipcRenderer.invoke('transcribe:stop'),
-  organizerMap: (): Promise<OrganizerMap> => ipcRenderer.invoke('organizer:map'),
+  organizerMap: (layout?: string): Promise<OrganizerMap> =>
+    ipcRenderer.invoke('organizer:map', layout),
   organizerBoundaries: (): Promise<{ name: string; shape: string }[]> =>
     ipcRenderer.invoke('organizer:boundaries'),
   saveOrganizerBoundary: (name: string, shape: string, postIds: string[]): Promise<number> =>

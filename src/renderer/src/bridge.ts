@@ -218,7 +218,7 @@ const previewApi: MagpieApi = {
   mapLabels: async (): Promise<{ id: string; text: string; anchors: string[] }[]> => [],
   saveMapLabel: async (): Promise<boolean> => true,
   deleteMapLabel: async (): Promise<boolean> => true,
-  organizerMap: async (): Promise<OrganizerMap> => {
+  organizerMap: async (_layout?: string): Promise<OrganizerMap> => {
     const posts = await previewPosts().catch(() => [])
     const islands = [
       { group: 'music', name: 'Music', cx: 0.28, cy: 0.32, spread: 0.13 },

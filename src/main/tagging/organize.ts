@@ -28,7 +28,7 @@ import {
   type OrganizationItem
 } from '../db/queries'
 import { centreVectors, embedItems, embedTexts } from './embeddings'
-import { blend, encodeTopicPrompts, toVector, topicStandoff } from './vision'
+import { blend, encodeTopicPrompts, toVector, topicStandoff, MAP_LAYOUTS, type MapLayout } from './vision'
 import { propagateByImage } from './propagate'
 import { project, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
@@ -708,6 +708,13 @@ let currentProposal: Promise<AiCollectionPlan> | null = null
 /** Vecteurs recentrés de la dernière analyse. La carte les réutilise plutôt que de réencoder
  *  toute la bibliothèque pour afficher les mêmes points. */
 let lastSemanticVectors: Map<string, Float32Array> | null = null
+/**
+ * Les vecteurs de texte, avant mélange.
+ *
+ * Gardés à part parce qu'un autre regard sur la carte remélange les mêmes signaux avec
+ * d'autres poids : partir du mélange déjà fait ne permettrait pas de le refaire autrement.
+ */
+let lastRawText: Map<string, Float32Array> | null = null
 /** Recette de la derniere analyse : en changer doit refaire la carte, pas la reprendre. */
 /**
  * Place les posts contre une carte déjà figée.
@@ -790,6 +797,14 @@ export function freezeMap(): boolean {
 let lastPlan: AiCollectionPlan | null = null
 /** Dernière projection. Rouvrir l'organisateur ne doit pas refaire neuf secondes de calcul. */
 let lastProjection: ProjectedPoint[] | null = null
+/**
+ * Les projections des autres regards, rangées par layout.
+ *
+ * Une par layout, calculée à la demande puis gardée : sans ce cache, chaque bascule coûterait
+ * les vingt-six secondes de la projection, et personne n'explore en attendant une demi-minute
+ * par essai.
+ */
+const layoutProjections = new Map<string, ProjectedPoint[]>()
 
 export async function buildLocalCollectionPlan(
   items: OrganizationItem[],
@@ -947,6 +962,9 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
       const placed = blend(vectors, images)
       if (lastSemanticVectors?.size !== placed.size) lastProjection = null
       lastSemanticVectors = placed
+      lastRawText = vectors
+      // Les regards déjà calculés portent sur un autre nuage : ils ne valent plus rien.
+      layoutProjections.clear()
     }
   } catch (error) {
     console.warn('[magpie] Embeddings indisponibles, tri par mots-clés seul :', error)
@@ -977,12 +995,35 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
  * l'analyse, et n'y ajoute qu'une projection. Un point et sa catégorie racontent donc la même
  * chose, ce qui serait faux si les deux étaient calculés séparément.
  */
-export async function buildOrganizerMap(): Promise<OrganizerMap> {
+export async function buildOrganizerMap(layout?: MapLayout): Promise<OrganizerMap> {
   /* Le plan vient d'être calculé par l'écran qui nous appelle : le redemander relançait
      toute l'analyse une seconde fois — chargement des vignettes, regroupement, tout. */
   const plan = lastPlan ?? (await proposeVideoCollections())
   const vectors = lastSemanticVectors
   if (!vectors || vectors.size === 0) return { points: [], plan }
+
+  /* Un autre regard sur le même nuage : on remélange les mêmes vecteurs avec d'autres poids et
+     on projette à part. Rangé par layout — sans ce cache, chaque bascule coûterait les
+     vingt-six secondes de la projection, et on n'explore pas en attendant une demi-minute par
+     essai. La carte de l'organisateur, elle, n'a qu'un seul mélange : là il s'agit de classer,
+     et il y a une bonne réponse. */
+  if (layout && layout !== 'equilibre') {
+    const kept = layoutProjections.get(layout)
+    if (kept && kept.length === vectors.size) {
+      return { points: withGroups(kept, plan), plan }
+    }
+    setProgress({ stage: 'projecting', done: 0, total: 100, running: true })
+    try {
+      const remixed = blend(lastRawText ?? new Map(), postImageEmbeddings(), MAP_LAYOUTS[layout])
+      const points = await project(remixed, (done, total) =>
+        setProgress({ stage: 'projecting', done, total, running: true })
+      )
+      layoutProjections.set(layout, points)
+      return { points: withGroups(points, plan), plan }
+    } finally {
+      setProgress({ stage: 'idle', done: 0, total: 0, running: false })
+    }
+  }
 
   try {
     /* La carte figée passe avant tout calcul.
@@ -1019,15 +1060,22 @@ export async function buildOrganizerMap(): Promise<OrganizerMap> {
     setProgress({ stage: 'idle', done: 0, total: 0, running: false })
   }
 
+  return { plan, points: withGroups(lastProjection, plan) }
+}
+
+/**
+ * Habille des positions : la collection du post, sa vignette, sa plateforme.
+ *
+ * Sorti de `buildOrganizerMap` pour que les autres regards de la carte s'en servent aussi —
+ * ils ne changent que les positions, pas ce qu'un point représente.
+ */
+function withGroups(points: ProjectedPoint[], plan: AiCollectionPlan): OrganizerMap['points'] {
   const groupOf = new Map<string, string>()
   for (const suggestion of plan.suggestions) {
     for (const postId of suggestion.postIds) groupOf.set(postId, suggestion.id)
   }
   const details = new Map(organizationItems().map((item) => [item.id, item]))
-
-  return {
-    plan,
-    points: lastProjection.flatMap((point) => {
+  return points.flatMap((point) => {
       const item = details.get(point.id)
       if (!item) return []
       return [
@@ -1042,8 +1090,7 @@ export async function buildOrganizerMap(): Promise<OrganizerMap> {
           sources: item.sources
         }
       ]
-    })
-  }
+  })
 }
 
 export function proposeVideoCollections(): Promise<AiCollectionPlan> {

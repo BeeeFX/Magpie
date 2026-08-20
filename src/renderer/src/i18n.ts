@@ -285,6 +285,10 @@ const fr = {
   'map.emptyText':
     'Elle place vos posts par ressemblance, ce qui suppose de les avoir lus une fois. L’analyse tourne en local et se reprend là où elle s’arrête.',
   'map.emptyAction': 'Lancer l’analyse',
+  'map.layoutEquilibre': 'Équilibré',
+  'map.layoutSujet': 'Par sujet',
+  'map.layoutStyle': 'Par style',
+  'map.layoutTexte': 'Par texte',
   'map.namePlaceholder': 'Nommer cet endroit…',
   'map.nameSave': 'Poser',
   'map.heavy':
@@ -847,6 +851,10 @@ const en: Record<TranslationKey, string> = {
   'map.emptyText':
     'It places your posts by resemblance, which means reading them once. The analysis runs locally and resumes where it stopped.',
   'map.emptyAction': 'Run the analysis',
+  'map.layoutEquilibre': 'Balanced',
+  'map.layoutSujet': 'By subject',
+  'map.layoutStyle': 'By style',
+  'map.layoutTexte': 'By text',
   'map.namePlaceholder': 'Name this place…',
   'map.nameSave': 'Place',
   'map.heavy':

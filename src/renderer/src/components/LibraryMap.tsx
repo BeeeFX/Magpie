@@ -33,6 +33,8 @@ export function LibraryMap(): React.JSX.Element {
   /** Étiquette en cours de saisie : ses ancres sont déjà choisies, il manque le mot. */
   const [naming, setNaming] = useState<string[] | null>(null)
   const [draft, setDraft] = useState('')
+  /** Le regard courant. « Équilibré » est le meilleur à la mesure ; les autres servent à explorer. */
+  const [layout, setLayout] = useState<'equilibre' | 'sujet' | 'style' | 'texte'>('equilibre')
 
   useEffect(() => {
     void magpie.mapLabels().then(setOwnLabels).catch(() => {})
@@ -42,7 +44,7 @@ export function LibraryMap(): React.JSX.Element {
     let cancelled = false
     setLoading(true)
     void magpie
-      .organizerMap()
+      .organizerMap(layout)
       .then((next) => {
         if (!cancelled) setData(next)
       })
@@ -55,7 +57,7 @@ export function LibraryMap(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [layout])
 
   /* Les points que les filtres ont laissés. Le placement vient de la projection complète : on
      retire des points, on ne les redispose pas. */
@@ -106,6 +108,21 @@ export function LibraryMap(): React.JSX.Element {
 
   return (
     <div className="library-map">
+      {/* Quatre regards sur le même nuage. Le premier est celui que la mesure retient ; les
+          autres rapprochent par le sujet, par l'allure, ou par le texte seul. Chacun est
+          calculé une fois puis gardé, donc la bascule est immédiate ensuite. */}
+      <div className="library-map__layouts segmented segmented--quiet">
+        {(['equilibre', 'sujet', 'style', 'texte'] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={layout === id ? 'is-active' : ''}
+            onClick={() => setLayout(id)}
+          >
+            {t(`map.layout${id[0].toUpperCase()}${id.slice(1)}` as Parameters<typeof t>[0])}
+          </button>
+        ))}
+      </div>
       {heavy ? (
         <p className="library-map__notice" role="status">
           {t('map.heavy', { count: posts.length, minutes: estimate })}

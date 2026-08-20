@@ -348,7 +348,8 @@ export interface MagpieApi {
   stopImageReading(): Promise<BackgroundState>
   startTranscription(): Promise<BackgroundState>
   stopTranscription(): Promise<BackgroundState>
-  organizerMap(): Promise<OrganizerMap>
+  /** `layout` ne concerne que la carte de l'écran principal : l'organisateur n'en a qu'un. */
+  organizerMap(layout?: string): Promise<OrganizerMap>
   organizerBoundaries(): Promise<{ name: string; shape: string }[]>
   saveOrganizerBoundary(name: string, shape: string, postIds: string[]): Promise<number>
   clearOrganizerBoundaries(): Promise<boolean>

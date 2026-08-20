@@ -409,7 +409,9 @@ export function registerIpc({
     return backgroundTasks.current()
   })
 
-  ipcMain.handle('organizer:map', () => buildOrganizerMap())
+  ipcMain.handle('organizer:map', (_event, layout?: string) =>
+    buildOrganizerMap(layout as never)
+  )
   ipcMain.handle('organizer:boundaries', () => collectionBoundaries())
   ipcMain.handle(
     'organizer:saveBoundary',

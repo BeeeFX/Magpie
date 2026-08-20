@@ -2354,6 +2354,13 @@ h1, h2, h3 {
 }
 
 /* Un avertissement, pas un refus : on annonce le coût et on laisse décider. */
+.library-map__layouts {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+}
+
 .library-map__naming {
   position: absolute;
   bottom: 24px;

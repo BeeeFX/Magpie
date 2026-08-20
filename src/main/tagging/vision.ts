@@ -328,6 +328,31 @@ export async function readImages(options: {
 export const BLEND = { text: 0.6, structure: 0.1, meaning: 0.3 }
 
 /**
+ * Les regards possibles sur la carte de l'écran principal.
+ *
+ * À ne pas confondre avec `BLEND`, qui reste le seul mélange de la fenêtre d'organisation :
+ * là, il s'agit de **classer**, et il y a une bonne réponse — mesurée, 17,6 % de precision@10
+ * contre 14,0 pour « image ». Ici il s'agit d'**explorer**, et l'intention change d'un moment à
+ * l'autre : on cherche parfois ce qui parle du même sujet, parfois ce qui se ressemble
+ * graphiquement. Aucune mesure ne tranche entre deux intentions.
+ *
+ * Les autres poids sont dans `scripts/bench-recipes` avec leur classement, pour qu'on sache ce
+ * qu'on perd en précision quand on choisit un regard plutôt que le meilleur.
+ */
+export const MAP_LAYOUTS = {
+  /** Le meilleur à la mesure. Le défaut. */
+  equilibre: BLEND,
+  /** Ce que l'image représente prend la main. */
+  sujet: { text: 0.4, structure: 0, meaning: 0.6 },
+  /** L'allure : composition, palette, trait. Regroupe ce qui *se ressemble*. */
+  style: { text: 0.45, structure: 0.4, meaning: 0.15 },
+  /** Sans les images. Le comportement d'avant 0.18, utile comme point de comparaison. */
+  texte: { text: 1, structure: 0, meaning: 0 }
+} as const
+
+export type MapLayout = keyof typeof MAP_LAYOUTS
+
+/**
  * Ce que SigLIP sait faire et dont personne ne se servait : comparer une image à des mots.
  *
  * Le classement en thèmes ne voyait que le texte du post, parce que les thèmes sont des

@@ -215,6 +215,16 @@ export function OrganizerMap({
   const [view, setView] = useState({ scale: MIN_SCALE, x: 0, y: 0 })
   /** Cadrage initial : centrer la carte demande de connaître la taille du canevas. */
   const framedRef = useRef(false)
+  /**
+   * Les positions précédentes, et l'avancement du fondu vers les nouvelles.
+   *
+   * Changer de regard rejoue une projection entière : les neuf mille points sautent d'un
+   * endroit à l'autre, et on perd de vue ce qu'on suivait. En les faisant glisser, l'œil
+   * accompagne le déplacement et comprend ce qui s'est réorganisé — c'est le seul moment où
+   * animer la carte a du sens, tout le reste étant du cadrage.
+   */
+  const morphFrom = useRef<Map<string, { x: number; y: number }> | null>(null)
+  const morphStart = useRef(0)
   const [hovered, setHovered] = useState<OrganizerMapPoint | null>(null)
   /** Amas éclairé : celui du point survolé, ou celui dont on survole le nom. */
   const [litGroup, setLitGroup] = useState<string | null>(null)
@@ -597,6 +607,15 @@ export function OrganizerMap({
 
   /* Sans étiquettes, neuf mille points colorés ne sont qu'une tache : on voit qu'il y a des
      amas, jamais lesquels. C'est ce qui sépare une jolie image d'une carte. */
+  /* On retient les positions qu'on quitte, à chaque changement de jeu de points. */
+  useEffect(() => {
+    const previous = new Map(data.points.map((point) => [point.id, { x: point.x, y: point.y }]))
+    return () => {
+      morphFrom.current = previous
+      morphStart.current = performance.now()
+    }
+  }, [data.points])
+
   const islands = useMemo(() => {
     /* L'étiquette se pose sur la masse du groupe, pas sur la moyenne de ses points.
        Une catégorie éparpillée — « architecture » répartie en trois endroits — a une moyenne
@@ -688,9 +707,27 @@ export function OrganizerMap({
 
     /* Position sans le déplacement : c'est la seule chose qui change quand on fait glisser
        la carte, et la garder à part permet de peindre une fois puis de translater. */
-    const at = (point: { x: number; y: number }): [number, number] => {
+    /* Avancement du fondu entre deux regards, s'il y en a un en cours. */
+    const MORPH_MS = 650
+    const morph = morphFrom.current
+      ? Math.min(1, (performance.now() - morphStart.current) / MORPH_MS)
+      : 1
+    if (morph >= 1) morphFrom.current = null
+    const at = (point: { x: number; y: number; id?: string }): [number, number] => {
       // L'atterrissage tire les points depuis le centre : ils se posent au lieu de surgir.
       const eased = 1 - Math.pow(1 - landing, 3)
+      /* Pendant le fondu, le point est entre là où il était et là où il va. Adouci aux deux
+         bouts, sinon le nuage démarre et s'arrête d'un coup. */
+      if (morph < 1 && point.id && morph > 0) {
+        const was = morph < 1 ? morphFrom.current?.get(point.id) : undefined
+        if (was) {
+          const ease = morph < 0.5 ? 2 * morph * morph : 1 - 2 * (1 - morph) * (1 - morph)
+          point = {
+            x: was.x + (point.x - was.x) * ease,
+            y: was.y + (point.y - was.y) * ease
+          }
+        }
+      }
       const cx = 0.5 + (point.x - 0.5) * eased
       const cy = 0.5 + (point.y - 0.5) * eased
       return [
