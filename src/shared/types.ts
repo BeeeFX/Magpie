@@ -181,6 +181,18 @@ export interface CollectionHeat {
   size: number
 }
 
+/**
+ * Une collection, sa teinte, et les posts dont elle est la collection dominante.
+ *
+ * Une seule par post : un pixel n'a qu'une couleur, et un nom se pose au milieu des siens.
+ */
+export interface CollectionMembership {
+  id: number
+  name: string
+  color: string | null
+  postIds: string[]
+}
+
 export interface AddToCollectionResult {
   added: number
   /** Posts déjà présents dans la collection — voir SPEC.md §9 sur les doublons. */
@@ -419,6 +431,7 @@ export interface MagpieApi {
   createManualCollection(name: string, postIds: string[]): Promise<number>
   deleteCollection(collectionId: number): Promise<void>
   mergeCollections(from: number, into: number): Promise<void>
+  collectionMembership(): Promise<CollectionMembership[]>
   collectionKeywords(collectionId: number): Promise<{ word: string; weight: number }[]>
   addCollectionKeyword(collectionId: number, word: string): Promise<CollectionHeat | null>
   setCollectionKeywordWeight(

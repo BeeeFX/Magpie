@@ -78,6 +78,7 @@ import {
   createManual,
   heatOf,
   keywordsOf,
+  membership as collectionMembership,
   merge as mergeCollections,
   remove as removeCollection,
   removeKeyword,
@@ -465,6 +466,7 @@ export function registerIpc({
     mergeCollections(Number(from), Number(into))
   })
   ipcMain.handle('collections:seed', () => seedFromTopics())
+  ipcMain.handle('collections:membership', () => collectionMembership())
   ipcMain.handle('collections:contested', () => contested())
 
   ipcMain.handle('organizer:map', (_event, layout?: string) =>

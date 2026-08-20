@@ -425,6 +425,8 @@ export function OrganizerMap({
   const sharpenNow = useRef(false)
   const sharpenAsked = useRef(false)
   const [zooming, setZooming] = useState(false)
+  /** Le même état, lisible depuis une réponse différée qui ne voit pas le rendu courant. */
+  const zoomingRef = useRef(false)
   const zoomTimer = useRef(0)
 
   /* React attache ses écouteurs de molette en mode passif, où `preventDefault` est ignoré :
@@ -1057,23 +1059,36 @@ export function OrganizerMap({
     /* Survoler éclaire l'amas désigné au lieu d'éteindre les autres : la toile complète doit
        rester lisible en permanence, c'est tout son intérêt. Repeint par-dessus l'image en
        cache — repeindre le tampon entier pour un survol coûterait 220 ms par mouvement. */
-    const lightUp = (group: string, stretch = 1): void => {
+    const lightUp = (group: string): void => {
       if (edgeAlpha <= 0.002 || pathCache.current.key === '') return
       context.save()
-      context.translate(view.x, view.y)
+      /**
+       * Le repère de la carte, comme le tracé principal.
+       *
+       * Ces deux calques translataient du déplacement et rien de plus. C'était juste quand les
+       * courbes étaient construites en pixels d'écran ; depuis qu'elles vivent entre 0 et 1 —
+       * ce qui a supprimé leur reconstruction à chaque cran de molette — un tracé sans mise à
+       * l'échelle les écrase toutes dans un carré d'un pixel. Isoler un groupe éteignait donc
+       * la carte sans jamais rallumer le groupe : c'était le calque qu'on ne voyait pas.
+       *
+       * L'étirement du geste de zoom n'a plus à être appliqué : `span` suit déjà l'échelle
+       * courante, et la recopie étirée du fond montre la carte exactement là où cette
+       * transformation la met.
+       */
+      context.translate(originX + view.x, originY + view.y)
+      context.scale(span, span)
       /* Pendant un geste de zoom, le fond est une recopie *étirée* du tampon : aucun retracé
          n'a eu lieu, donc `pathCache` tient encore les courbes de l'échelle précédente. Les
          dessiner telles quelles les décalait du fond — c'était le calque qui glissait sous
          les points pendant qu'on zoomait. On leur applique le même étirement qu'à l'image. */
-      if (stretch !== 1) context.scale(stretch, stretch)
       context.globalCompositeOperation = 'lighter'
       for (const entry of pathCache.current.paths.values()) {
         if (entry.group !== group) continue
         context.strokeStyle = entry.tone
-        context.lineWidth = core * Math.max(1.5, WEB.bloomWidth / 2.3)
+        context.lineWidth = (core * Math.max(1.5, WEB.bloomWidth / 2.3)) / span
         context.globalAlpha = Math.min(0.5, edgeAlpha * 2.5)
         context.stroke(entry.path)
-        context.lineWidth = core
+        context.lineWidth = core / span
         context.globalAlpha = Math.min(0.75, edgeAlpha * 4.5)
         context.stroke(entry.path)
       }
@@ -1092,28 +1107,41 @@ export function OrganizerMap({
      * luminance qu'il avait. Passer par `lightUp` rendait le groupe sélectionné éclatant, si
      * bien qu'on ne le voyait plus tel qu'il est.
      */
-    const restoreGroup = (group: string, stretch = 1): void => {
+    const restoreGroup = (group: string): void => {
       if (edgeAlpha <= 0.002 || pathCache.current.key === '') return
       context.save()
-      context.translate(view.x, view.y)
+      /**
+       * Le repère de la carte, comme le tracé principal.
+       *
+       * Ces deux calques translataient du déplacement et rien de plus. C'était juste quand les
+       * courbes étaient construites en pixels d'écran ; depuis qu'elles vivent entre 0 et 1 —
+       * ce qui a supprimé leur reconstruction à chaque cran de molette — un tracé sans mise à
+       * l'échelle les écrase toutes dans un carré d'un pixel. Isoler un groupe éteignait donc
+       * la carte sans jamais rallumer le groupe : c'était le calque qu'on ne voyait pas.
+       *
+       * L'étirement du geste de zoom n'a plus à être appliqué : `span` suit déjà l'échelle
+       * courante, et la recopie étirée du fond montre la carte exactement là où cette
+       * transformation la met.
+       */
+      context.translate(originX + view.x, originY + view.y)
+      context.scale(span, span)
       /* Pendant un geste de zoom, le fond est une recopie *étirée* du tampon : aucun retracé
          n'a eu lieu, donc `pathCache` tient encore les courbes de l'échelle précédente. Les
          dessiner telles quelles les décalait du fond — c'était le calque qui glissait sous
          les points pendant qu'on zoomait. On leur applique le même étirement qu'à l'image. */
-      if (stretch !== 1) context.scale(stretch, stretch)
       context.globalCompositeOperation = 'lighter'
       for (const entry of pathCache.current.paths.values()) {
         if (entry.group !== group) continue
         context.strokeStyle = entry.tone
         if (bloom > 0.02) {
-          context.lineWidth = core * WEB.bloomWidth
+          context.lineWidth = (core * WEB.bloomWidth) / span
           context.globalAlpha = edgeAlpha * bloom * 0.5
           context.stroke(entry.path)
-          context.lineWidth = core * Math.max(1.5, WEB.bloomWidth / 2.3)
+          context.lineWidth = (core * Math.max(1.5, WEB.bloomWidth / 2.3)) / span
           context.globalAlpha = edgeAlpha * bloom * 0.6
           context.stroke(entry.path)
         }
-        context.lineWidth = core
+        context.lineWidth = core / span
         context.globalAlpha = edgeAlpha
         context.stroke(entry.path)
       }
@@ -1209,9 +1237,6 @@ export function OrganizerMap({
     /* Ce qu'il faut avoir peint pour que le cadre soit juste : la carte, limitée au cadre.
        Au-delà il n'y a rien à peindre, et c'est ce qui rend les recuissons rares une fois
        dézoomé — la carte entière tient alors dans le tampon. */
-    /* Combien le fond peint est étiré par rapport à l'échelle courante. Vaut 1 hors geste de
-       zoom, et c'est alors sans effet sur les calques. */
-    let overlayStretch = 1
     const frame = { width, height, scale: view.scale, x: view.x, y: view.y }
     const needed = neededArea(frame, content)
     const painted = webCache.current
@@ -1223,7 +1248,20 @@ export function OrganizerMap({
     /* On garde la recopie étirée tant qu'on n'a pas décidé d'affiner. `!usable` reste un
        retracé immédiat : là, ce n'est plus une question de netteté mais de zone manquante, et
        étirer laisserait du vide à l'écran. */
-    const covers = usable && (sharp || !sharpenNow.current)
+    /**
+     * Garde-t-on la recopie étirée ?
+     *
+     * `zooming` est décisif, et l'avoir retiré a coûté une session. Un tracé étalé sur plusieurs
+     * images ne peut pas traverser un changement d'échelle : ses courbes sont mises à l'échelle
+     * au moment du tracé, donc deux tranches peintes à deux échelles ne se raccorderaient pas.
+     * Il faut donc le recommencer à chaque cran — et recommencer, c'est redimensionner le
+     * tampon, l'effacer et repartir de zéro. Pendant un geste continu, ce tracé ne finissait
+     * jamais et payait sa mise en place à chaque cran.
+     *
+     * Pendant le geste on étire, donc, sans rien peindre. L'affinage attend l'arrêt de la
+     * molette, où l'échelle est stable et où le tracé peut enfin aller au bout.
+     */
+    const covers = usable && (sharp || zooming || !sharpenNow.current)
 
     if (landing < 1) {
       /* Pendant l'atterrissage, les coordonnées bougent à chaque image : peindre dans un
@@ -1268,10 +1306,19 @@ export function OrganizerMap({
               ? spareBuffer.current
               : document.createElement('canvas')
           spareBuffer.current = canvas
-          canvas.width = Math.ceil(bufferWidth * ratio)
-          canvas.height = Math.ceil(bufferHeight * ratio)
+          /* Réaffecter `width` réalloue et efface le canevas — plusieurs mégapixels, des
+             dizaines de millisecondes. On ne le fait donc que si la taille change réellement ;
+             sinon `clearRect` suffit, et il coûte autrement moins cher. La zone peinte garde le
+             plus souvent la même taille d'un cran à l'autre : c'est le cadre plus sa marge, et
+             seul son centre bouge. */
+          const wantedWidth = Math.ceil(bufferWidth * ratio)
+          const wantedHeight = Math.ceil(bufferHeight * ratio)
           const paint = canvas.getContext('2d')
           if (!paint) return
+          if (canvas.width !== wantedWidth || canvas.height !== wantedHeight) {
+            canvas.width = wantedWidth
+            canvas.height = wantedHeight
+          }
           paint.setTransform(ratio, 0, 0, ratio, 0, 0)
           paint.clearRect(0, 0, bufferWidth, bufferHeight)
           paint.translate(-area.left, -area.top)
@@ -1332,7 +1379,6 @@ export function OrganizerMap({
            l'écran, et la recopie rééchantillonne : la toile deviendrait floue au déplacement,
            alors qu'elle est nette au premier tracé. */
         const zoom = web.scale > 0 ? view.scale / web.scale : 1
-        overlayStretch = zoom
         const snap = (value: number): number => Math.round(value * ratio) / ratio
         context.drawImage(
           web.canvas,
@@ -1351,10 +1397,13 @@ export function OrganizerMap({
        * rend la main dans l'image courante avec une recopie étirée, et la toile redevient nette
        * dès que la main se pose. Le repli à `setTimeout` sert aux moteurs qui ne l'ont pas.
        */
-      if (usable && !sharp && !sharpenAsked.current) {
+      if (usable && !sharp && !zooming && !sharpenAsked.current) {
         sharpenAsked.current = true
         const ask = (): void => {
           sharpenAsked.current = false
+          /* Un geste a pu reprendre pendant l'attente : on ne réclame l'affinage que si la main
+             s'est réellement posée, sinon la prochaine accalmie le redemandera. */
+          if (zoomingRef.current) return
           sharpenNow.current = true
           drawRef.current()
         }
@@ -1442,7 +1491,7 @@ export function OrganizerMap({
       context.fillStyle = '#000'
       context.fillRect(0, 0, width, height)
       context.restore()
-      restoreGroup(focusGroup, overlayStretch)
+      restoreGroup(focusGroup)
       // Les points du groupe, repeints par-dessus : ils viennent d'être effacés avec le reste.
       const bodies = new Map<string, Path2D>()
       for (const point of data.points) {
@@ -1487,7 +1536,7 @@ export function OrganizerMap({
       context.restore()
     }
 
-    if (litGroup) lightUp(litGroup, overlayStretch)
+    if (litGroup) lightUp(litGroup)
 
     /* Chaque amas doit porter son nom, y compris quand deux étiquettes se gênent : la plus
        petite s'écarte de son amas avec un trait de rappel, au lieu de disparaître.
@@ -1717,8 +1766,28 @@ export function OrganizerMap({
   }, [data.points])
 
   // Tout changement d'apparence — survol, couleur, zoom, exclusion — redessine une fois.
+  /**
+   * Un dessin par image, et non un par événement.
+   *
+   * C'était la vraie cause du gel au zoom. Chaque cran de molette appelle `setView`, donc un
+   * rendu, donc cet effet — et le dessin partait **sur le champ**, de façon synchrone. Une
+   * molette envoie un cran toutes les huit millisecondes, un dessin en coûte davantage : les
+   * crans s'empilaient plus vite qu'ils ne se traitaient et la file d'événements ne se vidait
+   * plus. L'application paraissait figée alors qu'elle dessinait sans arrêt, chaque image jetée
+   * avant d'avoir été vue.
+   *
+   * Une image en attente est donc annulée par la suivante : vingt crans dans la même image ne
+   * dessinent qu'une fois, à la position finale. Cela coûte au plus une image de retard, ce
+   * qu'aucun geste ne perçoit — et c'est ce qui rend la main.
+   */
   useEffect(() => {
-    draw()
+    let frame = requestAnimationFrame(() => {
+      frame = 0
+      draw()
+    })
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+    }
   }, [draw])
 
   /* Par `draw`, cet effet se redéfaisait à chaque déplacement : l'observateur se démontait
@@ -2254,8 +2323,12 @@ export function OrganizerMap({
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return
     setZooming(true)
+    zoomingRef.current = true
     window.clearTimeout(zoomTimer.current)
-    zoomTimer.current = window.setTimeout(() => setZooming(false), 140)
+    zoomTimer.current = window.setTimeout(() => {
+      zoomingRef.current = false
+      setZooming(false)
+    }, 140)
     const pointerX = event.clientX - rect.left
     const pointerY = event.clientY - rect.top
     setView((current) => {

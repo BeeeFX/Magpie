@@ -137,6 +137,7 @@ const previewApi: MagpieApi = {
   createManualCollection: async () => 0,
   deleteCollection: async () => {},
   mergeCollections: async () => {},
+  collectionMembership: async () => [],
   collectionKeywords: async () => [],
   addCollectionKeyword: async () => null,
   setCollectionKeywordWeight: async () => null,

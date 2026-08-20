@@ -378,3 +378,47 @@ export function merge(sourceId: number, targetId: number): Membership | null {
   })()
   return recompute(targetId)
 }
+
+/**
+ * Qui appartient à quoi, une collection par post.
+ *
+ * L'appartenance est multiple par construction, mais colorer un point demande d'en choisir
+ * **une** — un pixel n'a qu'une teinte. On prend celle où le post compte le plus, son degré
+ * étant justement une mesure de cela. Les appartenances posées à la main passent devant toutes
+ * les autres : leur degré est nul en base, et un choix explicite ne se laisse pas doubler par un
+ * calcul.
+ *
+ * Sert à deux choses à l'écran, et c'est pour cela que la réponse est unique : teinter les points
+ * à la couleur de leur collection, et poser le nom de chaque collection au milieu des siens.
+ */
+export function membership(): {
+  id: number
+  name: string
+  color: string | null
+  postIds: string[]
+}[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT cp.post_id AS postId, cp.collection_id AS collectionId
+         FROM collection_posts cp
+         JOIN (
+           SELECT post_id, MAX(COALESCE(degree, 1e9)) AS best
+             FROM collection_posts GROUP BY post_id
+         ) top ON top.post_id = cp.post_id AND COALESCE(cp.degree, 1e9) = top.best
+        GROUP BY cp.post_id`
+    )
+    .all() as { postId: string; collectionId: number }[]
+
+  const rooms = new Map<number, string[]>()
+  for (const row of rows) {
+    const list = rooms.get(row.collectionId)
+    if (list) list.push(row.postId)
+    else rooms.set(row.collectionId, [row.postId])
+  }
+
+  return (
+    getDb()
+      .prepare('SELECT id, name, color FROM collections ORDER BY sort_index, name COLLATE NOCASE')
+      .all() as { id: number; name: string; color: string | null }[]
+  ).map((row) => ({ ...row, postIds: rooms.get(row.id) ?? [] }))
+}

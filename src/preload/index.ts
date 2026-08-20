@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   CollectionHeat,
+  CollectionMembership,
   AccountInfo,
   AddToCollectionResult,
   AiCollectionApplyResult,
@@ -53,6 +54,8 @@ const api: MagpieApi = {
     ipcRenderer.invoke('collections:delete', collectionId),
   mergeCollections: (from: number, into: number): Promise<void> =>
     ipcRenderer.invoke('collections:merge', from, into),
+  collectionMembership: (): Promise<CollectionMembership[]> =>
+    ipcRenderer.invoke('collections:membership'),
   collectionKeywords: (collectionId: number): Promise<{ word: string; weight: number }[]> =>
     ipcRenderer.invoke('collections:keywords', collectionId),
   addCollectionKeyword: (collectionId: number, word: string): Promise<CollectionHeat | null> =>
