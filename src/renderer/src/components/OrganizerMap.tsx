@@ -8,6 +8,7 @@ import {
   collectionSeeds,
   meshWalls,
   moveMeshVertex,
+  splitCell,
   outerBounds,
   ringArea,
   type CellMesh
@@ -127,6 +128,13 @@ interface Props {
    * même chemin que celle de la liste — annulable, et éprouvée.
    */
   onMergeGroups?(from: string, to: string): void
+  /**
+   * Une cellule vient d'être scindée : la moitié détachée devient une collection.
+   *
+   * L'appelant reçoit les posts qu'elle contient — c'est lui qui sait nommer une collection et
+   * la faire vivre dans son plan.
+   */
+  onSplitCell?(fromGroup: string, inside: string[]): void
   onLasso(ids: string[]): void
   onHover(point: OrganizerMapPoint | null): void
   /** Clic sur un point : ouvrir le post qu'il représente. */
@@ -191,6 +199,7 @@ export function OrganizerMap({
   onBoundaryChange,
   onEditingChange,
   onMergeGroups,
+  onSplitCell,
   onLasso,
   onHover,
   onOpen,
@@ -226,6 +235,8 @@ export function OrganizerMap({
   }, [editing, onEditingChange])
   /** Le sommet saisi pendant un glisser, s'il y en a un. */
   const draggedVertexRef = useRef<number | null>(null)
+  /** Le trait de coupe en cours, quand on scinde une cellule. */
+  const cutRef = useRef<{ from: Vertex; to: Vertex; cell: number } | null>(null)
   /** Où les noms ont été posés au dernier dessin, pour pouvoir les survoler. */
   const labelBoxes = useRef<{ group: string; x: number; y: number; half: number; size: number }[]>(
     []
@@ -1155,6 +1166,22 @@ export function OrganizerMap({
       context.globalAlpha = 1
     }
 
+    if (cutRef.current) {
+      const cut = cutRef.current
+      const [ax, ay] = at(cut.from)
+      const [bx, by] = at(cut.to)
+      context.save()
+      context.strokeStyle = '#ffffff'
+      context.globalAlpha = 0.9
+      context.lineWidth = 2
+      context.setLineDash([6, 4])
+      context.beginPath()
+      context.moveTo(ax + view.x, ay + view.y)
+      context.lineTo(bx + view.x, by + view.y)
+      context.stroke()
+      context.restore()
+    }
+
     if (litGroup) lightUp(litGroup, overlayStretch)
 
     /* Chaque amas doit porter son nom, y compris quand deux étiquettes se gênent : la plus
@@ -1708,6 +1735,20 @@ export function OrganizerMap({
             return
           }
         }
+        /* Maj + glisser trace une coupe. Le geste dit ce qu'il fait — on dessine la paroi qu'on
+           veut ajouter — et il ne peut pas se confondre avec le déplacement d'un sommet. */
+        if (event.shiftKey && cellMesh) {
+          const place = mapPointAt(event.clientX, event.clientY)
+          if (place) {
+            const which = cellMesh.cells.findIndex((cell) =>
+              insideRing(cellRing(cellMesh, cell), place.x, place.y)
+            )
+            if (which >= 0) {
+              cutRef.current = { from: place, to: place, cell: which }
+              return
+            }
+          }
+        }
       }
       const overLabel = labelAt(event.clientX, event.clientY)
       clickedRef.current = overLabel ? null : pointAt(event.clientX, event.clientY)
@@ -1722,6 +1763,12 @@ export function OrganizerMap({
         x: event.clientX - (rect?.left ?? 0),
         y: event.clientY - (rect?.top ?? 0)
       })
+      draw()
+      return
+    }
+    if (cutRef.current) {
+      const place = mapPointAt(event.clientX, event.clientY)
+      if (place) cutRef.current = { ...cutRef.current, to: place }
       draw()
       return
     }
@@ -1755,6 +1802,26 @@ export function OrganizerMap({
   }
 
   const onPointerUp = (): void => {
+    if (cutRef.current) {
+      const cut = cutRef.current
+      cutRef.current = null
+      const mesh = cellMesh
+      if (mesh && Math.hypot(cut.to.x - cut.from.x, cut.to.y - cut.from.y) > 0.01) {
+        const fromGroup = mesh.cells[cut.cell]?.group ?? ''
+        /* Le nom vient de l'appelant : ici on ne sait pas nommer une collection. On pose un
+           identifiant provisoire, il le remplacera. */
+        const next = splitCell(mesh, cut.cell, cut.from, cut.to, `split-${Date.now()}`)
+        if (next) {
+          setCellMesh(next)
+          const half = cellRing(next, next.cells[cut.cell + 1])
+          const inside = data.points
+            .filter((point) => insideRing(half, point.x, point.y))
+            .map((point) => point.id)
+          if (inside.length > 0) onSplitCell?.(fromGroup, inside)
+        }
+      }
+      return
+    }
     if (draggedVertexRef.current !== null) {
       draggedVertexRef.current = null
       commitRegion()

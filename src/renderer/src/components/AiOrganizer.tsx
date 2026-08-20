@@ -680,6 +680,32 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                       onBoundaryChange={onBoundaryChange}
                       onEditingChange={setEditingBoundary}
                       onMergeGroups={(from, to) => merge(from, to)}
+                      onSplitCell={(fromGroup, inside) => {
+                        /* La moitié détachée devient une collection à part. Épinglée : ses
+                           posts sont désignés, pas déduits, donc une prochaine analyse ne les
+                           reprendra pas. Et ils quittent leur collection d'origine — un post
+                           ne vit que dans une seule. */
+                        const chosen = new Set(inside)
+                        const source = suggestions.find((entry) => entry.id === fromGroup)
+                        setSuggestions((current) => [
+                          {
+                            id: `split-${Date.now()}`,
+                            ruleKeys: [],
+                            name: t('organizer.splitName', {
+                              name: source?.name ?? '',
+                              count: chosen.size
+                            }),
+                            description: t('organizer.splitDescription'),
+                            postIds: [...chosen],
+                            included: true,
+                            pinned: true
+                          },
+                          ...current.map((entry) => ({
+                            ...entry,
+                            postIds: entry.postIds.filter((id) => !chosen.has(id))
+                          }))
+                        ])
+                      }}
                   includedGroups={
                         new Set(suggestions.filter((s) => s.included).map((s) => s.id))
                       }
@@ -715,6 +741,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                     {editMode ? (
                       <div className="organizer-lasso" role="status">
                         <span>{t('organizer.edgeMergeHint')}</span>
+                        <span className="organizer-hint">{t('organizer.edgeSplitHint')}</span>
                       </div>
                     ) : null}
                     {editingBoundary ? (

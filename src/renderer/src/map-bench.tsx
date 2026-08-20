@@ -64,6 +64,7 @@ createRoot(document.getElementById('root')!).render(
     showBoundaries
     editMode={false}
     onMergeGroups={() => {}}
+    onSplitCell={() => {}}
     savedBoundaries={new Map()}
     onBoundaryChange={() => {}}
     onLasso={() => {}}

@@ -4,6 +4,7 @@ import {
   collectionSeeds,
   moveMeshVertex,
   outerBounds,
+  splitCell,
   ringArea
 } from '../src/renderer/src/map-cells'
 import { insideRing, type Vertex } from '../src/renderer/src/map-boundaries'
@@ -194,6 +195,54 @@ console.log('\nDéformation libre')
   }
   assert(convex(ring), 'le pavage de départ est convexe, comme un Voronoï')
   assert(!convex(deformed), 'tirer un sommet vers l’intérieur rend la cellule concave')
+}
+
+console.log('')
+console.log('Scinder une cellule')
+{
+  const target = 0
+  const ring = cellRing(mesh, mesh.cells[target])
+  let cx = 0
+  let cy = 0
+  for (const v of ring) {
+    cx += v.x / ring.length
+    cy += v.y / ring.length
+  }
+  const before = ringArea(ring)
+  const split = splitCell(mesh, target, { x: cx - 1, y: cy }, { x: cx + 1, y: cy }, 'nouveau')
+  assert(split !== null, 'une droite qui traverse scinde bien la cellule')
+  if (split) {
+    assert(
+      split.cells.length === mesh.cells.length + 1,
+      `une cellule de plus (${split.cells.length} contre ${mesh.cells.length})`
+    )
+    const halves = [ringArea(cellRing(split, split.cells[target])), ringArea(cellRing(split, split.cells[target + 1]))]
+    /* Rien ne se perd et rien ne se crée : les deux moitiés valent la cellule d'origine. Une
+       coupe qui n'additionne pas laisserait un interstice ou un recouvrement. */
+    assert(
+      Math.abs(halves[0] + halves[1] - before) < 1e-6,
+      `les deux moitiés valent l’originale (${halves[0].toFixed(4)} + ${halves[1].toFixed(4)} = ${before.toFixed(4)})`
+    )
+    assert(halves[0] > 1e-4 && halves[1] > 1e-4, 'aucune moitié n’est dégénérée')
+
+    /* La coupe est une paroi partagée, pas deux bords qui se touchent : ses extrémités
+       appartiennent aux deux moitiés, donc les déplacer bouge la frontière des deux. */
+    const left = new Set(split.cells[target].loop)
+    const shared = split.cells[target + 1].loop.filter((at) => left.has(at))
+    assert(shared.length >= 2, `la coupe est partagée par les deux moitiés (${shared.length} sommets)`)
+
+    const total = split.cells.reduce((sum, c) => sum + ringArea(cellRing(split, c)), 0)
+    assert(
+      Math.abs(total - ringArea(border)) < 0.02,
+      `le pavage couvre toujours la bordure (${total.toFixed(4)})`
+    )
+  }
+
+  // Une droite qui passe à côté ne doit rien faire, plutôt que rendre une moitié vide.
+  assert(
+    splitCell(mesh, target, { x: -5, y: -5 }, { x: -5, y: 5 }, 'nouveau') === null,
+    'une droite qui ne traverse pas ne scinde rien'
+  )
 }
 
 console.log('\nTout est vert.')

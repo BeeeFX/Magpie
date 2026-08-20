@@ -2509,6 +2509,11 @@ h1, h2, h3 {
   opacity: 0.85;
 }
 
+.organizer-hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+
 .organizer-warn {
   color: var(--danger, #e0574f);
   font-size: 12px;
@@ -2620,6 +2625,11 @@ h1, h2, h3 {
   margin-top: 3px;
   color: var(--danger, #e0574f);
   opacity: 0.85;
+}
+
+.organizer-hint {
+  color: var(--faint);
+  font-size: 12px;
 }
 
 .organizer-warn {

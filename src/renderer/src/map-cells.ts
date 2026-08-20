@@ -309,3 +309,59 @@ export function outerBounds(points: Vertex[], margin = 0.02): Vertex[] {
     return { x: point.x + (dx / length) * margin, y: point.y + (dy / length) * margin }
   })
 }
+
+/**
+ * Scinde une cellule par une droite.
+ *
+ * Les deux moitiés partagent la coupe : ses deux extrémités sont soudées comme n'importe quelle
+ * autre jonction, donc déplacer l'une déplace la frontière des deux — la scission ne crée pas
+ * deux cellules étrangères posées côte à côte, elle crée une paroi de plus dans le maillage.
+ *
+ * Rend `null` quand la droite ne traverse pas la cellule : mieux vaut ne rien faire que rendre
+ * une moitié vide et une cellule inchangée sous un nom nouveau.
+ */
+export function splitCell(
+  mesh: CellMesh,
+  cellIndex: number,
+  from: Vertex,
+  to: Vertex,
+  newGroup: string,
+  weld = 1e-4
+): CellMesh | null {
+  const cell = mesh.cells[cellIndex]
+  if (!cell) return null
+  const ring = cellRing(mesh, cell)
+  if (ring.length < 3) return null
+
+  /* La droite, en demi-plan. Le sens choisi importe peu : on garde les deux côtés, et c'est
+     le côté positif qui prend le nouveau nom. */
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return null
+  const plane: HalfPlane = { a: dy, b: -dx, c: dy * from.x - dx * from.y }
+  const opposite: HalfPlane = { a: -dy, b: dx, c: -(dy * from.x - dx * from.y) }
+
+  const keep = clip(ring, plane)
+  const other = clip(ring, opposite)
+  // Une coupe qui ne traverse pas laisse une moitié vide : on refuse plutôt que de bricoler.
+  if (keep.length < 3 || other.length < 3) return null
+
+  const vertices = mesh.vertices.slice()
+  const index = new Map<string, number>()
+  vertices.forEach((point, at) => {
+    index.set(`${Math.round(point.x / weld)}:${Math.round(point.y / weld)}`, at)
+  })
+  const share = (point: Vertex): number => {
+    const key = `${Math.round(point.x / weld)}:${Math.round(point.y / weld)}`
+    const found = index.get(key)
+    if (found !== undefined) return found
+    vertices.push(point)
+    index.set(key, vertices.length - 1)
+    return vertices.length - 1
+  }
+
+  const cells = mesh.cells.slice()
+  cells[cellIndex] = { group: cell.group, loop: keep.map(share) }
+  cells.splice(cellIndex + 1, 0, { group: newGroup, loop: other.map(share) })
+  return { vertices, cells }
+}
