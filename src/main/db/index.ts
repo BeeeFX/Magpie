@@ -91,6 +91,15 @@ export function getDb(): Database.Database {
 }
 
 /**
+ * Une bibliothèque écrite par une version plus récente que celle qui l'ouvre.
+ *
+ * Sa propre classe d'erreur, et ce n'est pas une coquetterie : c'est le seul échec d'ouverture
+ * qui ne dénote **aucun** problème avec le fichier. Le confondre avec une base abîmée a coûté
+ * cher — voir `openLibrary`.
+ */
+class LibraryFromTheFuture extends Error {}
+
+/**
  * Ouvre la bibliothèque, et la remet debout si elle ne s'ouvre pas.
  *
  * Un cas réel : le fichier principal s'est retrouvé remplacé par une base bien plus
@@ -98,12 +107,24 @@ export function getDb(): Database.Database {
  * deux ensemble, et l'application n'avait pour toute réponse qu'une boîte d'erreur et un
  * arrêt — sans aucun moyen de s'en sortir depuis l'interface, alors qu'une sauvegarde
  * intacte dormait dans le même dossier.
+ *
+ * **Une base venue du futur est le contre-exemple, et il a fait des dégâts.** Une vieille
+ * version lancée sur une bibliothèque déjà migrée levait ici, et le secours faisait exactement
+ * ce qu'il ne fallait pas : il mettait de côté une base parfaitement saine, restaurait une
+ * sauvegarde antérieure — donc perdait tout ce qui avait été fait depuis — puis échouait
+ * quand même, la sauvegarde restant elle aussi trop récente pour ce lecteur. Relevé sur la
+ * bibliothèque de référence : deux mises à l'écart de 285 Mo en dix secondes, vingt-sept
+ * collections évaporées, et l'application toujours incapable de démarrer.
+ *
+ * Un fichier venu du futur n'a donc rien à réparer. On remonte l'erreur telle quelle et on ne
+ * touche à rien : c'est l'application qui est en retard, pas la bibliothèque.
  */
 function openLibrary(): Database.Database {
   const path = join(dataDir(), 'magpie.db')
   try {
     return openAndMigrate(path)
   } catch (error) {
+    if (error instanceof LibraryFromTheFuture) throw error
     console.error('[magpie] Bibliothèque illisible :', error)
     quarantineLibrary(path)
     const restored = restoreNewestBackup(path)
@@ -214,7 +235,19 @@ function rememberLibraryState(conn: Database.Database): void {
   }
 }
 
-/** Écarte la base illisible et ses journaux, sans jamais rien supprimer. */
+const QUARANTINE_NAME_PATTERN = /^magpie-illisible-[\dTZ.:-]+\.db$/
+
+/**
+ * Combien de bases mises à l'écart on garde.
+ *
+ * Elles pèsent le poids de la bibliothèque entière — 285 Mo pièce sur la bibliothèque de
+ * référence — et rien ne les nettoyait : quatre d'entre elles y dormaient, soit un gigaoctet
+ * et demi que personne n'avait demandé. Deux suffisent : la dernière dit ce qui vient de mal
+ * tourner, l'avant-dernière permet de comparer.
+ */
+const QUARANTINE_KEEP = 2
+
+/** Écarte la base illisible et ses journaux, sans jamais supprimer ce qu'on vient d'écarter. */
 function quarantineLibrary(path: string): void {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   for (const suffix of ['', '-wal', '-shm']) {
@@ -227,6 +260,27 @@ function quarantineLibrary(path: string): void {
     } catch (error) {
       console.warn(`[magpie] Impossible d'écarter ${source}`, error)
     }
+  }
+  pruneQuarantine()
+}
+
+/** Ne garde que les mises à l'écart les plus récentes. Voir `QUARANTINE_KEEP`. */
+function pruneQuarantine(): void {
+  try {
+    const stale = readdirSync(dataDir())
+      .filter((name) => QUARANTINE_NAME_PATTERN.test(name))
+      .map((name) => ({ name, at: statSync(join(dataDir(), name)).mtimeMs }))
+      .sort((a, b) => b.at - a.at)
+      .slice(QUARANTINE_KEEP)
+    for (const { name } of stale) {
+      for (const suffix of ['', '-wal', '-shm']) {
+        rmSync(join(dataDir(), `${name}${suffix}`), { force: true })
+      }
+      console.log(`[magpie] Mise à l'écart périmée retirée : ${name}.`)
+    }
+  } catch (error) {
+    // La place perdue est un désagrément ; refuser d'ouvrir la bibliothèque en serait un autre.
+    console.warn('[magpie] Purge des mises à l’écart impossible', error)
   }
 }
 
@@ -383,8 +437,13 @@ function migrate(conn: Database.Database): void {
   const current = conn.pragma('user_version', { simple: true }) as number
 
   if (current > SCHEMA_VERSION) {
-    throw new Error(
-      `Base créée par une version plus récente de Magpie (schéma v${current}, cette version lit v${SCHEMA_VERSION}).`
+    /* Pas une base abîmée : une application en retard. La distinction est portée par le type,
+       parce que c'est `openLibrary` qui doit la lire — et surtout ne pas tenter de « réparer »
+       un fichier qui n'a rien. */
+    throw new LibraryFromTheFuture(
+      `Base créée par une version plus récente de Magpie (schéma v${current}, ` +
+        `cette version lit v${SCHEMA_VERSION}). Installez la dernière version de Magpie : ` +
+        `votre bibliothèque est intacte et n'a pas été modifiée.`
     )
   }
 

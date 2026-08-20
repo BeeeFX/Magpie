@@ -25,6 +25,7 @@
     "check:embeddings": "tsx --tsconfig tsconfig.node.json scripts/check-embeddings.ts",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "check:db": "tsx scripts/check-db.ts",
+    "check:library-guard": "tsx --tsconfig tsconfig.node.json scripts/check-library-guard.mts",
     "logo": "tsx scripts/make-logo.ts",
     "dist": "electron-vite build && electron-builder",
     "dist:win": "electron-vite build && electron-builder --win",

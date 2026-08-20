@@ -120,6 +120,7 @@ npm run check:organizer
 npm run check:transcribe
 npm run check:map
 npm run check:map-density
+npm run check:library-guard
 npm run check:cells
 npm run check:boundaries
 npm run build
