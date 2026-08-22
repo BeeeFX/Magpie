@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
+import { SCHEMA_VERSION } from '../src/main/db/schema'
 
 /**
  * Le secours d'ouverture répare-t-il seulement ce qui est cassé ?
@@ -142,6 +143,55 @@ console.log('\nLes mises à l’écart ne s’accumulent pas')
   )
 }
 
+
+console.log('\nUne migration qui échoue n’emporte pas la bibliothèque')
+{
+  const { out, files } = play('migration', (dir) => {
+    /* Une base au palier précédent, mais sans la table que la migration suivante altère :
+       le palier lève, la transaction annule tout, et `user_version` reste où il était.
+       C’est exactement la forme du défaut qui a coûté `map_labels`. */
+    makeLibrary(join(dir, 'magpie.db'), SCHEMA_VERSION - 1)
+    makeLibrary(join(dir, `magpie-before-v${SCHEMA_VERSION}-1.db`), 0)
+  })
+
+  assert(out.includes('REFUS'), 'elle refuse de s’ouvrir')
+  assert(
+    out.includes('La migration du schéma a échoué'),
+    'et l’erreur nomme la migration, pas une base illisible'
+  )
+  assert(
+    !files.some((name) => name.startsWith('magpie-illisible')),
+    'rien n’est mis de côté'
+  )
+  const db = new Database(join(root, 'migration', 'magpie.db'), { readonly: true })
+  assert(
+    db.pragma('user_version', { simple: true }) === SCHEMA_VERSION - 1,
+    'la base est restée telle quelle'
+  )
+  db.close()
+}
+
+console.log('\nUne ouverture réussie fait le ménage')
+{
+  /* Les deux purges n’étaient appelées que depuis l’incident qui les crée. Dès que tout
+     allait bien, plus rien ne balayait : huit mises à l’écart et trois sauvegardes dormaient
+     dans le dossier de référence, environ deux gigaoctets et demi. */
+  const { out, files } = play('swept', (dir) => {
+    makeLibrary(join(dir, 'magpie.db'), SCHEMA_VERSION)
+    for (let index = 0; index < 5; index += 1) {
+      makeLibrary(join(dir, `magpie-illisible-2020-01-0${index + 1}T00-00-00-000Z.db`), 0)
+    }
+    for (let index = 0; index < 3; index += 1) {
+      makeLibrary(join(dir, `magpie-before-v9-${index + 1}.db`), 0)
+    }
+  })
+
+  assert(out.includes('OUVERT'), 'elle s’ouvre')
+  const quarantined = files.filter((name) => name.startsWith('magpie-illisible'))
+  const backups = files.filter((name) => /^magpie-before-v\d+-\d+\.db$/.test(name))
+  assert(quarantined.length === 2, `deux mises à l’écart au plus (${quarantined.length})`)
+  assert(backups.length === 1, `une seule sauvegarde de migration (${backups.length})`)
+}
 rmSync(root, { recursive: true, force: true })
 console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} échec(s).`)
 process.exit(failures === 0 ? 0 : 1)

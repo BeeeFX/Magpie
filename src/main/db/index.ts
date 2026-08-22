@@ -16,6 +16,7 @@ import { mediaIdentity } from '../media/identity'
 import { MIGRATIONS, SCHEMA_SQL, SCHEMA_VERSION } from './schema'
 
 let db: Database.Database | null = null
+let openFailure: Error | null = null
 
 /**
  * Où vit la bibliothèque, par défaut.
@@ -72,7 +73,23 @@ export function mediaDir(): string {
 
 export function getDb(): Database.Database {
   if (db) return db
-  db = openLibrary()
+  /* Un échec se retient, et c’est ce qui manquait le plus.
+
+     `db` restait `null` sur erreur, donc chacun des cent vingt appels de `getDb()` relançait
+     l'ouverture entière — mise à l'écart de 285 Mo comprise. Et `registerIpc()` puis
+     `createWindow()` s’exécutent avant le premier appel : le rendu réclamait déjà ses posts,
+     ses réglages et ses statistiques pendant que la bibliothèque échouait à s’ouvrir. D’où les
+     « deux mises à l'écart en dix secondes » — il y en aurait eu autant que d'appels.
+
+     On rejoue donc la même erreur au lieu de retenter : une ouverture ratée l’est pour la
+     durée du processus, et un seul diagnostic remonte. */
+  if (openFailure) throw openFailure
+  try {
+    db = openLibrary()
+  } catch (error) {
+    openFailure = error instanceof Error ? error : new Error(String(error))
+    throw openFailure
+  }
   return db
 }
 
@@ -84,6 +101,21 @@ export function getDb(): Database.Database {
  * cher — voir `openLibrary`.
  */
 class LibraryFromTheFuture extends Error {}
+
+/**
+ * Une migration qui échoue — et le fichier, lui, va bien.
+ *
+ * La distinction manquait, et elle a coûté la table des étiquettes. Chaque palier s’exécute
+ * dans une transaction avec son `user_version` : une erreur annule donc le DDL *et* le
+ * numéro de version, ce qui est correct. Mais l’erreur remontait ensuite jusqu’au secours
+ * de `openLibrary`, qui la lisait comme une base abîmée : il écartait une bibliothèque
+ * intacte, restaurait une sauvegarde antérieure au palier fautif, rejouait la même migration
+ * — qui échouait pareil, cette fois sans personne pour rattraper.
+ *
+ * Une migration qui ne passe pas est un défaut de code ou un disque plein. Dans les deux cas
+ * la réponse est de le dire, pas de déplacer trois cents mégaoctets.
+ */
+class LibraryMigrationFailed extends Error {}
 
 /**
  * Ouvre la bibliothèque, et la remet debout si elle ne s'ouvre pas.
@@ -111,6 +143,7 @@ function openLibrary(): Database.Database {
     return openAndMigrate(path)
   } catch (error) {
     if (error instanceof LibraryFromTheFuture) throw error
+    if (error instanceof LibraryMigrationFailed) throw error
     console.error('[magpie] Bibliothèque illisible :', error)
     quarantineLibrary(path)
     const restored = restoreNewestBackup(path)
@@ -182,13 +215,42 @@ function prepareConnection(
 
   if (current > 0 && current < SCHEMA_VERSION) {
     const name = `magpie-before-v${SCHEMA_VERSION}-${Date.now()}.db`
-    conn.exec(`VACUUM INTO '${join(dataDir(), name).replaceAll("'", "''")}'`)
+    try {
+      conn.exec(`VACUUM INTO '${join(dataDir(), name).replaceAll("'", "''")}'`)
+    } catch (error) {
+      /* Le filet est une copie intégrale : 285 Mo sur la bibliothèque de référence, écrits
+         hors transaction, juste à côté d’un dossier média qui pèse dix-huit gigaoctets. Un
+         disque plein le fait échouer — et faisait alors écarter une base parfaitement saine.
+         Migrer sans filet serait pire : on refuse, et on dit pourquoi. */
+      throw new LibraryMigrationFailed(
+        `Impossible d’écrire la sauvegarde avant migration (${name}) : ` +
+          `${error instanceof Error ? error.message : String(error)}. ` +
+          `Libérez de la place sur le disque ; votre bibliothèque n’a pas été modifiée.`
+      )
+    }
     console.log(`[magpie] Sauvegarde avant migration : ${name}.`)
     pruneMigrationBackups(name)
   }
 
-  migrate(conn)
+  try {
+    migrate(conn)
+  } catch (error) {
+    if (error instanceof LibraryFromTheFuture) throw error
+    throw new LibraryMigrationFailed(
+      `La migration du schéma a échoué : ${error instanceof Error ? error.message : String(error)}. ` +
+        `Votre bibliothèque n’a pas été modifiée.`
+    )
+  }
   rememberLibraryState(conn)
+  /* Le ménage se fait à chaque ouverture réussie, et c’est le changement qui compte.
+
+     Les deux purges n’étaient appelées que depuis l’incident qui les crée : `pruneQuarantine`
+     depuis `quarantineLibrary`, `pruneMigrationBackups` depuis le palier de migration. Donc
+     dès que tout allait bien à nouveau, plus rien ne balayait — et les copies restaient. Relevé
+     sur la bibliothèque de référence : huit mises à l’écart et trois sauvegardes, environ deux
+     gigaoctets et demi que personne n’avait demandés. */
+  pruneQuarantine()
+  pruneMigrationBackups()
   return conn
 }
 
@@ -316,10 +378,18 @@ const BACKUP_NAME_PATTERN = /^magpie-before-v\d+-\d+\.db$/
  * arrière si la migration qui vient de s'exécuter tourne mal. Les précédentes décrivent des
  * schémas que cette version ne sait de toute façon plus relire.
  */
-function pruneMigrationBackups(keep: string): void {
+function pruneMigrationBackups(keep?: string): void {
   try {
+    /* Sans palier en cours, il n’y a rien à garder « en plus » : on conserve la plus récente,
+       qui est le filet du schéma sur lequel on tourne. */
+    const survivor =
+      keep ??
+      readdirSync(dataDir())
+        .filter((name) => BACKUP_NAME_PATTERN.test(name))
+        .map((name) => ({ name, at: statSync(join(dataDir(), name)).mtimeMs }))
+        .sort((a, b) => b.at - a.at)[0]?.name
     for (const name of readdirSync(dataDir())) {
-      if (name === keep || !BACKUP_NAME_PATTERN.test(name)) continue
+      if (name === survivor || !BACKUP_NAME_PATTERN.test(name)) continue
       rmSync(join(dataDir(), name), { force: true })
       console.log(`[magpie] Sauvegarde de migration périmée retirée : ${name}.`)
     }
