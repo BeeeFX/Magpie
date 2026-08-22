@@ -13,22 +13,7 @@ import {
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { mediaIdentity } from '../media/identity'
-import {
-  MIGRATION_9_SQL,
-  MIGRATION_10_SQL,
-  MIGRATION_11_SQL,
-  MIGRATION_12_SQL,
-  MIGRATION_13_SQL,
-  MIGRATION_14_SQL,
-  MIGRATION_15_SQL,
-  MIGRATION_16_SQL,
-  MIGRATION_17_SQL,
-  MIGRATION_18_SQL,
-  MIGRATION_19_SQL,
-  MIGRATION_20_SQL,
-  SCHEMA_SQL,
-  SCHEMA_VERSION
-} from './schema'
+import { MIGRATIONS, SCHEMA_SQL, SCHEMA_VERSION } from './schema'
 
 let db: Database.Database | null = null
 
@@ -345,103 +330,6 @@ function pruneMigrationBackups(keep: string): void {
   }
 }
 
-/**
- * Une entrée par palier de version : la clé est la version que la migration produit.
- * Elles s'appliquent dans l'ordre, dans une transaction, avec `user_version` mis à jour
- * en même temps — une migration interrompue ne laisse donc jamais la base à moitié
- * migrée.
- */
-const MIGRATIONS: Record<number, (conn: Database.Database) => void> = {
-  2: (conn) => {
-    conn.exec('ALTER TABLE media ADD COLUMN video_source TEXT')
-    conn.exec('ALTER TABLE media ADD COLUMN video_path TEXT')
-  },
-  3: (conn) => {
-    conn.exec('ALTER TABLE posts ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0')
-    // Tout ce qui existait avant l'arrivée des vrais comptes vient de la fixture.
-  },
-  4: (conn) => {
-    conn.exec('ALTER TABLE posts ADD COLUMN label TEXT')
-    conn.exec('ALTER TABLE collections ADD COLUMN color TEXT')
-    conn.exec(
-      'CREATE INDEX IF NOT EXISTS idx_posts_label ON posts(label) WHERE label IS NOT NULL'
-    )
-  },
-  5: (conn) => {
-    conn.exec(`CREATE TABLE IF NOT EXISTS media_variants (
-      post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-      idx INTEGER NOT NULL,
-      quality TEXT NOT NULL,
-      source TEXT NOT NULL,
-      width INTEGER,
-      height INTEGER,
-      bitrate INTEGER,
-      cache_path TEXT,
-      PRIMARY KEY (post_id, idx, quality)
-    )`)
-  },
-  6: (conn) => {
-    conn.exec("ALTER TABLE media ADD COLUMN video_cache_state TEXT NOT NULL DEFAULT 'pending'")
-    conn.exec('ALTER TABLE media ADD COLUMN video_attempts INTEGER NOT NULL DEFAULT 0')
-  },
-  7: (conn) => {
-    conn.exec('ALTER TABLE media ADD COLUMN thumb_attempts INTEGER NOT NULL DEFAULT 0')
-    conn.exec(`CREATE INDEX IF NOT EXISTS idx_posts_feed ON posts(
-      is_archived, COALESCE(saved_at, discovered_at) DESC, saved_rank ASC, id
-    )`)
-    conn.exec(
-      'CREATE INDEX IF NOT EXISTS idx_media_thumb_queue ON media(thumb_path, thumb_attempts, post_id, idx)'
-    )
-    conn.exec(`CREATE INDEX IF NOT EXISTS idx_media_video_queue ON media(
-      video_cache_state, video_attempts, video_path, post_id, idx
-    )`)
-  },
-  8: (conn) => {
-    conn.exec(`CREATE TABLE IF NOT EXISTS local_video_features (
-      post_id TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
-      thumb_path TEXT,
-      visual BLOB,
-      updated_at INTEGER NOT NULL
-    )`)
-  },
-  9: (conn) => {
-    conn.exec(MIGRATION_9_SQL)
-  },
-  10: (conn) => {
-    conn.exec(MIGRATION_10_SQL)
-  },
-  11: (conn) => {
-    conn.exec(MIGRATION_11_SQL)
-  },
-  12: (conn) => {
-    conn.exec(MIGRATION_12_SQL)
-  },
-  13: (conn) => {
-    conn.exec(MIGRATION_13_SQL)
-  },
-  14: (conn) => {
-    conn.exec(MIGRATION_14_SQL)
-  },
-  15: (conn) => {
-    conn.exec(MIGRATION_15_SQL)
-  },
-  16: (conn) => {
-    conn.exec(MIGRATION_16_SQL)
-  },
-  17: (conn) => {
-    conn.exec(MIGRATION_17_SQL)
-  },
-  18: (conn) => {
-    conn.exec(MIGRATION_18_SQL)
-  },
-  19: (conn) => {
-    conn.exec(MIGRATION_19_SQL)
-  },
-  20: (conn) => {
-    conn.exec(MIGRATION_20_SQL)
-  }
-}
-
 function migrate(conn: Database.Database): void {
   const current = conn.pragma('user_version', { simple: true }) as number
 
@@ -468,7 +356,7 @@ function migrate(conn: Database.Database): void {
     const migration = MIGRATIONS[version]
     if (!migration) throw new Error(`Migration manquante vers le schéma v${version}.`)
     conn.transaction(() => {
-      migration(conn)
+      conn.exec(migration)
       conn.pragma(`user_version = ${version}`)
     })()
     console.log(`[magpie] Base migrée en v${version}.`)

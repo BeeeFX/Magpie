@@ -391,6 +391,48 @@ console.log('\ncache média conservé d’une synchronisation à l’autre')
   memory.close()
 }
 
+/**
+ * La vraie base contre SCHEMA_SQL.
+ *
+ * check:schema compare le code à lui-même — SCHEMA_SQL contre l'échelle des migrations. Il ne
+ * peut rien dire des bases déjà installées : une migration publiée puis corrigée sur place
+ * laisse derrière elle des bases à l’ancienne forme, que ses CREATE TABLE IF NOT EXISTS ne
+ * reconstruiront jamais. Relevé ici : collection_boundaries portait encore une colonne mask
+ * quand le code interrogeait shape — donc « no such column: shape » à chaque appel, sur une
+ * base pourtant tamponnée à la version courante, que rien ne réparerait.
+ */
+console.log('\nforme de la base')
+{
+  const reference = new Database(':memory:')
+  reference.exec(SCHEMA_SQL)
+  const columnsOf = (conn: Database.Database, table: string): string[] =>
+    (conn.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((c) => c.name)
+  const tablesOf = (conn: Database.Database): string[] =>
+    (
+      conn
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
+        )
+        .all() as { name: string }[]
+    ).map((t) => t.name)
+
+  const expected = tablesOf(reference)
+  const present = tablesOf(db)
+  const missingTables = expected.filter((t) => !present.includes(t))
+  check('toutes les tables du schéma sont là', missingTables.length === 0, missingTables.join(', '))
+
+  const drift: string[] = []
+  for (const table of expected) {
+    if (!present.includes(table)) continue
+    const want = columnsOf(reference, table)
+    const have = columnsOf(db, table)
+    for (const column of want) if (!have.includes(column)) drift.push(`${table}.${column} manque`)
+    for (const column of have) if (!want.includes(column)) drift.push(`${table}.${column} en trop`)
+  }
+  check('aucune colonne ne dérive du schéma', drift.length === 0, drift.join(' ; '))
+  reference.close()
+}
+
 console.log('\nintégrité')
 check('intégrité SQLite', one<{ integrity_check: string }>('PRAGMA integrity_check').integrity_check === 'ok')
 check('aucune clé étrangère orpheline', (db.pragma('foreign_key_check') as unknown[]).length === 0)

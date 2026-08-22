@@ -7,6 +7,69 @@
  */
 export const SCHEMA_VERSION = 20
 
+/**
+ * Les paliers 2 à 8, en SQL comme tous les autres.
+ *
+ * Ils vivaient en fonctions dans db/index.ts, qui importe electron : la vérification
+ * check:schema devait alors faire résoudre le binaire Electron pour lire l'échelle des
+ * migrations. Ici elles sont à côté du schéma quelles entretiennent, et le contrôle qui
+ * compare les deux ne dépend plus de rien.
+ */
+export const MIGRATION_2_SQL = /* sql */ `
+ALTER TABLE media ADD COLUMN video_source TEXT;
+ALTER TABLE media ADD COLUMN video_path TEXT;
+`
+
+/* Tout ce qui existait avant l'arrivée des vrais comptes vient de la fixture. */
+export const MIGRATION_3_SQL = /* sql */ `
+ALTER TABLE posts ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0;
+`
+
+export const MIGRATION_4_SQL = /* sql */ `
+ALTER TABLE posts ADD COLUMN label TEXT;
+ALTER TABLE collections ADD COLUMN color TEXT;
+CREATE INDEX IF NOT EXISTS idx_posts_label ON posts(label) WHERE label IS NOT NULL;
+`
+
+export const MIGRATION_5_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS media_variants (
+  post_id    TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  idx        INTEGER NOT NULL,
+  quality    TEXT NOT NULL,
+  source     TEXT NOT NULL,
+  width      INTEGER,
+  height     INTEGER,
+  bitrate    INTEGER,
+  cache_path TEXT,
+  PRIMARY KEY (post_id, idx, quality)
+);
+`
+
+export const MIGRATION_6_SQL = /* sql */ `
+ALTER TABLE media ADD COLUMN video_cache_state TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE media ADD COLUMN video_attempts INTEGER NOT NULL DEFAULT 0;
+`
+
+export const MIGRATION_7_SQL = /* sql */ `
+ALTER TABLE media ADD COLUMN thumb_attempts INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_posts_feed ON posts(
+  is_archived, COALESCE(saved_at, discovered_at) DESC, saved_rank ASC, id
+);
+CREATE INDEX IF NOT EXISTS idx_media_thumb_queue
+  ON media(thumb_path, thumb_attempts, post_id, idx);
+CREATE INDEX IF NOT EXISTS idx_media_video_queue ON media(
+  video_cache_state, video_attempts, video_path, post_id, idx
+);
+`
+
+export const MIGRATION_8_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS local_video_features (
+  post_id    TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  thumb_path TEXT,
+  visual     BLOB,
+  updated_at INTEGER NOT NULL
+);
+`
 export const MIGRATION_9_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS post_sources (
   post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -545,8 +608,20 @@ CREATE TABLE IF NOT EXISTS organizer_rules (
 CREATE INDEX IF NOT EXISTS idx_organizer_rules_collection
   ON organizer_rules(collection_id) WHERE collection_id IS NOT NULL;
 
--- Table externe : le contenu vit dans la table posts, l'index FTS ne stocke que ce qu'il
--- faut pour chercher. Les triggers ci-dessous la maintiennent synchronisée.
+-- Les étiquettes posées à la main sur la carte. anchors retient les posts qui
+-- entouraient l'étiquette, pas une position : une reprojection déplace les neuf mille
+-- points, et une étiquette figée en coordonnées désignerait alors autre chose.
+--
+-- Elle manquait ici. Seules les migrations 16 et 17 la créaient, donc toute installation
+-- neuve démarrait sans cette table et mapLabels() échouait à chaque ouverture de la
+-- carte — en silence, le seul appelant avalant l'erreur dans un catch.
+CREATE TABLE IF NOT EXISTS map_labels (
+  id         TEXT PRIMARY KEY,
+  text       TEXT NOT NULL,
+  anchors    TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS post_positions (
   post_id TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
   x       REAL NOT NULL,
@@ -586,3 +661,35 @@ CREATE TRIGGER IF NOT EXISTS posts_fts_au AFTER UPDATE ON posts BEGIN
   VALUES (new.rowid, new.text, new.ai_description, new.author_handle, new.transcript);
 END;
 `
+
+/**
+ * L'échelle des migrations : une entrée par palier, la clé est la version produite.
+ *
+ * Invariant tenu par check:schema — une installation neuve exécute SCHEMA_SQL seul, donc
+ * SCHEMA_SQL doit déjà contenir tout ce que cette échelle produit. Une table ajoutée ici et
+ * oubliée là-bas ne manque à personne qui migre, et manque à tout le monde qui installe.
+ *
+ * Et une migration publiée ne se corrige pas sur place : ses CREATE TABLE IF NOT EXISTS ne
+ * reconstruisent rien chez ceux qui l'ont déjà passée. Une correction prend un palier neuf.
+ */
+export const MIGRATIONS: Record<number, string> = {
+  2: MIGRATION_2_SQL,
+  3: MIGRATION_3_SQL,
+  4: MIGRATION_4_SQL,
+  5: MIGRATION_5_SQL,
+  6: MIGRATION_6_SQL,
+  7: MIGRATION_7_SQL,
+  8: MIGRATION_8_SQL,
+  9: MIGRATION_9_SQL,
+  10: MIGRATION_10_SQL,
+  11: MIGRATION_11_SQL,
+  12: MIGRATION_12_SQL,
+  13: MIGRATION_13_SQL,
+  14: MIGRATION_14_SQL,
+  15: MIGRATION_15_SQL,
+  16: MIGRATION_16_SQL,
+  17: MIGRATION_17_SQL,
+  18: MIGRATION_18_SQL,
+  19: MIGRATION_19_SQL,
+  20: MIGRATION_20_SQL
+}
