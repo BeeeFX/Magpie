@@ -98,6 +98,18 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
     // d'annulation doit donc être là dès l'ouverture, pas seulement juste après coup.
     void magpie.lastOrganizerApplication().then(setLastApplication).catch(() => {})
     requestAnimationFrame(() => panelRef.current?.focus())
+  }, [open])
+
+  /**
+   * Échappée : à part, et surtout pas dans l'effet qui remet l'écran à zéro.
+   *
+   * Les deux vivaient ensemble, avec `onClose` en dépendance. Or `onClose` change d'identité
+   * dès que `stepsRunning` bascule — c'est-à-dire juste avant que l'analyse ne démarre. La
+   * préparation à peine finie, l'écran revenait au choix rapide/approfondi pendant quelques
+   * secondes, puis sautait au résultat : le travail semblait perdu, puis revenait tout seul.
+   */
+  useEffect(() => {
+    if (!open) return
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
     }
@@ -286,7 +298,9 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
           </button>
         </header>
 
-        <div className="modal__body ai-organizer__body">
+        <div
+          className={`modal__body ai-organizer__body${phase === 'keep' ? ' ai-organizer__body--keep' : ''}`}
+        >
           {phase === 'choose' ? (
             <div className="organizer-choose">
               <h3>{t('organizer.chooseTitle')}</h3>

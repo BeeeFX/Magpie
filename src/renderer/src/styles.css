@@ -1241,8 +1241,11 @@ h1, h2, h3 {
   font-size: 12px;
 }
 
+/* Une hauteur de confort, pour que le panneau ne saute pas d'une étape à l'autre — mais
+   qui cède sur une fenêtre basse, où elle poussait le bas du corps hors du panneau, qui le
+   rognait sans jamais laisser l'atteindre. */
 .ai-organizer__body {
-  min-height: 430px;
+  min-height: min(430px, calc(100vh - 150px));
 }
 
 .organizer-intro,
@@ -5992,6 +5995,7 @@ html.window-is-moving .app *::after {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
   padding: 10px 0;
 }
 
@@ -6011,7 +6015,8 @@ html.window-is-moving .app *::after {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 44vh;
+  flex: 0 1 auto;
+  min-height: 132px;
   overflow-y: auto;
   margin: 0;
   padding: 6px;
@@ -6065,6 +6070,25 @@ html.window-is-moving .app *::after {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/**
+ * Le bouton d'action ne se mérite pas au défilement.
+ *
+ * Vingt-sept collections remplissaient le corps du panneau et poussaient « Tout remplacer »
+ * sous la ligne de flottaison : l'étape paraissait sans issue tant qu'on n'avait pas deviné
+ * qu'il fallait défiler. Ici c'est la liste qui prend ce qui reste de hauteur — le titre,
+ * la note et les boutons, eux, ne bougent plus.
+ */
+.ai-organizer__body--keep {
+  display: flex;
+  flex-direction: column;
+}
+
+.organizer-keep > h3,
+.organizer-keep > p,
+.organizer-keep__foot {
+  flex: none;
 }
 
 /**

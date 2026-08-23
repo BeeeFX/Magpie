@@ -793,6 +793,18 @@ function placeAgainstFrozen(
 
 /** Dernier plan produit. La carte le réutilise au lieu de relancer toute l'analyse. */
 let lastPlan: AiCollectionPlan | null = null
+
+/**
+ * Le plan tel qu'il vient d'être calculé, pour qui a besoin des groupes eux-mêmes.
+ *
+ * L'amorçage des collections en est le premier client : les groupes portent le nom trouvé
+ * dans *cette* bibliothèque et leur effectif réel, ce qu'aucune liste écrite d'avance ne peut
+ * dire. `null` tant qu'aucune analyse n'a tourné — on ne relance pas deux heures de calcul
+ * pour répondre à une question.
+ */
+export function lastCollectionPlan(): AiCollectionPlan | null {
+  return lastPlan
+}
 /** Dernière projection. Rouvrir l'organisateur ne doit pas refaire neuf secondes de calcul. */
 let lastProjection: ProjectedPoint[] | null = null
 /**

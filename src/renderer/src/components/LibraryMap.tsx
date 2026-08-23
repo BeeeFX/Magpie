@@ -7,6 +7,7 @@ import type {
 import { magpie, magpieEvents } from '../bridge'
 import { displayName } from '../format'
 import { useStore, useT } from '../store'
+import type { TranslationKey } from '../i18n'
 import { IconClose } from './Icons'
 import { swatchOf } from '../collection-colours'
 import { CollectionsRail } from './CollectionsRail'
@@ -44,6 +45,22 @@ const STAGE_LABEL = {
   grouping: 'organizer.grouping',
   projecting: 'organizer.projecting'
 } as const
+
+/**
+ * Ce que peint chaque lecture, écrit en toutes lettres.
+ *
+ * La clé était fabriquée par concaténation puis castée, donc invisible au compilateur comme
+ * à la recherche plein texte : le dernier ménage du dictionnaire les a emportées toutes les
+ * cinq sans que rien ne proteste, et les boutons se sont affichés vides. Écrites ici, elles
+ * cassent la compilation le jour où elles disparaîtront.
+ */
+const COLOUR_LABELS: Record<ColourMode, TranslationKey> = {
+  group: 'organizer.colourGroup',
+  collection: 'organizer.colourCollection',
+  platform: 'organizer.colourPlatform',
+  kind: 'organizer.colourKind',
+  source: 'organizer.colourSource'
+}
 
 export function LibraryMap(): React.JSX.Element {
   const t = useT()
@@ -326,19 +343,19 @@ export function LibraryMap(): React.JSX.Element {
           — double-clic — et rien ne l'annonçait. */}
       <div className="library-map__tools">
         {/* Cinq lectures du même nuage. Le groupe d'abord : c'est celle qu'on vient voir. */}
-        <div className="segmented segmented--quiet library-map__colours">
-          {(['group', 'collection', 'platform', 'kind', 'source'] as const).map((mode) => (
+        <div
+          className="segmented segmented--quiet library-map__colours"
+          role="group"
+          aria-label={t('map.colours')}
+        >
+          {(Object.keys(COLOUR_LABELS) as ColourMode[]).map((mode) => (
             <button
               key={mode}
               type="button"
               className={colourMode === mode ? 'is-active' : ''}
               onClick={() => setColourMode(mode)}
             >
-              {t(
-                `organizer.colour${mode[0].toUpperCase()}${mode.slice(1)}` as Parameters<
-                  typeof t
-                >[0]
-              )}
+              {t(COLOUR_LABELS[mode])}
             </button>
           ))}
         </div>

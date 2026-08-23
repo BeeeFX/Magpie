@@ -1,5 +1,5 @@
 import { getDb } from '../db'
-import { TOPIC_NAMES } from './organize'
+import { lastCollectionPlan, TOPIC_NAMES } from './organize'
 import { interfaceLanguage } from '../settings'
 import {
   cutFor,
@@ -177,14 +177,14 @@ export function heatOf(
  * mesuré, la phrase nue rend 43,7 % de justesse en zéro-shot contre 24,1 % pour un nom suivi de
  * mots-clés.
  */
-export async function createFromPhrase(phrase: string): Promise<number> {
+export async function createFromPhrase(phrase: string, size = DEFAULT_SIZE): Promise<number> {
   const clean = phrase.trim()
   if (!clean) throw new Error('Phrase vide')
   const info = getDb()
     .prepare(
       "INSERT INTO collections (name, sort_index, kind, target_size) VALUES (?, 0, 'query', ?)"
     )
-    .run(clean, DEFAULT_SIZE)
+    .run(clean, Math.max(10, Math.min(5000, Math.round(size))))
   const id = Number(info.lastInsertRowid)
   /* Le nom devient le premier mot-clé, et cesse ensuite d'être la définition : renommer
      n'entraîne plus mille posts. C'est la séparation demandée — un nom se lit, des mots
@@ -309,23 +309,58 @@ export function contested(minimum = 2): { postId: string; collectionIds: number[
 }
 
 /**
- * Les vingt-sept thèmes, en brouillons.
+ * Les brouillons, pris sur la bibliothèque et non sur une liste écrite d'avance.
  *
- * Ils ne sont plus des catégories câblées : ce sont des phrases comme les autres, donc des
- * collections comme les autres — qu'on renomme, qu'on élague, qu'on élargit. Une bibliothèque
- * neuve est classée dès la première analyse, comme avant ; mais devant neuf mille posts, une
- * page blanche serait une corvée, et vingt-sept brouillons à élaguer prennent dix minutes.
+ * L'analyse produit déjà les groupes de *cette* bibliothèque : au plus vingt-quatre, chacun
+ * d'au moins trois posts, nommés soit par un des thèmes intégrés — ceux qui ont réellement
+ * accroché quelque chose — soit par un terme relevé dans les légendes et les tags, et triés
+ * du plus gros au plus petit. Tout cela était jeté : on installait les vingt-sept thèmes
+ * câblés, y compris ceux dont la bibliothèque ne contient pas une image, et chacun coupé aux
+ * trois cents premiers. D'où les vingt-sept collections à « 300 » identiques, qui ne
+ * mesuraient rien — ni Skateboard n'a trois cents posts de skate, ni Musique ne s'arrête à
+ * trois cents.
  *
- * Appelé une seule fois, et seulement si aucune collection n'existe : ré-amorcer une
- * bibliothèque déjà rangée y remettrait ce que l'utilisateur avait retiré.
+ * L'effectif du groupe devient l'ampleur par défaut. C'est une estimation, pas un verdict :
+ * elle vient de trois signaux — mots-clés, sens, image — tandis que l'appartenance, elle,
+ * se recalcule ensuite sur la seule phrase du nom. Les deux ensembles différeront un peu, et
+ * c'est le curseur qui tranche — mais il part enfin d'un nombre qui veut dire quelque chose.
+ *
+ * Sans plan en mémoire — le rail propose d'amorcer sans qu'aucune analyse ait tourné — on
+ * retombe sur les thèmes intégrés : mieux vaut des brouillons à élaguer qu'une page blanche,
+ * et deux heures de calcul ne se déclenchent pas pour remplir une liste.
+ *
+ * Amorcé une seule fois, et seulement si aucune collection **définie** n'existe : ré-amorcer
+ * une bibliothèque déjà rangée y remettrait ce que l'utilisateur avait retiré.
+ *
+ * Définie, et non simplement présente — la nuance décidait du sort de l'écran précédent.
+ * Ce qu'on garde y devient une liste figée, mise de côté pour ne plus participer à aucun
+ * recalcul ; compter ces listes ici revenait à dire « tu en as gardé une, tu n'auras donc
+ * aucune proposition », quand l'écran venait de promettre un jeu complet à côté d'elles.
  */
 export async function seedFromTopics(): Promise<number> {
-  const existing = (
-    getDb().prepare('SELECT COUNT(*) AS n FROM collections').get() as { n: number }
+  const defined = (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM collections WHERE kind = 'query'")
+      .get() as { n: number }
   ).n
-  if (existing > 0) return 0
-  const french = interfaceLanguage() === 'fr'
+  if (defined > 0) return 0
+
   let made = 0
+  const seen = new Set<string>()
+  for (const group of lastCollectionPlan()?.suggestions ?? []) {
+    const name = group.name.trim()
+    if (!name || group.postIds.length === 0) continue
+    /* Un thème intégré et un terme relevé peuvent tomber sur le même nom. Deux collections
+       homonymes ne se distingueraient nulle part : on garde la première, qui est la plus grosse. */
+    const key = name.toLocaleLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    await createFromPhrase(name, group.postIds.length)
+    made += 1
+  }
+  if (made > 0) return made
+
+  const french = interfaceLanguage() === 'fr'
   for (const topic of TOPIC_NAMES) {
     /* Le nom du thème dans la langue de l'interface, et non son descripteur à mots-clés : c'est
        ce que l'utilisateur va lire et réécrire. Le prototype, lui, encode la phrase telle
