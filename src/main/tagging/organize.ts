@@ -805,8 +805,6 @@ let lastPlan: AiCollectionPlan | null = null
 export function lastCollectionPlan(): AiCollectionPlan | null {
   return lastPlan
 }
-/** Dernière projection. Rouvrir l'organisateur ne doit pas refaire neuf secondes de calcul. */
-let lastProjection: ProjectedPoint[] | null = null
 /**
  * Les projections des autres regards, rangées par layout.
  *
@@ -823,7 +821,6 @@ const layoutProjections = new Map<string, ProjectedPoint[]>()
  * processus principal garde la projection courante et la resservirait telle quelle.
  */
 export function forgetMapCache(): void {
-  lastProjection = null
   layoutProjections.clear()
 }
 
@@ -981,7 +978,6 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
          d'image n'aurait pas de sens, ils ne vivent pas dans ce repère. La projection, elle,
          gagne à tout voir — c'est là que se joue « ce qui se ressemble est côte à côte ». */
       const placed = blend(vectors, images)
-      if (lastSemanticVectors?.size !== placed.size) lastProjection = null
       lastSemanticVectors = placed
       lastRawText = vectors
       // Les regards déjà calculés portent sur un autre nuage : ils ne valent plus rien.
@@ -1024,8 +1020,8 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
  * et c'est la règle de couverture de `placeAgainstFrozen` qui décide seule quand reprojeter
  * franchement. Compter les posts ici aurait tout rejeté à chaque synchronisation.
  */
-function projectionFingerprint(): string {
-  const recipe = MAP_LAYOUTS.equilibre
+function projectionFingerprint(layout: MapLayout = 'equilibre'): string {
+  const recipe = MAP_LAYOUTS[layout]
   return [
     'v1',
     `n=${TUNING.neighbours}`,
@@ -1037,59 +1033,45 @@ function projectionFingerprint(): string {
   ].join('|')
 }
 
-export async function buildOrganizerMap(layout?: MapLayout): Promise<OrganizerMap> {
+export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promise<OrganizerMap> {
   /* Le plan vient d'être calculé par l'écran qui nous appelle : le redemander relançait
      toute l'analyse une seconde fois — chargement des vignettes, regroupement, tout. */
   const plan = lastPlan ?? (await proposeVideoCollections())
-  const vectors = lastSemanticVectors
-  if (!vectors || vectors.size === 0) return { points: [], plan }
+  const base = lastSemanticVectors
+  if (!base || base.size === 0) return { points: [], plan }
 
-  /* Un autre regard sur le même nuage : on remélange les mêmes vecteurs avec d'autres poids et
-     on projette à part. Rangé par layout — sans ce cache, chaque bascule coûterait les
-     vingt-six secondes de la projection, et on n'explore pas en attendant une demi-minute par
-     essai. La carte de l'organisateur, elle, n'a qu'un seul mélange : là il s'agit de classer,
-     et il y a une bonne réponse. */
-  if (layout && layout !== 'equilibre') {
-    const kept = layoutProjections.get(layout)
-    if (kept && kept.length === vectors.size) {
-      return { points: withGroups(kept, plan), plan }
-    }
-    setProgress({ stage: 'projecting', done: 0, total: 100, running: true })
-    try {
-      const remixed = blend(lastRawText ?? new Map(), postImageEmbeddings(), MAP_LAYOUTS[layout])
-      const points = await project(remixed, (done, total) =>
-        setProgress({ stage: 'projecting', done, total, running: true })
-      )
-      layoutProjections.set(layout, points)
-      return { points: withGroups(points, plan), plan }
-    } finally {
-      setProgress({ stage: 'idle', done: 0, total: 0, running: false })
-    }
-  }
+  /* Un autre regard, ce sont les mêmes blocs remixés à d'autres poids. L'équilibré est déjà
+     mélangé — c'est celui que l'analyse produit — et les autres se refont ici, ce qui ne coûte
+     rien au regard de la projection. */
+  const vectors =
+    layout === 'equilibre'
+      ? base
+      : blend(lastRawText ?? new Map(), postImageEmbeddings(), MAP_LAYOUTS[layout])
+
+  const kept = layoutProjections.get(layout)
+  if (kept && kept.length === vectors.size) return { plan, points: withGroups(kept, plan) }
 
   try {
-    /* La carte figée passe avant tout calcul.
-       Dès qu'une frontière a été tracée à la main, les positions ne doivent plus bouger :
-       reprojeter déplacerait les neuf mille points et le contour désignerait autre chose. On
-       relit donc ce qui est rangé en base, et on ne projette que ce qui manque — un post
-       arrivé depuis. Effacer la carte figée, c'est le bouton « Regénérer », et il prévient. */
-    if (!lastProjection) {
-      /* Mêmes réglages, ou rien : une recette ou un voisinage qui change produit une autre
-         carte, et la servir depuis l’ancienne serait un mensonge silencieux. */
-      const frozen = mapFingerprint() === projectionFingerprint() ? mapPositions() : new Map()
-      if (frozen.size > 0) {
-        const kept = [...vectors.keys()].filter((id) => frozen.has(id))
-        /* Une carte figée qui ne couvre presque plus la bibliothèque n'en est plus une : au
-           delà d'un quart de posts nouveaux, l'interpolation placerait trop de monde à partir
-           de trop peu, et mieux vaut reprojeter franchement. */
-        if (kept.length >= vectors.size * 0.75) {
-          lastProjection = placeAgainstFrozen(vectors, frozen)
-        }
-      }
+    /* La carte figée passe avant tout calcul, et désormais pour **chaque** regard.
+       Les autres que l'équilibré ne vivaient qu'en mémoire : perdus à la fermeture, vidés dès
+       qu'un plan était reconstruit, donc reprojetés entiers à chaque fois. Quarante-quatre
+       secondes pour un résultat que la base rend en deux millisecondes — c'est ce qui rendait
+       un second regard intenable à l'écran. */
+    let projected: ProjectedPoint[] | null = null
+    /* Mêmes réglages, ou rien : une recette ou un voisinage qui change produit une autre
+       carte, et la servir depuis l'ancienne serait un mensonge silencieux. */
+    const frozen =
+      mapFingerprint(layout) === projectionFingerprint(layout) ? mapPositions(layout) : new Map()
+    if (frozen.size > 0) {
+      const covered = [...vectors.keys()].filter((id) => frozen.has(id))
+      /* Une carte figée qui ne couvre presque plus la bibliothèque n'en est plus une : au
+         delà d'un quart de posts nouveaux, l'interpolation placerait trop de monde à partir
+         de trop peu, et mieux vaut reprojeter franchement. */
+      if (covered.length >= vectors.size * 0.75) projected = placeAgainstFrozen(vectors, frozen)
     }
-    if (!lastProjection || lastProjection.length !== vectors.size) {
+    if (!projected || projected.length !== vectors.size) {
       setProgress({ stage: 'projecting', done: 0, total: 100, running: true })
-      lastProjection = await project(vectors, (done, total) =>
+      projected = await project(vectors, (done, total) =>
         setProgress({ stage: 'projecting', done, total, running: true })
       )
     }
@@ -1101,20 +1083,18 @@ export async function buildOrganizerMap(layout?: MapLayout): Promise<OrganizerMa
        `freezeMap()`, que plus rien n'appelle depuis que l'édition des frontières a quitté
        l'interface en 0.29.0. L'ensemble ne pouvait donc plus jamais devenir non vide : une
        bibliothèque qui n'avait pas été figée avant ne le serait plus jamais, et refaisait la
-       projection entière **à chaque ouverture de la carte, indéfiniment**.
-
-       Mesuré sur la bibliothèque de référence : quatre-vingt-onze secondes de calcul pour un
-       résultat que la base rend en deux millisecondes. */
+       projection entière **à chaque ouverture de la carte, indéfiniment**. */
     saveMapPositions(
-      lastProjection.map((point) => ({ postId: point.id, x: point.x, y: point.y }))
+      projected.map((point) => ({ postId: point.id, x: point.x, y: point.y })),
+      layout
     )
-    saveMapFingerprint(projectionFingerprint())
+    saveMapFingerprint(projectionFingerprint(layout), layout)
+    layoutProjections.set(layout, projected)
+    return { plan, points: withGroups(projected, plan) }
   } finally {
     // Toujours, y compris sur échec : sinon l'indicateur reste violet et animé sans fin.
     setProgress({ stage: 'idle', done: 0, total: 0, running: false })
   }
-
-  return { plan, points: withGroups(lastProjection, plan) }
 }
 
 /**

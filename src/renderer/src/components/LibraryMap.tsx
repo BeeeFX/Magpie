@@ -97,6 +97,20 @@ export function LibraryMap(): React.JSX.Element {
    */
   const [colourMode, setColourMode] = useState<ColourMode>('group')
   /**
+   * Le coup d'œil, et pourquoi il n'est pas un onglet.
+   *
+   * Quatre mélanges co-égaux avaient été retirés pour une bonne raison : une carte qui a quatre
+   * versions n'est plus un endroit, on ne peut pas s'y souvenir d'où était quelque chose. Celui-ci
+   * ne rouvre pas ce débat — il en rend **un**, temporaire, dont on revient par le même bouton,
+   * et que rien ne mémorise : quitter la carte le relâche avec le composant. Le défaut reste le
+   * seul mélange qu'on retrouve en ouvrant.
+   *
+   * « Style », parce que c'est la seule intention que le défaut ne sert pas : le bloc d'allure
+   * — composition, palette, trait — y pousse de 0,10 à 0,40, et rapproche deux images du même
+   * geste graphique quand rien dans leurs légendes ne les relie.
+   */
+  const [lens, setLens] = useState<'equilibre' | 'style'>('equilibre')
+  /**
    * La largeur du panneau, gardée ici pour survivre à sa fermeture.
    *
    * La moitié de l'écran par défaut : c'est la taille à laquelle on voit ce qu'un post est, et
@@ -188,7 +202,7 @@ export function LibraryMap(): React.JSX.Element {
     setLoading(true)
     setFailure(null)
     void magpie
-      .organizerMap('equilibre')
+      .organizerMap(lens)
       .then((next) => {
         if (!cancelled) setData(next)
       })
@@ -207,7 +221,7 @@ export function LibraryMap(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [attempt])
+  }, [attempt, lens])
 
   /* Les points que les filtres ont laissés. Le placement vient de la projection complète : on
      retire des points, on ne les redispose pas. */
@@ -295,6 +309,21 @@ export function LibraryMap(): React.JSX.Element {
             <span style={{ width: `${Math.min(100, (progress.done / progress.total) * 100)}%` }} />
           </div>
         ) : null}
+        {/* Un coup d'œil se paie une fois : la projection est ensuite rangée comme celle du
+            défaut, et la bascule suivante se lit en base. Le dire évite de croire que chaque
+            aller-retour coûtera une minute.
+
+            Et le retour reste à portée : l'écran d'attente remplace la barre d'outils, donc sans
+            ce bouton on serait enfermé une minute dans un aller-retour qu'on vient de regretter.
+            Le calcul en cours, lui, va au bout et se range — il ne sera pas à refaire. */}
+        {lens !== 'equilibre' ? (
+          <>
+            <p className="library-map__lens-wait">{t('map.lensWait')}</p>
+            <button type="button" className="btn" onClick={() => setLens('equilibre')}>
+              {t('map.lensBack')}
+            </button>
+          </>
+        ) : null}
       </div>
     )
   }
@@ -374,6 +403,15 @@ export function LibraryMap(): React.JSX.Element {
             </button>
           ))}
         </div>
+        {/* Une commande, pas un cinquième segment : elle dit où l'on va, puis comment revenir. */}
+        <button
+          type="button"
+          className={`btn library-map__label library-map__lens${lens === 'style' ? ' is-active' : ''}`}
+          aria-pressed={lens === 'style'}
+          onClick={() => setLens((current) => (current === 'style' ? 'equilibre' : 'style'))}
+        >
+          {t(lens === 'style' ? 'map.lensBack' : 'map.lens')}
+        </button>
       </div>
       {heavy ? (
         <p className="library-map__notice" role="status">
@@ -383,6 +421,9 @@ export function LibraryMap(): React.JSX.Element {
       <CollectionsRail onHeat={setHeat} />
       <OrganizerMap
         data={shown}
+        /* Le nuage entier : les étiquettes s'y placent, pour qu'un filtre ne déplace pas un
+           endroit déjà nommé. */
+        allPoints={data?.points ?? shown.points}
         colourMode={colourMode}
         includedGroups={includedGroups}
         groupNames={groupNames}

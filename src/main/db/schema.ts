@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 23
+export const SCHEMA_VERSION = 24
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -416,6 +416,52 @@ CREATE INDEX IF NOT EXISTS idx_collections_cover ON collections(cover_post_id)
   WHERE cover_post_id IS NOT NULL;
 `
 
+/**
+ * Une carte figée par regard, et non plus une seule.
+ *
+ * Les positions n'étaient rangées que pour le mélange équilibré ; les autres regards vivaient
+ * dans une carte en mémoire, perdue à la fermeture et vidée dès qu'un plan était reconstruit.
+ * Chaque bascule coûtait donc une projection entière — 43,8 s mesurées sur la bibliothèque de
+ * référence — ce qui interdisait de rendre les regards à l'écran. Avec le regard dans la clé,
+ * la seconde visite coûte ce que coûte une lecture : deux millisecondes.
+ *
+ * Les positions existantes deviennent celles du regard équilibré, qui est le seul qu'elles
+ * aient jamais décrit. Rien n'est reprojeté : la carte de tout le monde reste la carte qu'ils
+ * connaissent.
+ *
+ * `post_id` reprend un index à lui : il n'est plus en tête de la clé primaire, et
+ * `foreign_keys = ON` parcourt cette colonne à chaque suppression de post — voir
+ * MIGRATION_23_SQL, même raison.
+ */
+export const MIGRATION_24_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS post_positions_next (
+  layout  TEXT NOT NULL,
+  post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  x       REAL NOT NULL,
+  y       REAL NOT NULL,
+  PRIMARY KEY (layout, post_id)
+);
+INSERT OR IGNORE INTO post_positions_next (layout, post_id, x, y)
+  SELECT 'equilibre', post_id, x, y FROM post_positions;
+DROP TABLE post_positions;
+ALTER TABLE post_positions_next RENAME TO post_positions;
+CREATE INDEX IF NOT EXISTS idx_post_positions_post ON post_positions(post_id);
+
+CREATE TABLE IF NOT EXISTS map_state_next (
+  layout      TEXT PRIMARY KEY,
+  fingerprint TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+-- La reprise n'a lieu que si l'ancienne forme est là. Le contrôle de schéma rejoue l'échelle
+-- entière par-dessus SCHEMA_SQL, où map_state porte déjà sa clé neuve : lire id sans
+-- précaution y lève, et une migration qui ne se rejoue pas ne se vérifie pas.
+INSERT OR IGNORE INTO map_state_next (layout, fingerprint, updated_at)
+  SELECT 'equilibre', fingerprint, updated_at FROM map_state
+   WHERE EXISTS (SELECT 1 FROM pragma_table_info('map_state') WHERE name = 'id');
+DROP TABLE map_state;
+ALTER TABLE map_state_next RENAME TO map_state;
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -675,15 +721,19 @@ CREATE TABLE IF NOT EXISTS map_labels (
   created_at INTEGER NOT NULL
 );
 
+-- Une carte figée par regard : voir MIGRATION_24_SQL.
 CREATE TABLE IF NOT EXISTS post_positions (
-  post_id TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+  layout  TEXT NOT NULL,
+  post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   x       REAL NOT NULL,
-  y       REAL NOT NULL
+  y       REAL NOT NULL,
+  PRIMARY KEY (layout, post_id)
 );
 
--- Les réglages qui ont produit ces positions : voir MIGRATION_21_SQL.
+-- Les réglages qui ont produit ces positions, regard par regard : voir MIGRATION_21_SQL
+-- pour l'empreinte elle-même, MIGRATION_24_SQL pour la clé.
 CREATE TABLE IF NOT EXISTS map_state (
-  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  layout      TEXT PRIMARY KEY,
   fingerprint TEXT NOT NULL,
   updated_at  INTEGER NOT NULL
 );
@@ -721,6 +771,7 @@ CREATE INDEX IF NOT EXISTS idx_collection_removals_post ON collection_removals(p
 CREATE INDEX IF NOT EXISTS idx_collection_feedback_post ON collection_feedback(post_id);
 CREATE INDEX IF NOT EXISTS idx_collections_cover ON collections(cover_post_id)
   WHERE cover_post_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_post_positions_post ON post_positions(post_id);
 `
 
 /**
@@ -755,5 +806,6 @@ export const MIGRATIONS: Record<number, string> = {
   20: MIGRATION_20_SQL,
   21: MIGRATION_21_SQL,
   22: MIGRATION_22_SQL,
-  23: MIGRATION_23_SQL
+  23: MIGRATION_23_SQL,
+  24: MIGRATION_24_SQL
 }

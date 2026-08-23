@@ -160,6 +160,84 @@ function orthonormalise(basis: Float32Array, width: number, target: number): voi
 }
 
 /** Ramène le nuage dans un carré unité, en gardant les proportions. */
+/**
+ * L'autre réduction : une projection aléatoire creuse, qui ne forme aucune covariance.
+ *
+ * La covariance coûte `n × largeur² / 2` — onze milliards d'opérations sur la bibliothèque de
+ * référence — et l'itération de puissance qui la suit en coûte sept de plus. Mesuré : 37,5 s
+ * des 43,8 que coûte la projection entière. Or UMAP ne lit ensuite que des **distances**, et le
+ * lemme de Johnson-Lindenstrauss dit qu'une projection aléatoire les conserve à epsilon près
+ * dès que la cible est de l'ordre de `log n / epsilon²` — 256 axes pour dix mille posts est
+ * large. On ne cherche donc pas les directions de plus grande variance : on cherche un espace
+ * plus petit où les voisinages sont les mêmes.
+ *
+ * Creuse au sens d'Achlioptas : chaque coefficient vaut +1 avec une chance sur six, -1 avec une
+ * chance sur six, et zéro deux fois sur trois. Deux tiers des multiplications disparaîssent, et
+ * celles qui restent sont des additions. La graine est fixe, comme celle d'UMAP : deux
+ * ouvertures doivent rendre la même carte.
+ *
+ * **Mesurée, et non retenue.** Elle tient sa promesse de vitesse : 25 s contre 43, sur les trois
+ * graines essayées, soit quarante pour cent de la projection. Mais la qualité ne se prononce pas.
+ * Compacité, sur la bibliothèque de référence :
+ *
+ *   graine 1 — PCA 70,2 %   aléatoire 76,7 %
+ *   graine 2 — PCA 91,5 %   aléatoire 81,6 %
+ *   graine 3 — PCA 74,8 %   aléatoire 71,1 %
+ *
+ * Deux points d'écart entre les deux moyennes, pour vingt et un points d'écart entre les graines
+ * d'une même configuration : l'instrument ne voit pas la différence qu'on lui demande de juger.
+ * Et le prix de l'adoption, lui, est certain — l'empreinte change, donc la carte de chacun se
+ * recalcule une fois et tous les points bougent. Dix-huit secondes gagnées sur un calcul qui,
+ * depuis que les projections se rangent par regard, ne se paie plus qu'une fois par regard : le
+ * marché n'est pas bon.
+ *
+ * Elle reste ici, et le banc garde son balayage à trois graines : c'est ce qui rend la
+ * conclusion rejouable le jour où la réduction redeviendra le goulot.
+ */
+function reduceRandom(vectors: Float32Array[], dims: number): Float32Array[] {
+  const width = vectors[0].length
+  const count = vectors.length
+  const target = Math.min(dims, width, count)
+  const random = mulberry32(0x5eed ^ 0x9e37)
+
+  /* La matrice n'est jamais matérialisée : on garde, pour chaque axe, les indices à ajouter et
+     ceux à retrancher. C'est la même chose, en trois fois moins de mémoire et sans multiplier
+     par zéro deux mille fois par axe. */
+  const plus: Int32Array[] = []
+  const minus: Int32Array[] = []
+  for (let axis = 0; axis < target; axis += 1) {
+    const up: number[] = []
+    const down: number[] = []
+    for (let i = 0; i < width; i += 1) {
+      const draw = random()
+      if (draw < 1 / 6) up.push(i)
+      else if (draw < 1 / 3) down.push(i)
+    }
+    plus.push(Int32Array.from(up))
+    minus.push(Int32Array.from(down))
+  }
+
+  /* Le facteur d'échelle du lemme : racine de trois pour la densité d'un tiers, divisé par la
+     racine de la cible pour que la longueur attendue soit conservée. Une constante commune à
+     tous les points ne changerait rien aux voisinages, mais elle garde la carte à l'échelle où
+     les réglages d'UMAP ont été mesurés. */
+  const scale = Math.sqrt(3 / target)
+  const out: Float32Array[] = []
+  for (const vector of vectors) {
+    const projected = new Float32Array(target)
+    for (let axis = 0; axis < target; axis += 1) {
+      let sum = 0
+      const up = plus[axis]
+      const down = minus[axis]
+      for (let k = 0; k < up.length; k += 1) sum += vector[up[k]]
+      for (let k = 0; k < down.length; k += 1) sum -= vector[down[k]]
+      projected[axis] = sum * scale
+    }
+    out.push(projected)
+  }
+  return out
+}
+
 function normalise(points: number[][]): { x: number; y: number }[] {
   let minX = Infinity
   let minY = Infinity
@@ -206,6 +284,23 @@ export interface ProjectionTuning {
   minDist: number
   spread: number
   pcaDims: number
+  /**
+   * Comment on descend de 1 536 dimensions à `pcaDims`.
+   *
+   * `pca` cherche les directions de plus grande variance ; `random` se contente de conserver
+   * les distances. Le second est bien plus rapide, et c'est au banc des îlots de dire s'il
+   * coûte quelque chose à la lecture de la carte.
+   */
+  reduction?: 'pca' | 'random'
+  /**
+   * La graine, fixe par défaut : deux ouvertures doivent rendre la même carte.
+   *
+   * Elle n'est là que pour les bancs. Compacité et resserrement bougent d'un réglage à l'autre
+   * sans suivre la qualité, et un écart de quelques points ne veut rien dire tant qu'on ne sait
+   * pas ce que la même configuration donne sous une autre graine. C'est la seule façon de
+   * distinguer un gain d'un tirage.
+   */
+  seed?: number
 }
 
 /**
@@ -299,9 +394,13 @@ export function projectSync(
      rapport est affiché. */
   const SCALE = 1000
   const REDUCTION_SHARE = 0.5
-  const reduced = reduce(raw, tuning.pcaDims, (fraction) =>
-    onProgress?.(Math.round(fraction * REDUCTION_SHARE * SCALE), SCALE)
-  )
+  const reduced =
+    tuning.reduction === 'random'
+      ? reduceRandom(raw, tuning.pcaDims)
+      : reduce(raw, tuning.pcaDims, (fraction) =>
+          onProgress?.(Math.round(fraction * REDUCTION_SHARE * SCALE), SCALE)
+        )
+  onProgress?.(Math.round(REDUCTION_SHARE * SCALE), SCALE)
   const umap = new UMAP({
     nComponents: 2,
     /* Plus de voisins pour que la structure d'ensemble ressorte, et une distance minimale
@@ -311,7 +410,7 @@ export function projectSync(
     minDist: tuning.minDist,
     spread: tuning.spread,
     // Graine fixe : la carte doit être la même d'une ouverture à l'autre.
-    random: mulberry32(0x5eed)
+    random: mulberry32(tuning.seed ?? 0x5eed)
   })
   const total = umap.initializeFit(reduced.map((vector) => Array.from(vector)))
   for (let step = 0; step < total; step += 1) {

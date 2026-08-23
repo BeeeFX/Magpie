@@ -3,7 +3,7 @@ import type { BackgroundState, BackgroundTaskKind } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { CLIP_BYTES, THUMBNAIL_BYTES } from '../estimates'
 import { formatBytes, formatDuration } from '../format'
-import { STEP_ORDER, type StepId, type StepState } from '../steps'
+import { STEP_ORDER, STEPS_WITH_LOSS, type StepId, type StepState } from '../steps'
 import { useStore, useT } from '../store'
 import { IconCheck, IconEye, IconImage, IconMic, IconSync, IconTag, IconVideo } from './Icons'
 
@@ -47,7 +47,7 @@ const SYNC_MS = 25_000
 const GROUP_MS = 40_000
 
 /** Les étapes dont le retrait dégrade le classement, et pas seulement la vitesse. */
-const GAIN_KEYS = new Set(['images', 'transcribe', 'clips'])
+const GAIN_KEYS = new Set<string>(STEPS_WITH_LOSS)
 
 export function OrganizerSteps({ onFinished }: Props): React.JSX.Element {
   const t = useT()

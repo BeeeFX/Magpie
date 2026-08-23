@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "fixture": "tsx scripts/make-fixture.ts",
     "check:layout": "tsx scripts/check-layout.ts",
+    "check:i18n": "tsx --tsconfig tsconfig.node.json scripts/check-i18n.ts",
     "check:organizer": "tsx --tsconfig tsconfig.node.json scripts/check-organizer.ts",
     "check:media": "tsx --tsconfig tsconfig.node.json scripts/check-media.ts",
     "check:cache-budget": "tsx --tsconfig tsconfig.node.json scripts/check-cache-budget.mts",

@@ -353,6 +353,17 @@ export const MAP_LAYOUTS = {
 export type MapLayout = keyof typeof MAP_LAYOUTS
 
 /**
+ * Le regard demandé, ramené à un regard connu.
+ *
+ * Il arrivait du renderer et était casté sans regarder. C'était à peu près sans conséquence
+ * tant qu'un regard inconnu ne produisait qu'un mélange vide ; depuis que les projections se
+ * rangent par regard, cette chaîne devient une **clé en base**, et n'importe quoi y entrerait.
+ */
+export function asMapLayout(value: unknown): MapLayout {
+  return typeof value === 'string' && value in MAP_LAYOUTS ? (value as MapLayout) : 'equilibre'
+}
+
+/**
  * Ce que SigLIP sait faire et dont personne ne se servait : comparer une image à des mots.
  *
  * Le classement en thèmes ne voyait que le texte du post, parce que les thèmes sont des

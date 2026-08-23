@@ -26,6 +26,7 @@ import {
   addTag,
   addToCollection,
   mapLabels,
+  pruneMapLabels,
   saveMapLabel,
   deleteMapLabel,
   clearFrozenMap,
@@ -87,6 +88,7 @@ import {
 } from './tagging/collections'
 import {
   forgetMapCache, buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
+import { asMapLayout } from './tagging/vision'
 import {
   countPendingTranscripts,
   isTranscribing,
@@ -471,7 +473,7 @@ export function registerIpc({
   ipcMain.handle('collections:contested', () => contested())
 
   ipcMain.handle('organizer:map', (_event, layout?: string) =>
-    buildOrganizerMap(layout as never)
+    buildOrganizerMap(asMapLayout(layout))
   )
   /* Refaire la carte : on jette les positions rangées et leur empreinte, la prochaine
      ouverture reprojette. C'est la seule sortie, et elle est devenue nécessaire — les
@@ -481,7 +483,12 @@ export function registerIpc({
     forgetMapCache()
     return true
   })
-  ipcMain.handle('map:labels', () => mapLabels())
+  /* Le ménage se fait ici : c'est le seul moment où la question « cette étiquette a-t-elle
+     encore des posts ? » se pose vraiment, et il évite un balayage au démarrage. */
+  ipcMain.handle('map:labels', () => {
+    pruneMapLabels()
+    return mapLabels()
+  })
   ipcMain.handle('map:saveLabel', (_event, id: string, text: string, anchors: string[]) => {
     saveMapLabel({ id: String(id), text: String(text).slice(0, 120), anchors })
     return true

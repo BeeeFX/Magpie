@@ -47,8 +47,11 @@ interface Props {
  */
 const SIZE_MIN = 20
 const SIZE_MAX = 4000
+/* Borné à [0, 1] : l'ampleur ne vaut plus trois cents pour tout le monde depuis qu'elle vient
+   de l'effectif réel du groupe, et une collection plus large que SIZE_MAX poussait la poignée
+   hors de sa glissière. La valeur rangée, elle, garde ses propres bornes côté base. */
 const toSlider = (size: number): number =>
-  Math.log(size / SIZE_MIN) / Math.log(SIZE_MAX / SIZE_MIN)
+  Math.min(1, Math.max(0, Math.log(size / SIZE_MIN) / Math.log(SIZE_MAX / SIZE_MIN)))
 const fromSlider = (value: number): number =>
   Math.round(SIZE_MIN * (SIZE_MAX / SIZE_MIN) ** value)
 

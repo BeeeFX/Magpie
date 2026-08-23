@@ -5694,6 +5694,23 @@ html.window-is-moving .app *::after {
   gap: 4px;
 }
 
+/* Le coup d'œil se tient à part des deux groupes : ce n'est pas un réglage de plus, c'est un
+   aller-retour dont on revient. */
+.library-map__lens {
+  margin-left: 4px;
+}
+
+/* Dans l'écran d'attente, pas sur la carte : le bandeau flottant y serait collé en haut d'un
+   panneau centré. Une ligne de plus sous le compte rendu suffit. */
+.library-map__lens-wait {
+  max-width: 46ch;
+  margin: 2px 0 14px;
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .library-map__label.is-active {
   background: var(--accent, #7b5cff);
   border-color: transparent;

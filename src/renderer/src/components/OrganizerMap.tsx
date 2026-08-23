@@ -25,6 +25,18 @@ const HOVER_DOT = 7
 /** Grille de recherche du point sous le curseur : un balayage linéaire de neuf mille points à
  *  chaque mouvement de souris coûterait plus cher que le dessin lui-même. */
 const BUCKET = 0.02
+
+/**
+ * Ce qu'une étiquette posée à la main retient, et le minimum qu'il lui en faut.
+ *
+ * Les deux ensemble : on ramasse les voisins proches au moment de la pose, et on cesse de la
+ * dessiner s'il en reste moins que ce minimum à l'écran. Un seul endroit, parce que la pose et
+ * l'affichage doivent s'accorder — accepter d'en créer une sur trois voisins puis la montrer
+ * sur un seul reviendrait à nommer le vide.
+ */
+const LABEL_RADIUS = 0.08
+const LABEL_ANCHORS = 24
+const LABEL_MIN_ANCHORS = 3
 /** Rayon de voisinage pour les liens, dans le repère unité de la carte. */
 const LINK_RADIUS = 0.022
 /** Au-delà, la toile devient une bouillie : on garde les plus proches. */
@@ -69,6 +81,14 @@ interface Props {
    * contenu — une étiquette figée en coordonnées désignerait le voisin.
    */
   ownLabels?: { id: string; text: string; anchors: string[] }[]
+  /**
+   * Le nuage entier, filtres compris — uniquement pour placer les étiquettes.
+   *
+   * Sans lui, leur centre de gravité se calculait sur les seuls points survivants : choisir une
+   * collection déplaçait une étiquette au barycentre de ce qu'il en restait, et elle finissait
+   * par nommer autre chose. Un filtre change ce qu'on regarde, pas où sont les endroits.
+   */
+  allPoints?: OrganizerMapPoint[]
   /** Double-clic dans le vide : l'appelant propose de nommer l'endroit. */
   onPlaceLabel?(anchors: string[]): void
   /**
@@ -226,6 +246,7 @@ export function OrganizerMap({
   groupNames,
   showLabels,
   ownLabels,
+  allPoints,
   onPlaceLabel,
   onRemoveLabel,
   collections,
@@ -458,33 +479,39 @@ export function OrganizerMap({
    */
 
   /**
-
-  /**
    * Où poser chaque étiquette personnelle : au centre de gravité de ses ancres.
    *
    * Recalculé à partir des points, jamais rangé : c'est ainsi qu'une étiquette suit le contenu
    * qu'elle nomme quand la carte est reprojetée. Une étiquette figée en coordonnées désignerait
    * le voisin dès la première reprojection — le défaut qu'on a payé sur les frontières.
+   *
+   * Deux nuages, et c'est la correction : la **place** vient du nuage entier, pour qu'un filtre
+   * ne déplace pas un endroit ; la **visibilité** vient des points affichés, parce qu'une
+   * étiquette dont il ne reste presque rien à l'écran nomme le vide. Le seuil est celui de la
+   * pose : on n'a jamais accepté d'en créer une sur moins de trois voisins.
    */
   const ownLabelSpots = useMemo(() => {
     if (!ownLabels || ownLabels.length === 0) return []
-    const at = new Map(data.points.map((point) => [point.id, point]))
+    const at = new Map((allPoints ?? data.points).map((point) => [point.id, point]))
+    const shown = allPoints ? new Set(data.points.map((point) => point.id)) : null
     return ownLabels.flatMap((label) => {
       let x = 0
       let y = 0
       let seen = 0
+      let visible = 0
       for (const anchor of label.anchors) {
         const point = at.get(anchor)
         if (!point) continue
         x += point.x
         y += point.y
         seen += 1
+        if (!shown || shown.has(anchor)) visible += 1
       }
-      // Toutes les ancres disparues : l'étiquette n'a plus rien à nommer, on ne la pose pas.
-      if (seen === 0) return []
+      // Plus assez d'ancres : l'étiquette n'a plus rien à nommer, on ne la pose pas.
+      if (seen === 0 || visible < LABEL_MIN_ANCHORS) return []
       return [{ id: label.id, text: label.text, x: x / seen, y: y / seen }]
     })
-  }, [ownLabels, data.points])
+  }, [ownLabels, data.points, allPoints])
 
   /* Découpage en cases pour le pointage. Reconstruit seulement quand les points changent —
      pas au zoom, qui ne déplace rien dans le repère de la carte. */
@@ -1815,17 +1842,30 @@ export function OrganizerMap({
     (clientX: number, clientY: number): string[] | null => {
       const place = mapPointAt(clientX, clientY)
       if (!place) return null
-      const near = data.points
-        .map((point) => ({ id: point.id, d: Math.hypot(point.x - place.x, point.y - place.y) }))
-        .sort((a, b) => a.d - b.d)
-        .slice(0, 24)
-        .filter((entry) => entry.d < 0.08)
-        .map((entry) => entry.id)
+      /* Par les cases plutôt que par un tri : la version précédente ordonnait les neuf mille
+         points à chaque clic droit pour en garder vingt-quatre. Le découpage existe déjà pour
+         le pointage, et le rayon ne couvre que quatre cases de part et d'autre. */
+      const reach = Math.ceil(LABEL_RADIUS / BUCKET)
+      const cx = Math.floor(place.x / BUCKET)
+      const cy = Math.floor(place.y / BUCKET)
+      const near: { id: string; d: number }[] = []
+      for (let dx = -reach; dx <= reach; dx += 1) {
+        for (let dy = -reach; dy <= reach; dy += 1) {
+          for (const point of buckets.get(`${cx + dx}:${cy + dy}`) ?? []) {
+            const d = Math.hypot(point.x - place.x, point.y - place.y)
+            if (d < LABEL_RADIUS) near.push({ id: point.id, d })
+          }
+        }
+      }
       // Moins de trois voisins : on nommerait le vide, et l'étiquette n'aurait nulle part à
       // revenir après la prochaine projection.
-      return near.length >= 3 ? near : null
+      if (near.length < LABEL_MIN_ANCHORS) return null
+      return near
+        .sort((a, b) => a.d - b.d)
+        .slice(0, LABEL_ANCHORS)
+        .map((entry) => entry.id)
     },
-    [data.points, mapPointAt]
+    [buckets, mapPointAt]
   )
 
   const onPointerDown = (event: React.PointerEvent): void => {

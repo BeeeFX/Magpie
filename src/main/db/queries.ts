@@ -1884,19 +1884,23 @@ export interface MapPosition {
  * main désignerait aussitôt autre chose. C'est ce qui rend le classement par frontières
  * possible : les positions ne bougent plus, les nouveaux posts viennent s'y ajouter.
  */
-export function saveMapPositions(positions: MapPosition[]): void {
+export function saveMapPositions(positions: MapPosition[], layout = 'equilibre'): void {
   if (positions.length === 0) return
   const insert = getDb().prepare(
-    'INSERT INTO post_positions (post_id, x, y) VALUES (?, ?, ?)\n' +
-      '  ON CONFLICT(post_id) DO UPDATE SET x = excluded.x, y = excluded.y'
+    'INSERT INTO post_positions (layout, post_id, x, y) VALUES (?, ?, ?, ?)\n' +
+      '  ON CONFLICT(layout, post_id) DO UPDATE SET x = excluded.x, y = excluded.y'
   )
   getDb().transaction(() => {
-    for (const position of positions) insert.run(position.postId, position.x, position.y)
+    for (const position of positions) insert.run(layout, position.postId, position.x, position.y)
   })()
 }
 
-export function mapPositions(): Map<string, { x: number; y: number }> {
-  const rows = getDb().prepare('SELECT post_id, x, y FROM post_positions').all() as {
+/* Le regard est une chaîne et non son type : la couche base ne connaît pas les recettes de
+   mélange, et n'a pas à les connaître. C'est `organize.ts` qui tient la liste. */
+export function mapPositions(layout = 'equilibre'): Map<string, { x: number; y: number }> {
+  const rows = getDb()
+    .prepare('SELECT post_id, x, y FROM post_positions WHERE layout = ?')
+    .all(layout) as {
     post_id: string
     x: number
     y: number
@@ -1926,21 +1930,21 @@ export function clearFrozenMap(): void {
  * reprojette. Sans elle, un changement de recette ou de voisinage aurait été servi depuis
  * l’ancienne carte indéfiniment, en silence.
  */
-export function mapFingerprint(): string | null {
-  const row = getDb().prepare('SELECT fingerprint FROM map_state WHERE id = 1').get() as
+export function mapFingerprint(layout = 'equilibre'): string | null {
+  const row = getDb().prepare('SELECT fingerprint FROM map_state WHERE layout = ?').get(layout) as
     | { fingerprint: string }
     | undefined
   return row?.fingerprint ?? null
 }
 
-export function saveMapFingerprint(fingerprint: string): void {
+export function saveMapFingerprint(fingerprint: string, layout = 'equilibre'): void {
   getDb()
     .prepare(
-      'INSERT INTO map_state (id, fingerprint, updated_at) VALUES (1, ?, ?)' +
-        '  ON CONFLICT(id) DO UPDATE SET fingerprint = excluded.fingerprint,' +
+      'INSERT INTO map_state (layout, fingerprint, updated_at) VALUES (?, ?, ?)' +
+        '  ON CONFLICT(layout) DO UPDATE SET fingerprint = excluded.fingerprint,' +
         '    updated_at = excluded.updated_at'
     )
-    .run(fingerprint, Date.now())
+    .run(layout, fingerprint, Date.now())
 }
 
 /** Une étiquette posée à la main sur la carte, accrochée aux posts qui l'entouraient. */
@@ -1983,6 +1987,48 @@ export function mapLabels(): MapLabel[] {
       return []
     }
   })
+}
+
+/**
+ * Retire les étiquettes qui ne nomment plus rien.
+ *
+ * Une étiquette est accrochée à des posts, pas à des coordonnées. Quand les derniers
+ * disparaissent — désabonnement, purge, post effacé chez la plateforme — elle cesse d'être
+ * dessinée mais reste en base, invisible et indéfiniment. On la retire.
+ *
+ * **Zéro ancre survivante**, et pas le seuil d'affichage. La carte cesse d'en poser une en
+ * dessous de trois ancres visibles, parce qu'un filtre peut en masquer temporairement ; ici il
+ * s'agit d'une suppression définitive, et elle ne se décide que lorsqu'il ne reste plus rien
+ * à quoi se rattacher.
+ */
+export function pruneMapLabels(): number {
+  const db = getDb()
+  const rows = db.prepare('SELECT id, anchors FROM map_labels').all() as {
+    id: string
+    anchors: string
+  }[]
+  if (rows.length === 0) return 0
+  const alive = db.prepare('SELECT 1 FROM posts WHERE id = ?').pluck()
+  const doomed: string[] = []
+  for (const row of rows) {
+    let anchors: unknown
+    try {
+      anchors = JSON.parse(row.anchors)
+    } catch {
+      doomed.push(row.id)
+      continue
+    }
+    const list = Array.isArray(anchors) ? (anchors as unknown[]) : []
+    const survives = list.some((id) => typeof id === 'string' && alive.get(id) === 1)
+    if (!survives) doomed.push(row.id)
+  }
+  if (doomed.length === 0) return 0
+  const remove = db.prepare('DELETE FROM map_labels WHERE id = ?')
+  db.transaction(() => {
+    for (const id of doomed) remove.run(id)
+  })()
+  console.log(`[magpie] ${doomed.length} étiquette(s) de carte sans ancre retirée(s).`)
+  return doomed.length
 }
 
 export function deleteMapLabel(id: string): void {

@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { join } from 'node:path'
+import { libraryDbPath } from './library-path'
 import { projectSync, TUNING, type ProjectionTuning } from '../src/main/tagging/projection-core'
 import { blend } from '../src/main/tagging/vision'
 import type { ProjectedPoint } from '../src/main/tagging/projection-core'
@@ -23,8 +23,10 @@ import type { ProjectedPoint } from '../src/main/tagging/projection-core'
  * doivent ensuite ranger les nouveaux posts — en dépend entièrement.
  */
 
-const APP = join(process.env['APPDATA'] ?? '', 'magpie')
-const db = new Database(join(APP, 'magpie.db'), { readonly: true })
+/* La même porte que les contrôles : `MAGPIE_DATA_DIR` fait tourner le banc sur une copie de
+   la vraie base plutôt que sur la bibliothèque installée, qu'on ne veut pas ouvrir pendant
+   qu'on s'en sert. */
+const db = new Database(libraryDbPath(), { readonly: true })
 
 const asVector = (b: Buffer): Float32Array =>
   new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))
@@ -193,9 +195,14 @@ function score(tuning: ProjectionTuning): Score {
 /* Le balayage entier, pour qu'il soit rejouable : c'est lui qui a retourné la note sur le
    voisinage dans `projection-core`, et une conclusion qu'on ne peut plus refaire n'est plus
    une mesure. Compter une quinzaine de minutes. */
-const candidates: { label: string; tuning: ProjectionTuning }[] = [
-  { label: '60 voisins (retenu)', tuning: TUNING }
-]
+const SEEDS = [0x5eed, 0x1234, 0xbeef]
+const candidates: { label: string; tuning: ProjectionTuning }[] = SEEDS.flatMap((seed, index) => [
+  { label: `PCA 256, graine ${index + 1}`, tuning: { ...TUNING, seed } },
+  {
+    label: `aléatoire 256, graine ${index + 1}`,
+    tuning: { ...TUNING, reduction: 'random' as const, seed }
+  }
+])
 
 console.log('réglage                              compacité   resserrement   étalement   durée')
 for (const candidate of candidates) {
