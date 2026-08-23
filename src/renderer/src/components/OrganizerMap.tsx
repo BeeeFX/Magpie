@@ -2,18 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { OrganizerMap as MapData, OrganizerMapPoint } from '@shared/types'
 import { useT } from '../store'
 import { neededArea, paintArea, stillCovers, ZOOM_HEADROOM } from '../map-coverage'
-import {
-  buildCellMesh,
-  cellRing,
-  collectionSeeds,
-  meshWalls,
-  moveMeshVertex,
-  splitCell,
-  outerBounds,
-  ringArea,
-  type CellMesh
-} from '../map-cells'
-import { insideRing, type Vertex } from '../map-boundaries'
 import * as perf from '../perf'
 import { edgeKeep, edgeKept, REFERENCE_FRAME, WEB, webTuning } from '../map-render'
 
@@ -73,10 +61,6 @@ interface Props {
   groupNames: Map<string, string>
   /** Les noms d'amas sont-ils dessinés ? Masqués, la toile se voit entière. */
   showLabels: boolean
-  /** Les contours de collections sont-ils tracés ? */
-  showBoundaries: boolean
-  /** En édition, un appui saisit la paroi la plus proche au lieu de déplacer la carte. */
-  editMode: boolean
   /**
    * Étiquettes posées à la main, accrochées à des posts.
    *
@@ -142,27 +126,8 @@ interface Props {
      */
     only?: boolean
   } | null
-  /** Les frontières déjà rangées en base, par groupe. Vides si la carte n'est pas figée. */
-  savedBoundaries: Map<string, Vertex[][]>
-  /** Une frontière vient d'être déformée : à l'appelant de la ranger et de reclasser. */
-  onBoundaryChange(group: string, rings: Vertex[][], inside: string[]): void
-  /** Quelle frontière est en cours de retouche, pour que l'écran puisse le dire. */
-  onEditingChange?(group: string | null): void
-  /**
-   * Deux collections à réunir, désignées par la paroi qui les sépare.
-   *
-   * Effacer une paroi, c'est fusionner : le geste dit exactement ce qu'il fait, et il tombe
-   * naturellement sur l'objet déjà manipulable du maillage. La fusion elle-même passe par le
-   * même chemin que celle de la liste — annulable, et éprouvée.
-   */
-  onMergeGroups?(from: string, to: string): void
-  /**
-   * Une cellule vient d'être scindée : la moitié détachée devient une collection.
-   *
-   * L'appelant reçoit les posts qu'elle contient — c'est lui qui sait nommer une collection et
-   * la faire vivre dans son plan.
-   */
-  onSplitCell?(fromGroup: string, inside: string[]): void
+  /** Refaire la carte depuis zéro : les positions rangées sont effacées et reprojetées. */
+  onRegenerate?(): void
   onLasso(ids: string[]): void
   onHover(point: OrganizerMapPoint | null): void
   /** Clic sur un point : ouvrir le post qu'il représente. */
@@ -260,8 +225,6 @@ export function OrganizerMap({
   includedGroups,
   groupNames,
   showLabels,
-  showBoundaries,
-  editMode,
   ownLabels,
   onPlaceLabel,
   onRemoveLabel,
@@ -270,11 +233,7 @@ export function OrganizerMap({
   showOwnLabels = true,
   menuOnRightClick = false,
   heat = null,
-  savedBoundaries,
-  onBoundaryChange,
-  onEditingChange,
-  onMergeGroups,
-  onSplitCell,
+  onRegenerate,
   onLasso,
   onHover,
   onOpen,
@@ -333,21 +292,6 @@ export function OrganizerMap({
   const [focusGroup, setFocusGroup] = useState<string | null>(null)
   /** Nom survolé, pour lui donner l'aspect d'un bouton — et au curseur la forme qui va avec. */
   const [hoverLabel, setHoverLabel] = useState<string | null>(null)
-  /**
-   * La frontière en cours de retouche, s'il y en a une.
-   *
-   * Une seule à la fois, et c'est délibéré : deux régions qui se recouvrent poseraient la
-   * question « à laquelle appartient ce post » sans réponse. Pousser la frontière d'une
-   * collection creuse celles qu'elle recouvre.
-   */
-  const [editing, setEditing] = useState<string | null>(null)
-  useEffect(() => {
-    onEditingChange?.(editing)
-  }, [editing, onEditingChange])
-  /** Le sommet saisi pendant un glisser, s'il y en a un. */
-  const draggedVertexRef = useRef<number | null>(null)
-  /** Le trait de coupe en cours, quand on scinde une cellule. */
-  const cutRef = useRef<{ from: Vertex; to: Vertex; cell: number } | null>(null)
   /** Où les noms ont été posés au dernier dessin, pour pouvoir les survoler. */
   /** L'emprise des étiquettes personnelles, pour pouvoir en viser une et la retirer. */
   const ownLabelBoxes = useRef<{ id: string; x: number; y: number; half: number; size: number }[]>(
@@ -512,170 +456,8 @@ export function OrganizerMap({
    * par cran, pour un tracé qui ne change pas : les frontières vivent dans l'espace de la
    * carte, pas dans celui de l'écran.
    */
-  /**
-   * Les régions des collections, sous forme de masques modifiables.
-   *
-   * Calculées depuis les points au premier affichage, puis remplacées par celles que
-   * l'utilisateur a déformées et rangées en base. Un masque plutôt qu'un contour : déformer
-   * revient à peindre, et l'appartenance se lit en une case.
-   */
-  /**
-   * Les régions, en contours vectoriels.
-   *
-   * Un anneau de sommets par région, et non plus un masque de 192 × 192 : le masque se
-   * pixellisait dès qu'on zoomait, ne pouvait pas être lissé, et n'offrait aucune poignée à
-   * saisir. Le vectoriel règle les trois — il se trace net à toute échelle, s'arrondit, et
-   * chaque sommet est déjà un point de contrôle.
-   */
-  /**
-   * Le maillage : la source de vérité des frontières.
-   *
-   * Tout en découle — les régions, les parois tracées une seule fois, et le déplacement qui
-   * met à jour les deux côtés d'une paroi du même geste.
-   */
-  const [cellMesh, setCellMesh] = useState<CellMesh | null>(null)
 
   /**
-   * Les cellules ont-elles une raison d'exister ici ?
-   *
-   * La réponse est collante, et c'est délibéré. Masquer les frontières un instant dans
-   * l'organisateur ne doit pas jeter un maillage qu'on vient de retoucher à la main : le
-   * rebâtir au retour écraserait ces retouches par le pavage par défaut. Une fois les cellules
-   * demandées, elles restent donc. Sur la carte de l'accueil les deux drapeaux sont des
-   * constantes fausses : la question n'y a qu'une réponse, et on économise le pavage entier.
-   */
-  const [needsCells, setNeedsCells] = useState(showBoundaries || editMode)
-  useEffect(() => {
-    if (showBoundaries || editMode) setNeedsCells(true)
-  }, [showBoundaries, editMode])
-
-  /**
-   * Les régions, dérivées du maillage.
-   *
-   * Le maillage est la source de vérité, et c'est ce qui fait fonctionner le partage des
-   * parois : déplacer un sommet met à jour toutes les cellules qui le désignent, donc les deux
-   * côtés d'une paroi, sans rien à propager. Les garder en état séparé les détachait du
-   * maillage, et pousser ne bougeait qu'un côté.
-   */
-  const regions = useMemo(() => {
-    const out = new Map<string, Vertex[][]>()
-    if (!cellMesh) return out
-    for (const cell of cellMesh.cells) {
-      const ring = cellRing(cellMesh, cell)
-      if (ring.length < 3) continue
-      const rings = out.get(cell.group)
-      if (rings) rings.push(ring)
-      else out.set(cell.group, [ring])
-    }
-    return out
-  }, [cellMesh])
-
-  useEffect(() => {
-    /* Rien à paver si rien ne le montre.
-       Le maillage ne sert qu'aux frontières et aux poignées d'édition : sur la carte de l'écran
-       principal, ni l'une ni l'autre. Il était pourtant construit à chaque fois — Voronoï des
-       foyers, bordure du nuage, cellules — pour être aussitôt ignoré au dessin. Sur neuf mille
-       points c'est une somme de travail synchrone, sur le thread du rendu, qui ne changeait pas
-       un pixel. */
-    if (!needsCells) return
-    const members = new Map<string, { x: number; y: number }[]>()
-    for (const point of data.points) {
-      if (!point.group) continue
-      const list = members.get(point.group)
-      if (list) list.push({ x: point.x, y: point.y })
-      else members.set(point.group, [{ x: point.x, y: point.y }])
-    }
-    /* Un pavage, et non plus des contours calculés chacun dans son coin. La ligne de niveau
-       d'un champ de densité laissait des interstices — donc des posts dans aucune collection —
-       et une forme qui ondulait sans jamais se refermer sur sa voisine. Le maillage part d'un
-       Voronoï des foyers de chaque collection : la surface est couverte par construction, les
-       cellules ont des parois droites qui se rejoignent, et plusieurs germes par collection
-       lui donnent une cellule à chacun de ses endroits au lieu d'une seule à l'autre bout. */
-    const seeds = [...members]
-      .filter(([, points]) => points.length >= 3)
-      .flatMap(([group, points]) => collectionSeeds(points).map((at) => ({ group, at })))
-    /* Une bordure unique, tirée du nuage entier : le pavage s'arrête où s'arrête la
-       bibliothèque, et les jonctions restent partagées parce que la même ligne coupe tout le
-       monde. Une bordure par cellule les désolidarisait. */
-    const cloud = data.points.map((point) => ({ x: point.x, y: point.y }))
-    setCellMesh(buildCellMesh(seeds, outerBounds(cloud)))
-
-  }, [data.points, savedBoundaries, needsCells])
-
-  /**
-  /**
-   * Toutes les parois, chacune une seule fois.
-   *
-   * Deux cellules voisines décrivent la même paroi, chacune dans son sens : la tracer depuis
-   * leurs contours la peignait deux fois, dans deux couleurs, et ces doubles traits se lisaient
-   * comme un chevauchement. Ici elle n'existe qu'une fois, dans une teinte neutre — l'identité
-   * d'une cellule est portée par son remplissage et par son nom, pas par un bord qu'elle
-   * partage avec une autre.
-   */
-  const wallPath = useMemo(() => {
-    if (!cellMesh) return null
-    const path = new Path2D()
-    for (const wall of meshWalls(cellMesh)) {
-      const from = cellMesh.vertices[wall.from]
-      const to = cellMesh.vertices[wall.to]
-      if (!from || !to) continue
-      path.moveTo(from.x, from.y)
-      path.lineTo(to.x, to.y)
-    }
-    return path
-  }, [cellMesh])
-
-  /**
-   * Les noms à poser quand les frontières sont visibles : un par **cellule**.
-   *
-   * Ce ne sont plus les noms d'amas. Un amas est une densité de points ; une cellule est une
-   * collection, et c'est d'elle qu'on parle quand on regarde des frontières. Les deux se
-   * mélangeaient à l'écran sans qu'on sache lequel on lisait. Une collection en deux endroits
-   * porte donc son nom deux fois, une fois dans chaque cellule — c'est exact, et c'est même le
-   * seul moyen de voir qu'elle est en deux morceaux.
-   *
-   * Les noms d'amas restent utiles ailleurs : sur la carte de l'écran principal, où il n'y a
-   * pas de collection à désigner.
-   */
-  const cellLabels = useMemo(() => {
-    if (!cellMesh) return []
-    return cellMesh.cells
-      .map((cell) => {
-        const ring = cellRing(cellMesh, cell)
-        if (ring.length < 3) return null
-        let x = 0
-        let y = 0
-        for (const vertex of ring) {
-          x += vertex.x / ring.length
-          y += vertex.y / ring.length
-        }
-        return { group: cell.group, x, y, count: Math.round(ringArea(ring) * 10_000), near: 0 }
-      })
-      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-      .sort((left, right) => right.count - left.count)
-  }, [cellMesh])
-
-  /**
-   * Où poser le nom d'une collection quand ses frontières sont visibles.
-   *
-   * Au centre de sa région, et non sur la case la plus fournie de l'amas : quand un contour est
-   * tracé, c'est lui que l'œil suit, et un nom posé à côté de sa région désignerait le voisin.
-   */
-  const regionCentres = useMemo(() => {
-    const centres = new Map<string, { x: number; y: number }>()
-    for (const [group, rings] of regions) {
-      const ring = [...rings].sort((a, b) => b.length - a.length)[0]
-      if (!ring || ring.length === 0) continue
-      let x = 0
-      let y = 0
-      for (const vertex of ring) {
-        x += vertex.x
-        y += vertex.y
-      }
-      centres.set(group, { x: x / ring.length, y: y / ring.length })
-    }
-    return centres
-  }, [regions])
 
   /**
    * Où poser chaque étiquette personnelle : au centre de gravité de ses ancres.
@@ -703,38 +485,6 @@ export function OrganizerMap({
       return [{ id: label.id, text: label.text, x: x / seen, y: y / seen }]
     })
   }, [ownLabels, data.points])
-
-  /**
-   * Les chemins prêts à tracer, refaits seulement quand une région change.
-   *
-   * Chacun porte son emprise, pour pouvoir l'écarter sans l'examiner : zoomé dans un amas,
-   * dix-neuf régions sur vingt sont hors cadre, et les remplir puis les border à chaque image
-   * coûtait sans que rien n'apparaisse.
-   */
-  const boundaryPaths = useMemo(() => {
-    const paths = new Map<string, { path: Path2D; left: number; top: number; right: number; bottom: number }>()
-    for (const [group, rings] of regions) {
-      const path = new Path2D()
-      let left = Infinity
-      let top = Infinity
-      let right = -Infinity
-      let bottom = -Infinity
-      for (const ring of rings) {
-        if (ring.length < 3) continue
-        path.moveTo(ring[0].x, ring[0].y)
-        for (const vertex of ring.slice(1)) path.lineTo(vertex.x, vertex.y)
-        path.closePath()
-        for (const vertex of ring) {
-          if (vertex.x < left) left = vertex.x
-          if (vertex.y < top) top = vertex.y
-          if (vertex.x > right) right = vertex.x
-          if (vertex.y > bottom) bottom = vertex.y
-        }
-      }
-      if (left <= right) paths.set(group, { path, left, top, right, bottom })
-    }
-    return paths
-  }, [regions])
 
   /* Découpage en cases pour le pointage. Reconstruit seulement quand les points changent —
      pas au zoom, qui ne déplace rien dans le repère de la carte. */
@@ -1519,65 +1269,6 @@ export function OrganizerMap({
       }
     }
 
-    /* Les frontières, recopiées une fois dans le repère de la carte. Le carré unité occupe
-       `size × scale` pixels à partir de l'origine de centrage — exactement la transformation
-       de `at()`, donc les contours tombent sur les points qu'ils cernent. */
-    if (showBoundaries && boundaryPaths.size > 0) {
-      /* Tracé dans le repère unité puis mis à l'échelle : le contour reste net quel que soit
-         le zoom, là où l'image de 1 024 pixels se pixellisait dès qu'on approchait. */
-      context.save()
-      context.translate(originX + view.x, originY + view.y)
-      context.scale(span, span)
-      /* Le cadre, ramené dans le repère unité : ce qui n'y touche pas ne se dessine pas.
-         Une marge d'un dixième absorbe le débord des courbes au-delà de leurs sommets. */
-      const seen = {
-        left: (-view.x - originX) / span - 0.1,
-        top: (-view.y - originY) / span - 0.1,
-        right: (-view.x - originX + width) / span + 0.1,
-        bottom: (-view.y - originY + height) / span + 0.1
-      }
-      for (const [group, entry] of boundaryPaths) {
-        if (
-          entry.right < seen.left ||
-          entry.left > seen.right ||
-          entry.bottom < seen.top ||
-          entry.top > seen.bottom
-        ) {
-          continue
-        }
-        const tone = colourOfGroup(group, groupIndex)
-        context.fillStyle = tone
-        context.globalAlpha = editing === group ? 0.22 : 0.1
-        context.fill(entry.path)
-      }
-      if (wallPath) {
-        /* En édition, les parois s'allument et chaque sommet montre sa poignée. Sans ce retour,
-           on appuyait sur la carte sans savoir qu'il y avait quoi que ce soit à saisir — c'est
-           le reproche le plus juste qu'on ait pu me faire sur ce mode. */
-        context.strokeStyle = editMode ? '#ffffff' : '#c8c8d4'
-        context.globalAlpha = editMode ? 0.95 : 0.55
-        // L'épaisseur est donnée en unités de carte : on la ramène à des pixels constants.
-        context.lineWidth = (editMode ? 2.2 : 1.4) / span
-        context.lineJoin = 'round'
-        context.stroke(wallPath)
-      }
-      if (editMode && cellMesh) {
-        const radius = 5 / span
-        context.globalAlpha = 1
-        for (const vertex of cellMesh.vertices) {
-          context.beginPath()
-          context.arc(vertex.x, vertex.y, radius, 0, Math.PI * 2)
-          context.fillStyle = '#ffffff'
-          context.fill()
-          context.lineWidth = 1.6 / span
-          context.strokeStyle = 'rgba(0, 0, 0, 0.65)'
-          context.stroke()
-        }
-      }
-      context.restore()
-      context.globalAlpha = 1
-    }
-
     /* Focus sur un groupe : tout s'efface sauf lui.
        L'effacement se fait en `destination-out` plutôt qu'en peignant un voile de la couleur
        du fond — on retire de l'alpha au lieu d'ajouter une couche. Deux raisons : la toile
@@ -1634,23 +1325,6 @@ export function OrganizerMap({
 
     perf.end()
 
-    if (cutRef.current) {
-      const cut = cutRef.current
-      const [ax, ay] = at(cut.from)
-      const [bx, by] = at(cut.to)
-      context.save()
-      context.strokeStyle = '#ffffff'
-      context.globalAlpha = 0.9
-      context.lineWidth = 2
-      context.setLineDash([6, 4])
-      context.beginPath()
-      context.moveTo(ax + view.x, ay + view.y)
-      context.lineTo(bx + view.x, by + view.y)
-      context.stroke()
-      context.restore()
-    }
-
-
     /* Chaque amas doit porter son nom, y compris quand deux étiquettes se gênent : la plus
        petite s'écarte de son amas avec un trait de rappel, au lieu de disparaître.
        Les amas anonymes étaient le principal reproche fait à la carte, et les faire céder
@@ -1681,7 +1355,7 @@ export function OrganizerMap({
     perf.note('aretes', pathCache.current.list.length)
     perf.note('tampon', covers ? 'recopie' : paintJob.current ? 'en cours' : 'pose')
     perf.begin('noms')
-    const groupTitles = (showBoundaries ? cellLabels : islands).map((island) => ({
+    const groupTitles = islands.map((island) => ({
       key: island.group,
       text: groupNames.get(island.group)?.trim().toLocaleLowerCase() ?? '',
       tone: colourOfGroup(island.group, groupIndex),
@@ -1873,16 +1547,9 @@ export function OrganizerMap({
     tintToken,
     islands,
     links,
-    boundaryPaths,
-    cellLabels,
     ownLabelSpots,
-    cellMesh,
-    editMode,
-    wallPath,
-    regionCentres,
     focusGroup,
     hoverLabel,
-    showBoundaries,
     showLabels,
     view,
     zooming
@@ -2096,7 +1763,7 @@ export function OrganizerMap({
 
   /** Le point de la carte sous le curseur, dans le repère unité. */
   const mapPointAt = useCallback(
-    (clientX: number, clientY: number): Vertex | null => {
+    (clientX: number, clientY: number): { x: number; y: number } | null => {
       const canvas = canvasRef.current
       if (!canvas) return null
       const rect = canvas.getBoundingClientRect()
@@ -2108,118 +1775,6 @@ export function OrganizerMap({
     },
     [view.scale, view.x, view.y]
   )
-
-  /** La région sous le curseur, s'il y en a une. C'est elle qu'on saisit pour la retoucher. */
-  const regionAt = useCallback(
-    (clientX: number, clientY: number): string | null => {
-      const place = mapPointAt(clientX, clientY)
-      if (!place) return null
-      for (const [group, rings] of regions) {
-        if (rings.some((ring) => insideRing(ring, place.x, place.y))) return group
-      }
-      return null
-    },
-    [regions, mapPointAt]
-  )
-
-  /**
-   * Le sommet du maillage le plus proche du curseur.
-   *
-   * Sur le maillage, et non sur la région d'une collection : un sommet appartient souvent à
-   * trois cellules, et c'est en le déplaçant qu'on pousse une paroi **des deux côtés à la
-   * fois**. Chercher dans les anneaux d'une seule collection ne bougeait qu'un côté.
-   *
-   * La tolérance est en pixels d'écran : viser une jonction doit demander la même précision de
-   * la main quel que soit le zoom. Large, parce qu'on vise une paroi, pas un pixel.
-   */
-  const meshVertexAt = useCallback(
-    (clientX: number, clientY: number): number | null => {
-      const canvas = canvasRef.current
-      if (!cellMesh || !canvas) return null
-      const place = mapPointAt(clientX, clientY)
-      if (!place) return null
-      const rect = canvas.getBoundingClientRect()
-      const size = Math.min(rect.width, rect.height)
-      const tolerance = 22 / (size * view.scale)
-      let best: number | null = null
-      let bestDistance = tolerance
-      cellMesh.vertices.forEach((vertex, at) => {
-        const distance = Math.hypot(vertex.x - place.x, vertex.y - place.y)
-        if (distance < bestDistance) {
-          bestDistance = distance
-          best = at
-        }
-      })
-      return best
-    },
-    [cellMesh, mapPointAt, view.scale]
-  )
-
-  /**
-   * La paroi sous le curseur, et les deux collections qu'elle sépare.
-   *
-   * On cherche le segment le plus proche, pas un sommet : une paroi se vise sur toute sa
-   * longueur, alors qu'un sommet est un point. Les deux gestes cohabitent donc — le sommet
-   * déforme, la paroi fusionne — et le sommet gagne quand on est dessus, puisqu'il est plus
-   * précis à atteindre.
-   */
-  const wallAt = useCallback(
-    (clientX: number, clientY: number): { from: string; to: string } | null => {
-      const canvas = canvasRef.current
-      if (!cellMesh || !canvas) return null
-      const place = mapPointAt(clientX, clientY)
-      if (!place) return null
-      const rect = canvas.getBoundingClientRect()
-      const size = Math.min(rect.width, rect.height)
-      const tolerance = 14 / (size * view.scale)
-      let best: { from: string; to: string } | null = null
-      let bestDistance = tolerance
-      for (const wall of meshWalls(cellMesh)) {
-        if (wall.groups.length < 2) continue
-        const a = cellMesh.vertices[wall.from]
-        const b = cellMesh.vertices[wall.to]
-        if (!a || !b) continue
-        const dx = b.x - a.x
-        const dy = b.y - a.y
-        const length = dx * dx + dy * dy
-        const t = length > 0 ? Math.max(0, Math.min(1, ((place.x - a.x) * dx + (place.y - a.y) * dy) / length)) : 0
-        const distance = Math.hypot(place.x - (a.x + dx * t), place.y - (a.y + dy * t))
-        if (distance < bestDistance) {
-          bestDistance = distance
-          best = { from: wall.groups[1], to: wall.groups[0] }
-        }
-      }
-      return best
-    },
-    [cellMesh, mapPointAt, view.scale]
-  )
-
-  /** Déplace le sommet saisi. Toutes les cellules qui le désignent suivent. */
-  const moveVertex = useCallback(
-    (clientX: number, clientY: number): void => {
-      const held = draggedVertexRef.current
-      if (held === null) return
-      const place = mapPointAt(clientX, clientY)
-      if (!place) return
-      setCellMesh((current) => (current ? moveMeshVertex(current, held, place) : current))
-    },
-    [mapPointAt]
-  )
-
-  /**
-   * Fin du geste : on remonte **chaque** collection touchée.
-   *
-   * Une paroi sépare deux cellules : la pousser change le contenu des deux. N'en remonter
-   * qu'une laissait l'autre avec des posts qu'elle avait perdus.
-   */
-  const commitRegion = useCallback((): void => {
-    for (const [group, rings] of regions) {
-      const inside = data.points
-        .filter((point) => rings.some((ring) => insideRing(ring, point.x, point.y)))
-        .map((point) => point.id)
-      onBoundaryChange(group, rings, inside)
-    }
-  }, [regions, data.points, onBoundaryChange])
 
   /** Le nom d'amas sous le curseur, s'il y en a un. */
   /** L'étiquette personnelle sous le curseur, s'il y en a une. */
@@ -2299,42 +1854,6 @@ export function OrganizerMap({
          point se trouvait sous le curseur une fois sur deux et c'est lui qui l'emportait —
          viser le nom devenait un jeu d'adresse. Rien n'est perdu à le prioriser : le point
          reste atteignable partout ailleurs, et les noms se masquent. */
-      /* En retouche, l'appui commence un coup de pinceau au lieu de saisir la carte.
-         Bouton droit ou touche Alt : on creuse au lieu de pousser. */
-      /* En mode édition, l'appui saisit la paroi la plus proche — sans viser un titre ni un
-         point. C'est ce qui manquait : la retouche s'ouvrait par un double-clic dans une région
-         et ne se voyait nulle part, donc personne ne la trouvait. */
-      if (editMode) {
-        /* Le sommet d'abord : il est plus précis à viser, et c'est le geste qu'on fait le plus.
-           Puis la paroi, avec Alt ou le bouton droit — effacer une paroi réunit ses deux
-           collections, et il ne faut pas que ça se produise en voulant déformer. */
-        const grabbed = meshVertexAt(event.clientX, event.clientY)
-        if (grabbed !== null) {
-          draggedVertexRef.current = grabbed
-          return
-        }
-        if (event.altKey || event.button === 2) {
-          const wall = wallAt(event.clientX, event.clientY)
-          if (wall && wall.from !== wall.to) {
-            onMergeGroups?.(wall.from, wall.to)
-            return
-          }
-        }
-        /* Maj + glisser trace une coupe. Le geste dit ce qu'il fait — on dessine la paroi qu'on
-           veut ajouter — et il ne peut pas se confondre avec le déplacement d'un sommet. */
-        if (event.shiftKey && cellMesh) {
-          const place = mapPointAt(event.clientX, event.clientY)
-          if (place) {
-            const which = cellMesh.cells.findIndex((cell) =>
-              insideRing(cellRing(cellMesh, cell), place.x, place.y)
-            )
-            if (which >= 0) {
-              cutRef.current = { from: place, to: place, cell: which }
-              return
-            }
-          }
-        }
-      }
       const overLabel = labelAt(event.clientX, event.clientY)
       clickedRef.current = overLabel ? null : pointAt(event.clientX, event.clientY)
       draggingRef.current = { x: event.clientX - view.x, y: event.clientY - view.y, moved: false }
@@ -2349,16 +1868,6 @@ export function OrganizerMap({
         y: event.clientY - (rect?.top ?? 0)
       })
       draw()
-      return
-    }
-    if (cutRef.current) {
-      const place = mapPointAt(event.clientX, event.clientY)
-      if (place) cutRef.current = { ...cutRef.current, to: place }
-      draw()
-      return
-    }
-    if (draggedVertexRef.current !== null) {
-      moveVertex(event.clientX, event.clientY)
       return
     }
     const dragging = draggingRef.current
@@ -2396,31 +1905,6 @@ export function OrganizerMap({
   }
 
   const onPointerUp = (): void => {
-    if (cutRef.current) {
-      const cut = cutRef.current
-      cutRef.current = null
-      const mesh = cellMesh
-      if (mesh && Math.hypot(cut.to.x - cut.from.x, cut.to.y - cut.from.y) > 0.01) {
-        const fromGroup = mesh.cells[cut.cell]?.group ?? ''
-        /* Le nom vient de l'appelant : ici on ne sait pas nommer une collection. On pose un
-           identifiant provisoire, il le remplacera. */
-        const next = splitCell(mesh, cut.cell, cut.from, cut.to, `split-${Date.now()}`)
-        if (next) {
-          setCellMesh(next)
-          const half = cellRing(next, next.cells[cut.cell + 1])
-          const inside = data.points
-            .filter((point) => insideRing(half, point.x, point.y))
-            .map((point) => point.id)
-          if (inside.length > 0) onSplitCell?.(fromGroup, inside)
-        }
-      }
-      return
-    }
-    if (draggedVertexRef.current !== null) {
-      draggedVertexRef.current = null
-      commitRegion()
-      return
-    }
     if (lassoActiveRef.current) {
       const path = lassoRef.current
       lassoRef.current = []
@@ -2439,10 +1923,6 @@ export function OrganizerMap({
          ouvre le post — et qu'on ne peut pas faire dire deux choses au même clic. */
       const name = labelAt(cursorRef.current.x, cursorRef.current.y)
       setFocusGroup((current) => (name && name !== current ? name : null))
-      /* On ne quitte la retouche qu'en cliquant hors de toute région : la quitter dès qu'un
-         clic tombait à côté d'un sommet obligeait à re-double-cliquer entre chaque
-         déplacement, ce qui rendait l'outil inutilisable. */
-      if (!regionAt(cursorRef.current.x, cursorRef.current.y)) setEditing(null)
     }
     clickedRef.current = null
     draggingRef.current = null
@@ -2535,11 +2015,27 @@ export function OrganizerMap({
           >
             {t('map.placeLabel')}
           </button>
+          {onRegenerate ? (
+            <button
+              type="button"
+              role="menuitem"
+              /* La seule sortie, et elle est devenue nécessaire : les positions sont désormais
+                 rangées en base et relues telles quelles, ce qui est tout l'intérêt — la carte
+                 ne bouge plus sous les pieds. Il faut donc un geste explicite pour demander
+                 qu'elle soit refaite, sinon rien ne la rafraîchirait jamais. */
+              onClick={() => {
+                setMenu(null)
+                onRegenerate()
+              }}
+            >
+              {t('organizer.edgeRegenerate')}
+            </button>
+          ) : null}
         </div>
       ) : null}
       <canvas
         ref={canvasRef}
-        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}${editMode ? ' is-editing' : ''}`.trim()}
+        className={`${lassoing ? 'is-lassoing' : ''}${hoverLabel ? ' is-over-label' : ''}`.trim()}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -2551,23 +2047,12 @@ export function OrganizerMap({
           clickedRef.current = null
         }}
         onDoubleClick={(event) => {
-          /* Double-clic dans une région : on retouche sa frontière.
-             C'était le nom qui servait de poignée, et c'était un piège : afficher les
-             frontières éteint les noms, donc il ne restait aucune boîte à viser — le geste
-             disparaissait à l'instant où l'on affichait ce qu'on voulait retoucher. La
-             région, elle, est toujours là. */
-          const group = regionAt(event.clientX, event.clientY)
-          if (!group) {
-            /* Hors de toute région : on propose de nommer l'endroit. Les ancres sont les posts
-               les plus proches — c'est à eux que l'étiquette restera accrochée, donc c'est eux
-               qu'il faut retenir, pas la position du curseur. */
-            if (!onPlaceLabel) return
-            const anchors = anchorsAt(event.clientX, event.clientY)
-            if (anchors) onPlaceLabel(anchors)
-            return
-          }
-          setFocusGroup(group)
-          setEditing((current) => (current === group ? null : group))
+          /* Double-clic : on propose de nommer l'endroit. Les ancres sont les posts les plus
+             proches — c'est à eux que l'étiquette restera accrochée, donc c'est eux qu'il faut
+             retenir, pas la position du curseur. */
+          if (!onPlaceLabel) return
+          const anchors = anchorsAt(event.clientX, event.clientY)
+          if (anchors) onPlaceLabel(anchors)
         }}
         onContextMenu={(event) => {
           event.preventDefault()

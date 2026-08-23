@@ -120,13 +120,7 @@ const api: MagpieApi = {
   stopTranscription: (): Promise<BackgroundState> => ipcRenderer.invoke('transcribe:stop'),
   organizerMap: (layout?: string): Promise<OrganizerMap> =>
     ipcRenderer.invoke('organizer:map', layout),
-  organizerBoundaries: (): Promise<{ name: string; shape: string }[]> =>
-    ipcRenderer.invoke('organizer:boundaries'),
-  saveOrganizerBoundary: (name: string, shape: string, postIds: string[]): Promise<number> =>
-    ipcRenderer.invoke('organizer:saveBoundary', name, shape, postIds),
-  clearOrganizerBoundaries: (): Promise<boolean> =>
-    ipcRenderer.invoke('organizer:clearBoundaries'),
-  hasFrozenMap: (): Promise<boolean> => ipcRenderer.invoke('organizer:hasFrozenMap'),
+  regenerateMap: (): Promise<boolean> => ipcRenderer.invoke('map:regenerate'),
   mapLabels: (): Promise<{ id: string; text: string; anchors: string[] }[]> =>
     ipcRenderer.invoke('map:labels'),
   saveMapLabel: (id: string, text: string, anchors: string[]): Promise<boolean> =>

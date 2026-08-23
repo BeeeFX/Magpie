@@ -24,63 +24,139 @@ export interface ProjectedPoint {
 }
 
 /**
- * Analyse en composantes principales, par itérations de puissance.
+ * Analyse en composantes principales, par la matrice de covariance.
  *
- * Suffisante ici : on ne cherche pas une décomposition exacte, seulement à jeter les
- * directions qui ne portent rien avant de passer la main à UMAP. Sert aussi de repli complet
- * quand la bibliothèque est trop petite pour qu'UMAP ait du sens.
+ * Mêmes directions principales qu'avant, dans le même ordre, mais on cesse de relire les
+ * données. La version précédente extrayait les axes un par un, et chacun redemandait douze
+ * passes sur les neuf mille vecteurs : trois mille parcours de soixante mégaoctets, soit deux
+ * cents gigaoctets lus pour un calcul que la mémoire bridait bien avant le processeur.
+ *
+ * Ici la bibliothèque n'est lue **qu'une fois**, pour former `A^T A` — et c'est possible parce
+ * que la largeur est plus petite que le nombre de posts : 1 536 contre 9 790. La covariance
+ * tient alors dans 1 536 × 1 536, neuf mégaoctets qui restent au chaud, et toute l'itération
+ * suivante travaille dessus sans jamais retoucher aux vecteurs.
+ *
+ * Mesuré sur la bibliothèque de référence (9 790 posts, 1 536 dimensions, 256 axes) : voir le
+ * message de commit. La projection entière coûtait 91,6 s, dont 64,4 pour cette fonction.
+ *
+ * Les vecteurs propres de `A^T A` sont exactement ce que l'itération de puissance cherchait à
+ * approcher : le sous-espace est le même, et mieux convergé. UMAP ne lit ensuite que des
+ * distances, et une autre base orthonormée du même sous-espace les laisse inchangées.
  */
-function reduce(vectors: Float32Array[], dims: number): Float32Array[] {
+function reduce(
+  vectors: Float32Array[],
+  dims: number,
+  onStep?: (fraction: number) => void
+): Float32Array[] {
   const width = vectors[0].length
-  const target = Math.min(dims, width, vectors.length)
+  const count = vectors.length
+  const target = Math.min(dims, width, count)
+
   const mean = new Float32Array(width)
   for (const vector of vectors) {
-    for (let i = 0; i < width; i += 1) mean[i] += vector[i] / vectors.length
+    for (let i = 0; i < width; i += 1) mean[i] += vector[i] / count
   }
-  const centred = vectors.map((vector) => {
-    const out = new Float32Array(width)
-    for (let i = 0; i < width; i += 1) out[i] = vector[i] - mean[i]
-    return out
-  })
 
-  const components: Float32Array[] = []
+  /* Covariance accumulée par paquets de lignes, chaque paquet transposé d'abord.
+     Le paquet transposé pèse 1 536 × 64 flottants — 400 Ko, donc il tient en cache de second
+     niveau — et chaque case de la covariance devient le produit scalaire de deux colonnes
+     contiguës. Sans ce découpage, une mise à jour de rang 1 par vecteur balaierait les neuf
+     mégaoctets de la covariance neuf mille fois. En double précision : neuf mille termes
+     s'additionnent, et le simple flottant y perdrait les axes de faible variance. */
+  const BLOCK = 64
+  const covariance = new Float64Array(width * width)
+  const column = new Float32Array(width * BLOCK)
+  for (let start = 0; start < count; start += BLOCK) {
+    const rows = Math.min(BLOCK, count - start)
+    for (let row = 0; row < rows; row += 1) {
+      const vector = vectors[start + row]
+      for (let i = 0; i < width; i += 1) column[i * BLOCK + row] = vector[i] - mean[i]
+    }
+    onStep?.((start / count) * 0.7)
+    for (let i = 0; i < width; i += 1) {
+      const left = i * BLOCK
+      const target_ = i * width
+      for (let j = i; j < width; j += 1) {
+        const right = j * BLOCK
+        let sum = 0
+        for (let row = 0; row < rows; row += 1) sum += column[left + row] * column[right + row]
+        covariance[target_ + j] += sum
+      }
+    }
+  }
+  // La moitié inférieure, par symétrie : le produit matrice-vecteur ci-dessous la parcourt.
+  for (let i = 0; i < width; i += 1) {
+    for (let j = i + 1; j < width; j += 1) covariance[j * width + i] = covariance[i * width + j]
+  }
+
+  /* Itération de sous-espace sur la covariance : les 256 directions avancent ensemble, et
+     l'orthonormalisation entre deux passes les empêche de retomber toutes sur la dominante.
+     Départ déterministe, comme avant — deux analyses de la même bibliothèque doivent donner
+     la même carte. Rangé en lignes (i * target + axis) pour que le parcours des axes soit
+     contigu. */
+  let basis = new Float32Array(width * target)
   for (let axis = 0; axis < target; axis += 1) {
-    let direction = new Float32Array(width)
-    // Départ déterministe : deux analyses de la même bibliothèque doivent donner la même
-    // carte, sinon les points sautent d'une ouverture à l'autre sans que rien ait changé.
-    for (let i = 0; i < width; i += 1) direction[i] = Math.sin((axis + 1) * (i + 1))
-    for (let iteration = 0; iteration < 12; iteration += 1) {
-      const next = new Float32Array(width)
-      for (const vector of centred) {
-        let dot = 0
-        for (let i = 0; i < width; i += 1) dot += vector[i] * direction[i]
-        for (let i = 0; i < width; i += 1) next[i] += dot * vector[i]
+    for (let i = 0; i < width; i += 1) basis[i * target + axis] = Math.sin((axis + 1) * (i + 1))
+  }
+  orthonormalise(basis, width, target)
+
+  const ITERATIONS = 12
+  for (let pass = 0; pass < ITERATIONS; pass += 1) {
+    onStep?.(0.7 + (pass / ITERATIONS) * 0.3)
+    const next = new Float32Array(width * target)
+    for (let i = 0; i < width; i += 1) {
+      const row = i * width
+      const out = i * target
+      for (let j = 0; j < width; j += 1) {
+        const weight = covariance[row + j]
+        if (weight === 0) continue
+        const from = j * target
+        for (let axis = 0; axis < target; axis += 1) next[out + axis] += weight * basis[from + axis]
       }
-      // Orthogonalisation vis-à-vis des axes déjà trouvés.
-      for (const previous of components) {
-        let dot = 0
-        for (let i = 0; i < width; i += 1) dot += next[i] * previous[i]
-        for (let i = 0; i < width; i += 1) next[i] -= dot * previous[i]
-      }
-      let norm = 0
-      for (let i = 0; i < width; i += 1) norm += next[i] * next[i]
-      norm = Math.sqrt(norm)
-      if (norm < 1e-9) break
-      for (let i = 0; i < width; i += 1) next[i] /= norm
-      direction = next
     }
-    components.push(direction)
+    orthonormalise(next, width, target)
+    basis = next
   }
 
-  return centred.map((vector) => {
-    const out = new Float32Array(components.length)
-    for (const [axis, component] of components.entries()) {
-      let dot = 0
-      for (let i = 0; i < width; i += 1) dot += vector[i] * component[i]
-      out[axis] = dot
+  const out: Float32Array[] = []
+  for (let row = 0; row < count; row += 1) {
+    const vector = vectors[row]
+    const projected = new Float32Array(target)
+    for (let i = 0; i < width; i += 1) {
+      const value = vector[i] - mean[i]
+      if (value === 0) continue
+      const from = i * target
+      for (let axis = 0; axis < target; axis += 1) projected[axis] += value * basis[from + axis]
     }
-    return out
-  })
+    out.push(projected)
+  }
+  return out
+}
+
+/** Gram-Schmidt modifié, en place, sur une base rangée en lignes. */
+function orthonormalise(basis: Float32Array, width: number, target: number): void {
+  for (let axis = 0; axis < target; axis += 1) {
+    for (let previous = 0; previous < axis; previous += 1) {
+      let dot = 0
+      for (let i = 0; i < width; i += 1) {
+        dot += basis[i * target + axis] * basis[i * target + previous]
+      }
+      if (dot === 0) continue
+      for (let i = 0; i < width; i += 1) {
+        basis[i * target + axis] -= dot * basis[i * target + previous]
+      }
+    }
+    let norm = 0
+    for (let i = 0; i < width; i += 1) {
+      const value = basis[i * target + axis]
+      norm += value * value
+    }
+    norm = Math.sqrt(norm)
+    /* Une direction épuisée : le sous-espace a moins de rang que d'axes demandés. On la laisse
+       à zéro plutôt que de diviser par presque rien — elle ne porte de toute façon rien. */
+    if (norm < 1e-9) continue
+    for (let i = 0; i < width; i += 1) basis[i * target + axis] /= norm
+  }
 }
 
 /** Ramène le nuage dans un carré unité, en gardant les proportions. */
@@ -217,7 +293,15 @@ export function projectSync(
     return normalise(flat).map((point, index) => ({ id: ids[index], ...point }))
   }
 
-  const reduced = reduce(raw, tuning.pcaDims)
+  /* Deux phases sur une seule échelle. La réduction précède UMAP et pèse à peu près
+     autant : sans compte rendu, la barre restait immobile une demi-minute avant de
+     démarrer, ce qui se lit comme un blocage. Le millième est arbitraire — seul le
+     rapport est affiché. */
+  const SCALE = 1000
+  const REDUCTION_SHARE = 0.5
+  const reduced = reduce(raw, tuning.pcaDims, (fraction) =>
+    onProgress?.(Math.round(fraction * REDUCTION_SHARE * SCALE), SCALE)
+  )
   const umap = new UMAP({
     nComponents: 2,
     /* Plus de voisins pour que la structure d'ensemble ressorte, et une distance minimale
@@ -232,9 +316,16 @@ export function projectSync(
   const total = umap.initializeFit(reduced.map((vector) => Array.from(vector)))
   for (let step = 0; step < total; step += 1) {
     umap.step()
-    if (step % 64 === 63) onProgress?.(step + 1, total)
+    /* Toutes les seize étapes : à 64, une projection d’une minute n’envoyait que trois
+       nouvelles, et une barre qui ne bouge pas se lit comme un blocage. */
+    if (step % 16 === 15) {
+      onProgress?.(
+        Math.round((REDUCTION_SHARE + ((step + 1) / total) * (1 - REDUCTION_SHARE)) * SCALE),
+        SCALE
+      )
+    }
   }
-  onProgress?.(total, total)
+  onProgress?.(SCALE, SCALE)
   return normalise(umap.getEmbedding()).map((point, index) => ({ id: ids[index], ...point }))
 }
 

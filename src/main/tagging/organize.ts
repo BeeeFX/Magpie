@@ -21,7 +21,8 @@ import {
   postImageEmbeddings,
   mapPositions,
   saveMapPositions,
-  hasFrozenMap,
+  mapFingerprint,
+  saveMapFingerprint,
   addToCollection,
   type LocalVideoFeature,
   type OrganizerRuleRow,
@@ -30,7 +31,7 @@ import {
 import { centreVectors, embedItems, embedTexts } from './embeddings'
 import { blend, encodeTopicPrompts, toVector, topicStandoff, MAP_LAYOUTS, type MapLayout } from './vision'
 import { propagateByImage } from './propagate'
-import { project, type ProjectedPoint } from './projection'
+import { project, TUNING, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
 
@@ -790,22 +791,6 @@ function placeAgainstFrozen(
   return out
 }
 
-/**
- * Fige la carte telle qu'elle est affichée.
- *
- * Appelé au moment où l'utilisateur pose sa première frontière, et jamais avant : c'est ce
- * geste qui donne un sens aux positions. Les figer d'office imposerait une carte immuable à
- * ceux qui ne s'en serviront pas, et les priverait des reprojections qui suivent l'évolution
- * de leur bibliothèque.
- */
-export function freezeMap(): boolean {
-  if (!lastProjection || lastProjection.length === 0) return false
-  saveMapPositions(
-    lastProjection.map((point) => ({ postId: point.id, x: point.x, y: point.y }))
-  )
-  return true
-}
-
 /** Dernier plan produit. La carte le réutilise au lieu de relancer toute l'analyse. */
 let lastPlan: AiCollectionPlan | null = null
 /** Dernière projection. Rouvrir l'organisateur ne doit pas refaire neuf secondes de calcul. */
@@ -818,6 +803,17 @@ let lastProjection: ProjectedPoint[] | null = null
  * par essai.
  */
 const layoutProjections = new Map<string, ProjectedPoint[]>()
+
+/**
+ * Oublie tout ce qui est gardé en mémoire sur la carte.
+ *
+ * Sert au geste « refaire la carte » : effacer les positions en base ne suffit pas, le
+ * processus principal garde la projection courante et la resservirait telle quelle.
+ */
+export function forgetMapCache(): void {
+  lastProjection = null
+  layoutProjections.clear()
+}
 
 export async function buildLocalCollectionPlan(
   items: OrganizationItem[],
@@ -1008,6 +1004,27 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
  * l'analyse, et n'y ajoute qu'une projection. Un point et sa catégorie racontent donc la même
  * chose, ce qui serait faux si les deux étaient calculés séparément.
  */
+/**
+ * Ce qui, en changeant, rend les positions rangées caduques.
+ *
+ * Les réglages de la projection et la recette du mélange — pas le nombre de posts. Des posts
+ * qui arrivent ne doivent pas déplacer la carte : ils viennent s’y poser par interpolation,
+ * et c'est la règle de couverture de `placeAgainstFrozen` qui décide seule quand reprojeter
+ * franchement. Compter les posts ici aurait tout rejeté à chaque synchronisation.
+ */
+function projectionFingerprint(): string {
+  const recipe = MAP_LAYOUTS.equilibre
+  return [
+    'v1',
+    `n=${TUNING.neighbours}`,
+    `d=${TUNING.minDist}`,
+    `s=${TUNING.spread}`,
+    `pca=${TUNING.pcaDims}`,
+    `u=${TUNING.unit ? 1 : 0}`,
+    `mix=${recipe.text}/${recipe.structure}/${recipe.meaning}`
+  ].join('|')
+}
+
 export async function buildOrganizerMap(layout?: MapLayout): Promise<OrganizerMap> {
   /* Le plan vient d'être calculé par l'écran qui nous appelle : le redemander relançait
      toute l'analyse une seconde fois — chargement des vignettes, regroupement, tout. */
@@ -1045,7 +1062,9 @@ export async function buildOrganizerMap(layout?: MapLayout): Promise<OrganizerMa
        relit donc ce qui est rangé en base, et on ne projette que ce qui manque — un post
        arrivé depuis. Effacer la carte figée, c'est le bouton « Regénérer », et il prévient. */
     if (!lastProjection) {
-      const frozen = mapPositions()
+      /* Mêmes réglages, ou rien : une recette ou un voisinage qui change produit une autre
+         carte, et la servir depuis l’ancienne serait un mensonge silencieux. */
+      const frozen = mapFingerprint() === projectionFingerprint() ? mapPositions() : new Map()
       if (frozen.size > 0) {
         const kept = [...vectors.keys()].filter((id) => frozen.has(id))
         /* Une carte figée qui ne couvre presque plus la bibliothèque n'en est plus une : au
@@ -1061,13 +1080,23 @@ export async function buildOrganizerMap(layout?: MapLayout): Promise<OrganizerMa
       lastProjection = await project(vectors, (done, total) =>
         setProgress({ stage: 'projecting', done, total, running: true })
       )
-      /* On ne fige qu'à la demande — c'est-à-dire quand des frontières existent déjà et
-         qu'on vient de les honorer. Enregistrer à chaque analyse figerait la carte de tout
-         le monde, y compris de ceux qui ne se serviront jamais des frontières. */
-      if (hasFrozenMap()) {
-        saveMapPositions(lastProjection.map((point) => ({ postId: point.id, x: point.x, y: point.y })))
-      }
     }
+
+    /* On range **toujours**, et c'était le défaut central de cet écran.
+
+       La sauvegarde était conditionnée à `hasFrozenMap()` — donc à ce que des positions soient
+       déjà rangées. Or les deux seules écritures de `post_positions` étaient cette ligne et
+       `freezeMap()`, que plus rien n'appelle depuis que l'édition des frontières a quitté
+       l'interface en 0.29.0. L'ensemble ne pouvait donc plus jamais devenir non vide : une
+       bibliothèque qui n'avait pas été figée avant ne le serait plus jamais, et refaisait la
+       projection entière **à chaque ouverture de la carte, indéfiniment**.
+
+       Mesuré sur la bibliothèque de référence : quatre-vingt-onze secondes de calcul pour un
+       résultat que la base rend en deux millisecondes. */
+    saveMapPositions(
+      lastProjection.map((point) => ({ postId: point.id, x: point.x, y: point.y }))
+    )
+    saveMapFingerprint(projectionFingerprint())
   } finally {
     // Toujours, y compris sur échec : sinon l'indicateur reste violet et animé sans fin.
     setProgress({ stage: 'idle', done: 0, total: 0, running: false })

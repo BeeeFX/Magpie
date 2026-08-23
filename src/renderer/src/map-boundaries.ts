@@ -15,6 +15,14 @@
  * Le champ sert deux fois, et c'est ce qui rend l'ensemble simple : il donne le tracé, et il
  * répond aussi à « ce point est-il dedans ? » sans qu'on ait à reconstituer un polygone
  * fermé. Un test d'appartenance se réduit à lire une case.
+ *
+ * **Plus personne ne l'affiche.** L'édition des frontières a quitté l'interface en 0.29.0,
+ * quand une collection est devenue une requête plutôt qu’une région — la carte n’est qu’une
+ * ombre, UMAP écrasant mille cinq cents dimensions sur deux, et une paroi tracée dessus ne
+ * décrivait pas ce qu’on croyait. Le module reste parce que les bancs s’en servent :
+ * `bench:map-islands` mesure la compacité des collections avec `ownershipMasks`, et c’est
+ * cette mesure qui a fixé le voisinage de la projection. `check:boundaries` le vérifie.
+ * Rien ici n’est importé par le rendu.
  */
 
 /** Côté de la grille du champ, en cases. */

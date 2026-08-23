@@ -389,10 +389,8 @@ export interface MagpieApi {
   stopTranscription(): Promise<BackgroundState>
   /** `layout` ne concerne que la carte de l'écran principal : l'organisateur n'en a qu'un. */
   organizerMap(layout?: string): Promise<OrganizerMap>
-  organizerBoundaries(): Promise<{ name: string; shape: string }[]>
-  saveOrganizerBoundary(name: string, shape: string, postIds: string[]): Promise<number>
-  clearOrganizerBoundaries(): Promise<boolean>
-  hasFrozenMap(): Promise<boolean>
+  /** Jette les positions rangées : la prochaine ouverture de la carte reprojette. */
+  regenerateMap(): Promise<boolean>
   mapLabels(): Promise<{ id: string; text: string; anchors: string[] }[]>
   saveMapLabel(id: string, text: string, anchors: string[]): Promise<boolean>
   deleteMapLabel(id: string): Promise<boolean>

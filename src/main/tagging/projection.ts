@@ -3,7 +3,7 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import type { ProjectedPoint } from './projection-core'
 
-export { projectSync, type ProjectedPoint } from './projection-core'
+export { projectSync, TUNING, type ProjectedPoint } from './projection-core'
 
 /**
  * Où trouver le script du fil, quel que soit l'empaquetage.

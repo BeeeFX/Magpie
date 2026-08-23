@@ -24,7 +24,17 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const POINTS = 9740
-const WIDTH = 384
+/**
+ * La largeur de production, et c'est une correction.
+ *
+ * Le banc mesurait 384 — la seule dimension du vecteur de texte. Or la carte projette le
+ * mélange : 384 de texte, 384 de structure, 768 de sens, soit 1 536. Le coût de la réduction
+ * est linéaire en largeur, donc ce banc tournait quatre fois plus léger que la vraie
+ * projection, et le plafond de deux minutes en dessous duquel il vérifie était calibré sur
+ * un calcul qui n’existe pas. C’est ce qui a rendu invisibles les quatre-vingt-onze secondes
+ * mesurées sur la bibliothèque de référence.
+ */
+const WIDTH = 1536
 
 async function main(): Promise<void> {
   console.log('Vérification de la carte sémantique')

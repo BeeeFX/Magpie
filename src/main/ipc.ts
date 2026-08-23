@@ -25,13 +25,10 @@ import { dataDir, getDb, mediaDir, writeDataDirLocation } from './db'
 import {
   addTag,
   addToCollection,
-  collectionBoundaries,
   mapLabels,
   saveMapLabel,
   deleteMapLabel,
-  saveCollectionBoundary,
   clearFrozenMap,
-  hasFrozenMap,
   collectionsForPost,
   countDemoPosts,
   createCollection,
@@ -89,7 +86,7 @@ import {
   setSize as setCollectionSize
 } from './tagging/collections'
 import {
-  freezeMap, buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
+  forgetMapCache, buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
 import {
   countPendingTranscripts,
   isTranscribing,
@@ -476,22 +473,14 @@ export function registerIpc({
   ipcMain.handle('organizer:map', (_event, layout?: string) =>
     buildOrganizerMap(layout as never)
   )
-  ipcMain.handle('organizer:boundaries', () => collectionBoundaries())
-  ipcMain.handle(
-    'organizer:saveBoundary',
-    (_event, name: string, shape: string, postIds: string[]) => {
-      /* Ranger la frontière fige la carte du même coup : sans les positions, le contour
-         désignerait n'importe quoi à la prochaine analyse. Les deux vont ensemble, toujours. */
-      freezeMap()
-      saveCollectionBoundary(String(name), String(shape))
-      return postIds.length
-    }
-  )
-  ipcMain.handle('organizer:clearBoundaries', () => {
+  /* Refaire la carte : on jette les positions rangées et leur empreinte, la prochaine
+     ouverture reprojette. C'est la seule sortie, et elle est devenue nécessaire — les
+     positions sont désormais permanentes, ce qui est tout leur intérêt. */
+  ipcMain.handle('map:regenerate', () => {
     clearFrozenMap()
+    forgetMapCache()
     return true
   })
-  ipcMain.handle('organizer:hasFrozenMap', () => hasFrozenMap())
   ipcMain.handle('map:labels', () => mapLabels())
   ipcMain.handle('map:saveLabel', (_event, id: string, text: string, anchors: string[]) => {
     saveMapLabel({ id: String(id), text: String(text).slice(0, 120), anchors })

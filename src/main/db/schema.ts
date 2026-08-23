@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 20
+export const SCHEMA_VERSION = 22
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -363,6 +363,40 @@ SELECT id, query, 1, prototype_text, prototype_meaning, 0
   FROM collections WHERE query IS NOT NULL AND trim(query) <> '';
 `
 
+/**
+ * Ce qui a produit les positions rangées dans post_positions.
+ *
+ * Sans elle, la carte figée ne pouvait pas savoir si elle était encore valable : la seule
+ * question posée était « y a-t-il des positions ? », jamais « viennent-elles des mêmes
+ * réglages ? ». Un changement de recette ou de voisinage aurait donc été servi depuis
+ * l’ancienne carte, indéfiniment et sans que rien ne le signale.
+ *
+ * Le nombre de posts n'entre **pas** dans l'empreinte, et c'est délibéré : des posts qui
+ * arrivent ne doivent pas déplacer la carte, ils viennent s’y poser. C’est déjà ce que fait
+ * `placeAgainstFrozen`, et sa règle de couverture décide seule quand reprojeter pour de bon.
+ */
+export const MIGRATION_21_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS map_state (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  fingerprint TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+`
+
+/**
+ * Les frontières s'en vont.
+ *
+ * Leur édition a quitté l'interface en 0.29.0 quand une collection est devenue une requête ;
+ * depuis, le seul appelant passait `showBoundaries={false}` en dur. La table restait, et sur
+ * les bases migrées elle portait encore une colonne `mask` là où le code interrogeait
+ * `shape` — donc « no such column » à chaque appel, sur une base pourtant à jour. Une
+ * migration publiée puis corrigée sur place ne reconstruit rien chez ceux qui l’ont déjà
+ * passée : la corriger demandait ce palier neuf. Autant la retirer.
+ */
+export const MIGRATION_22_SQL = /* sql */ `
+DROP TABLE IF EXISTS collection_boundaries;
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -628,10 +662,11 @@ CREATE TABLE IF NOT EXISTS post_positions (
   y       REAL NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS collection_boundaries (
-  name       TEXT PRIMARY KEY,
-  shape      TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
+-- Les réglages qui ont produit ces positions : voir MIGRATION_21_SQL.
+CREATE TABLE IF NOT EXISTS map_state (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  fingerprint TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(
@@ -691,5 +726,7 @@ export const MIGRATIONS: Record<number, string> = {
   17: MIGRATION_17_SQL,
   18: MIGRATION_18_SQL,
   19: MIGRATION_19_SQL,
-  20: MIGRATION_20_SQL
+  20: MIGRATION_20_SQL,
+  21: MIGRATION_21_SQL,
+  22: MIGRATION_22_SQL
 }

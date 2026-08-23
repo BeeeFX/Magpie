@@ -5,7 +5,6 @@ import type {
   OrganizerProgress
 } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
-import type { Vertex } from '../map-boundaries'
 import { displayName } from '../format'
 import { useStore, useT } from '../store'
 import { IconClose } from './Icons'
@@ -33,16 +32,8 @@ import { MapPostPanel } from './MapPostPanel'
  * un canevas noir sans explication passerait pour une panne.
  */
 
-/**
- * Ce que cet écran ne fait pas, hissé hors du composant.
- *
- * La carte d'accueil ne trace pas de frontières et ne se modifie pas : les trois rappels et la
- * table de contours qu'elle passe quand même sont donc constants. Les écrire à l'appel les
- * recréait à chaque rendu, et `OrganizerMap` en fait des dépendances — dont celle qui
- * reconstruit le pavage entier, Voronoï compris. Il se refaisait à chaque vignette arrivée, sur
- * le thread du rendu, pour un maillage que cet écran ne dessine même pas.
- */
-const NO_BOUNDARIES: Map<string, Vertex[][]> = new Map()
+/** Un rappel qui ne fait rien, hissé hors du composant : réécrit à chaque rendu, il
+    changeait d’identité et refaisait travailler la carte pour rien. */
 const IGNORE = (): void => {}
 
 /** Les étapes que l'analyse annonce, dans l'ordre où elle les traverse. */
@@ -379,10 +370,14 @@ export function LibraryMap(): React.JSX.Element {
         includedGroups={includedGroups}
         groupNames={groupNames}
         showLabels={titles.groups}
-        showBoundaries={false}
-        editMode={false}
-        savedBoundaries={NO_BOUNDARIES}
-        onBoundaryChange={IGNORE}
+        onRegenerate={() => {
+          /* On jette la carte rangée, puis on redemande : `attempt` est le seul moyen de
+             refaire tourner l'effet, aucun autre état ne change. */
+          void magpie
+            .regenerateMap()
+            .then(() => setAttempt((count) => count + 1))
+            .catch((error) => console.warn('[magpie] Carte non regénérée', error))
+        }}
         onLasso={IGNORE}
         onHover={(point) => {
           const request = ++hoverRef.current

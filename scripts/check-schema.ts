@@ -147,54 +147,74 @@ console.log('\nSCHEMA_SQL')
   conn.close()
 }
 
-/* Le cœur du contrôle : chaque migration, rejouée sur une base neuve, ne doit rien apporter.
-   Une instruction qui réussit *et* fait apparaître un objet désigne précisément ce que
-   SCHEMA_SQL a oublié. Une colonne déjà là se signale par « duplicate column name » : c'est
-   le succès, pas l'échec. */
-console.log('\nchaque migration est déjà contenue dans SCHEMA_SQL')
-for (const version of versions) {
+/* Le cœur du contrôle : les migrations rejouées **dans l’ordre**, sur une base neuve issue de
+   SCHEMA_SQL, ne doivent rien laisser derrière elles. Une instruction qui réussit et fait
+   apparaître un objet désigne ce que SCHEMA_SQL a oublié ; une colonne déjà là se signale par
+   « duplicate column name », et c’est le succès.
+
+   Cumulativement, et non palier par palier : un objet créé à un palier puis retiré à un autre
+   — collection_boundaries, créée en v16 et supprimée en v22 — ne doit pas compter comme un
+   oubli. Seul ce qui survit à toute l’échelle en est un. */
+console.log('')
+console.log('l’échelle rejouée en entier')
+{
   const conn = fresh()
   const before = shapeOf(conn)
-  const missing: string[] = []
+  const introduced = new Map<string, number>()
   const errors: string[] = []
 
-  for (const statement of splitStatements(MIGRATIONS[version])) {
-    try {
-      conn.exec(statement)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (!/duplicate column name|already exists/i.test(message)) {
-        errors.push(`${message} — « ${statement.split('\n')[0].slice(0, 70)} »`)
+  for (const version of versions) {
+    for (const statement of splitStatements(MIGRATIONS[version])) {
+      try {
+        conn.exec(statement)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!/duplicate column name|already exists/i.test(message)) {
+          errors.push(`v${version} : ${message} — « ${statement.split(String.fromCharCode(10))[0].slice(0, 60)} »`)
+        }
+      }
+    }
+    const now = shapeOf(conn)
+    for (const key of now.objects.keys()) {
+      if (!before.objects.has(key) && !introduced.has(key)) introduced.set(key, version)
+    }
+    for (const [table, cols] of now.columns) {
+      const had = before.columns.get(table)
+      if (!had) continue
+      for (const column of cols) {
+        const key = `column:${table}.${column}`
+        if (!had.includes(column) && !introduced.has(key)) introduced.set(key, version)
       }
     }
   }
 
   const after = shapeOf(conn)
+  const surviving: string[] = []
   for (const key of after.objects.keys()) {
-    if (!before.objects.has(key)) missing.push(key)
+    if (!before.objects.has(key)) surviving.push(`${key} (v${introduced.get(key) ?? 0})`)
   }
   for (const [table, cols] of after.columns) {
     const had = before.columns.get(table)
     if (!had) continue
-    for (const col of cols) if (!had.includes(col)) missing.push(`column:${table}.${col}`)
+    for (const column of cols) {
+      const key = `column:${table}.${column}`
+      if (!had.includes(column)) surviving.push(`${key} (v${introduced.get(key) ?? 0})`)
+    }
   }
   conn.close()
 
   check(
-    `v${version}`,
-    missing.length === 0 && errors.length === 0,
-    [
-      missing.length ? `absent de SCHEMA_SQL : ${missing.join(', ')}` : '',
-      errors.length ? `erreurs : ${errors.join(' | ')}` : ''
-    ]
-      .filter(Boolean)
-      .join(' ; ')
+    'les migrations n’apportent rien que SCHEMA_SQL n’ait déjà',
+    surviving.length === 0,
+    surviving.join(', ')
   )
+  check('aucune migration ne lève', errors.length === 0, errors.join(' | '))
 }
 
+console.log('')
 console.log(
   failures === 0
-    ? '\nSCHEMA_SQL et les migrations disent la même chose.'
-    : `\n${failures} écart(s). Une installation neuve n'aurait pas ce que les migrations produisent.`
+    ? 'SCHEMA_SQL et les migrations disent la même chose.'
+    : `${failures} écart(s). Une installation neuve n’aurait pas ce que les migrations produisent.`
 )
 process.exit(failures === 0 ? 0 : 1)

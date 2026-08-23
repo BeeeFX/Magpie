@@ -1888,38 +1888,6 @@ export function mapPositions(): Map<string, { x: number; y: number }> {
 }
 
 /**
- * La région d'une collection : ses anneaux de sommets, en JSON, dans le repère unité.
- *
- * Du vectoriel plutôt qu'un masque de bits. Le masque se pixellisait au zoom, ne pouvait pas
- * être lissé, et n'offrait aucune poignée à saisir ; les sommets, eux, sont déjà les points de
- * contrôle de la courbe qu'on trace.
- */
-export interface CollectionBoundary {
-  name: string
-  shape: string
-}
-
-export function saveCollectionBoundary(name: string, shape: string): void {
-  getDb()
-    .prepare(
-      'INSERT INTO collection_boundaries (name, shape, updated_at) VALUES (?, ?, ?)\n' +
-        '  ON CONFLICT(name) DO UPDATE SET shape = excluded.shape, updated_at = excluded.updated_at'
-    )
-    .run(name, shape, Date.now())
-}
-
-export function collectionBoundaries(): CollectionBoundary[] {
-  return getDb().prepare('SELECT name, shape FROM collection_boundaries').all() as {
-    name: string
-    shape: string
-  }[]
-}
-
-export function deleteCollectionBoundary(name: string): void {
-  getDb().prepare('DELETE FROM collection_boundaries WHERE name = ?').run(name)
-}
-
-/**
  * Efface la carte figée **et** les frontières, ensemble.
  *
  * Jamais l'une sans l'autre : une frontière ne veut rien dire sans les positions contre
@@ -1929,16 +1897,33 @@ export function deleteCollectionBoundary(name: string): void {
  */
 export function clearFrozenMap(): void {
   getDb().transaction(() => {
-    getDb().prepare('DELETE FROM collection_boundaries').run()
     getDb().prepare('DELETE FROM post_positions').run()
+    getDb().prepare('DELETE FROM map_state').run()
   })()
 }
 
-/** La carte est-elle figée ? Sert à savoir si les frontières ont un sens. */
-export function hasFrozenMap(): boolean {
-  return (
-    ((getDb().prepare('SELECT COUNT(*) n FROM post_positions').get() as { n: number }).n ?? 0) > 0
-  )
+/**
+ * L'empreinte des réglages qui ont produit les positions rangées, ou null.
+ *
+ * Lue avant de servir la carte figée : mêmes réglages, on relit ; réglages différents, on
+ * reprojette. Sans elle, un changement de recette ou de voisinage aurait été servi depuis
+ * l’ancienne carte indéfiniment, en silence.
+ */
+export function mapFingerprint(): string | null {
+  const row = getDb().prepare('SELECT fingerprint FROM map_state WHERE id = 1').get() as
+    | { fingerprint: string }
+    | undefined
+  return row?.fingerprint ?? null
+}
+
+export function saveMapFingerprint(fingerprint: string): void {
+  getDb()
+    .prepare(
+      'INSERT INTO map_state (id, fingerprint, updated_at) VALUES (1, ?, ?)' +
+        '  ON CONFLICT(id) DO UPDATE SET fingerprint = excluded.fingerprint,' +
+        '    updated_at = excluded.updated_at'
+    )
+    .run(fingerprint, Date.now())
 }
 
 /** Une étiquette posée à la main sur la carte, accrochée aux posts qui l'entouraient. */
