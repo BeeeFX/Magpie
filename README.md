@@ -49,7 +49,7 @@ Magpie also *looks* at your posts. Two local vision models read every thumbnail 
 
 And it *listens*. Whisper transcribes the speech in your videos on your machine, which is often a reel's only real text. Each clip is transcribed in the language it is actually spoken in, guessed from its caption and from the library around it — a French reel heard as English does not come out approximate, it comes out invented.
 
-Nothing is filed without your approval: rename a category, exclude it, or merge related suggestions before creating the collections.
+Analysing does not commit you to anything: the collections it proposes are ordinary collections, and you can rename, recolour, merge or delete any of them afterwards — or undo the whole run in one click.
 
 ### A map of what you saved
 
@@ -65,7 +65,7 @@ The reach is a number of posts, not a confidence score, and that is a deliberate
 
 - Selecting a collection paints the whole library as a heatmap, so you see it bleed outward and know what one more notch would catch.
 - One post can belong to several collections, because that is how meaning actually works.
-- Rename, recolour, merge or delete a collection at any time; renaming only changes the label, never what is inside.
+- Rename, recolour, merge or delete a collection at any time from the map’s side rail; renaming only changes the label, never what is inside.
 - Hide everything outside the collection when you want to read its shape alone.
 
 ![Magpie local collection organiser](docs/assets/magpie-organizer.png)

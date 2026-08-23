@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useModalFocus } from '../useModalFocus'
 import type {
   AiProvider,
   LanguageChoice,
@@ -93,7 +94,6 @@ export function Settings(): React.JSX.Element | null {
   const [rendered, setRendered] = useState(open)
   const [closing, setClosing] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
-  const returnFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -147,36 +147,17 @@ export function Settings(): React.JSX.Element | null {
     void magpie.hasAiKey(aiProvider).then(setAiKeyStored)
   }, [open, aiProvider])
 
+  /* Le piège de tabulation, l’entrée du focus et son retour vivent dans `useModalFocus` :
+     trois fenêtres les demandent, et seule celle-ci les avait. `Échap` reste ici. */
+  useModalFocus(open, panelRef)
+
   useEffect(() => {
     if (!open) return
-    returnFocusRef.current = document.activeElement as HTMLElement | null
-    const panel = panelRef.current
-    requestAnimationFrame(() => {
-      panel?.querySelector<HTMLElement>('button, input, select, [tabindex]:not([tabindex="-1"])')?.focus()
-    })
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setOpen(false)
-      if (e.key === 'Tab' && panel) {
-        const focusable = [...panel.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )]
-        if (focusable.length === 0) return
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }
     }
     document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      returnFocusRef.current?.focus()
-    }
+    return () => document.removeEventListener('keydown', onKey)
   }, [open, setOpen])
 
   if (!rendered) return null

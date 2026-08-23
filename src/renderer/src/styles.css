@@ -213,6 +213,13 @@ h1, h2, h3 {
   gap: 0;
 }
 
+/* Même raison que pour le rail : la colonne tombe à zéro et le panneau est rogné, mais ses
+   vingt-cinq contrôles restaient atteignables au clavier et lisibles par un lecteur d'écran,
+   invisibles à tout le monde sauf à eux. */
+.app.is-collapsed > .sidebar {
+  visibility: hidden;
+}
+
 .main {
   position: relative;
   display: flex;
@@ -454,18 +461,6 @@ h1, h2, h3 {
   cursor: default;
 }
 
-.row--muted {
-  color: var(--faint);
-}
-
-.row__icon {
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  flex: none;
-}
-
 .row__label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -495,10 +490,6 @@ h1, h2, h3 {
   background: currentColor;
 }
 
-.dot--instagram { color: #e1306c; }
-.dot--x { color: var(--text); }
-.dot--reddit { color: #ff5c1f; }
-
 .link-btn {
   align-self: flex-start;
   margin-top: 4px;
@@ -513,16 +504,6 @@ h1, h2, h3 {
 
 .link-btn:hover {
   color: var(--text);
-}
-
-.badge-soon {
-  margin-left: auto;
-  padding: 1px 6px;
-  border-radius: var(--pill);
-  background: var(--field);
-  color: var(--faint);
-  font-size: 10px;
-  font-weight: 600;
 }
 
 /* ----------------------------------------------------------------- topbar */
@@ -1352,59 +1333,6 @@ h1, h2, h3 {
   transition: width 180ms var(--ease);
 }
 
-.organizer-summary {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.organizer-summary > div {
-  display: grid;
-  gap: 2px;
-  padding: 13px;
-  border-radius: var(--radius-md);
-  background: var(--field);
-}
-
-.organizer-summary strong { font-size: 20px; }
-.organizer-summary span { color: var(--faint); font-size: 11.5px; }
-
-.organizer-review-hint {
-  margin: 0 0 14px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.organizer-memory {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 13px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--hairline));
-  border-radius: 15px;
-  background: color-mix(in srgb, var(--accent) 7%, var(--field));
-}
-
-.organizer-memory > div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.organizer-memory strong {
-  color: var(--text);
-  font-size: 12.5px;
-}
-
-.organizer-memory span {
-  color: var(--faint);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-
 /* Le rappel du dernier classement. Volontairement discret et neutre : c'est une porte de
    sortie qu'on doit trouver quand on la cherche, pas une alerte qui met en doute le
    rangement qu'on vient de valider. */
@@ -1676,11 +1604,6 @@ h1, h2, h3 {
   line-height: 1.45;
 }
 
-.downloads__actions {
-  display: grid;
-  gap: 6px;
-}
-
 .downloads__actions .btn {
   justify-content: flex-start;
   width: 100%;
@@ -1688,59 +1611,6 @@ h1, h2, h3 {
 
 /* Une colonne pour l'icône, une pour le texte : l'image et la pellicule disent d'un coup
    d'œil laquelle des deux lignes concerne quoi, avant même qu'on lise. */
-.downloads__actions .downloads__action {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 3px 9px;
-  /* `.btn` fixe une hauteur pour aligner les boutons d'une barre d'outils, et sa règle
-     vient plus bas dans la feuille : il faut donc un sélecteur plus précis pour qu'un
-     bouton à deux lignes suive son contenu. */
-  height: auto;
-  padding: 9px 11px;
-  text-align: left;
-}
-
-.downloads__action-icon {
-  display: flex;
-  align-items: center;
-  height: 17px;
-  color: var(--faint);
-}
-
-.downloads__action:not(:disabled):hover .downloads__action-icon {
-  color: var(--accent);
-}
-
-.downloads__action-hint {
-  grid-column: 2;
-}
-
-.downloads__action-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  font-weight: 600;
-}
-
-.downloads__action-top em {
-  color: var(--faint);
-  font-size: 11px;
-  font-style: normal;
-  font-variant-numeric: tabular-nums;
-  font-weight: 400;
-  white-space: nowrap;
-}
-
-.downloads__action-hint {
-  color: var(--faint);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.4;
-  white-space: normal;
-}
-
 .downloads__meter {
   display: flex;
   align-items: center;
@@ -2144,90 +2014,12 @@ h1, h2, h3 {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-.steps__row.is-done /* Bascule dessinée à partir de la case native : elle garde le clavier, le focus et le
-   lecteur d'écran, on ne remplace que l'apparence. */
-.steps__switch {
-  appearance: none;
-  position: relative;
-  width: 32px;
-  height: 18px;
-  margin: 0;
-  flex: none;
-  border-radius: 999px;
-  background: var(--field-hover);
-  cursor: pointer;
-  transition: background-color var(--fast) var(--ease);
-}
-
-.steps__switch::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--faint);
-  transition:
-    transform var(--fast) var(--ease),
-    background-color var(--fast) var(--ease);
-}
-
-.steps__switch:checked {
-  background: var(--accent);
-}
-
-.steps__switch:checked::after {
-  transform: translateX(14px);
-  background: #fff;
-}
-
-.steps__switch:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.steps__switch:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Une étape en cours sans ampleur connue : on montre du mouvement, pas un faux pourcentage. */
-.steps__bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  overflow: hidden;
-  border-radius: 999px;
-}
-
-.steps__bar::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 35%;
-  border-radius: inherit;
-  background: var(--accent);
-  animation: downloads-sweep 1.3s var(--ease) infinite;
-}
-
-/* Avancement connu : on montre où on en est, pas seulement qu'il se passe quelque chose. */
-.steps__bar.is-measured::after {
-  width: var(--steps-progress, 0%);
-  animation: none;
-  transition: width 0.3s var(--ease);
-}
-
-.steps__row label {
-  position: relative;
-}
-
-.steps__icon {
-  color: var(--accent);
-}
-
+/* Un commentaire s’était glissé **entre un sélecteur et son accolade**, dix versions durant.
+   CSS le traite comme une espace : `.steps__row.is-done` et `.steps__switch` ne faisaient donc
+   plus qu’un seul sélecteur descendant, et l’état « étape terminée » n’avait aucun style. Les
+   bascules, elles, s’affichaient quand même — parce que tout le bloc était dupliqué à
+   l’identique quatre-vingts lignes plus bas, et que c’est cette copie-là qui les peignait.
+   La copie fautive part ; celle qui suit, correctement commentée, reste. */
 .steps__row.is-failed .steps__cost {
   color: var(--warn, #e0a030);
 }
@@ -2482,8 +2274,16 @@ h1, h2, h3 {
   transition: opacity var(--base) var(--ease);
 }
 
+/* Replié : `visibility` et non la seule opacité.
+
+   Le rail porte `aria-hidden` quand il est fermé, mais un élément à `opacity: 0` reste dans
+   l'ordre de tabulation. On tabulait donc à travers le champ de saisie, chaque pastille de
+   collection, chaque curseur, les sept teintes et les boutons renommer/fusionner/supprimer —
+   une trentaine d'arrêts invisibles, dans un sous-arbre annoncé comme masqué. Le panneau de
+   post de la carte fait déjà exactement ça. */
 .rail-dock:not(.is-open) .rail {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
 }
 
@@ -2691,61 +2491,6 @@ h1, h2, h3 {
   transform: scale(1.25);
 }
 
-.rail__judge {
-  display: flex;
-  gap: 6px;
-}
-
-.rail__judge button {
-  flex: 1;
-  height: 30px;
-  border: 0;
-  border-radius: var(--pill);
-  font-size: 12px;
-  font-weight: 600;
-  transition: transform var(--fast) var(--spring), opacity var(--fast) var(--ease);
-}
-
-.rail__judge button:disabled {
-  opacity: 0.28;
-}
-
-.rail__judge button:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.rail__yes {
-  background: rgb(74 222 128 / 0.2);
-  color: #86efac;
-}
-
-.rail__no {
-  background: rgb(251 113 133 / 0.2);
-  color: #fda4af;
-}
-
-.rail__hint {
-  margin: 0;
-  color: var(--faint);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.rail__rename {
-  align-self: flex-start;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11.5px;
-  text-decoration: underline dotted;
-  text-underline-offset: 3px;
-}
-
-.rail__rename:hover {
-  color: var(--text);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .rail__add:hover:not(:disabled),
   .rail__chip:hover,
@@ -2841,62 +2586,13 @@ h1, h2, h3 {
   line-height: 1.55;
 }
 
-.organizer-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.organizer-tabs button {
-  padding: 8px 14px;
-  background: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--faint);
-  font: inherit;
-  cursor: pointer;
-  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
-}
-
-.organizer-tabs button:hover {
-  color: var(--text);
-}
-
 .organizer-tabs button.is-active {
   color: var(--text);
   border-bottom-color: var(--accent, #7c6cf0);
 }
 
-.organizer-views {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 /* Interrupteur isolé, à côté du sélecteur de couleur : même hauteur et même pilule, mais
    il commute au lieu de choisir — il ne fait donc pas partie du groupe segmenté. */
-.segmented__toggle {
-  height: 32px;
-  padding: 0 12px;
-  background: var(--field);
-  border: 0;
-  border-radius: var(--pill);
-  color: var(--faint);
-  font: inherit;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background-color var(--fast) var(--ease),
-    color var(--fast) var(--ease);
-}
-
-.segmented__toggle:hover {
-  color: var(--text);
-}
-
 .segmented__toggle.is-active {
   color: var(--text);
 }
@@ -2908,12 +2604,6 @@ h1, h2, h3 {
 /* La carte et l'aperçu côte à côte. Le panneau prend une largeur fixe et la carte le reste :
    ouvrir un post rétrécit la carte au lieu de la recouvrir, pour qu'on garde sous les yeux
    l'endroit d'où vient le post qu'on regarde. */
-.organizer-stage {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-}
-
 .organizer-stage > .organizer-map {
   flex: 1;
   min-width: 0;
@@ -2925,16 +2615,6 @@ h1, h2, h3 {
   margin-top: 3px;
   color: var(--danger, #e0574f);
   opacity: 0.85;
-}
-
-.organizer-hint {
-  color: var(--faint);
-  font-size: 12px;
-}
-
-.organizer-warn {
-  color: var(--danger, #e0574f);
-  font-size: 12px;
 }
 
 .map-panel {
@@ -3154,16 +2834,6 @@ h1, h2, h3 {
   opacity: 0.85;
 }
 
-.organizer-hint {
-  color: var(--faint);
-  font-size: 12px;
-}
-
-.organizer-warn {
-  color: var(--danger, #e0574f);
-  font-size: 12px;
-}
-
 .map-panel {
     width: auto;
     height: auto;
@@ -3307,54 +2977,10 @@ h1, h2, h3 {
   pointer-events: none;
 }
 
-.organizer-lasso {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  font-size: 12px;
-}
-
-.organizer-lasso span {
-  flex: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.organizer-undo-merge {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  background: var(--field);
-  color: var(--faint);
-  font-size: 12px;
-}
-
 .organizer-joined {
   color: var(--faint);
   font-size: 12px;
   line-height: 1.5;
-}
-
-.organizer-list {
-  display: grid;
-  gap: 8px;
-}
-
-.organizer-category {
-  display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 12px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-lg);
-  background: var(--field);
-  transition: opacity 180ms var(--ease-out), border-color 180ms var(--ease-out);
 }
 
 .organizer-category.is-excluded {
@@ -3366,116 +2992,6 @@ h1, h2, h3 {
 .organizer-category.is-excluded .organizer-category__side {
   opacity: 0.5;
 }
-.organizer-category:focus-within { border-color: color-mix(in srgb, var(--accent) 52%, var(--hairline)); }
-
-.organizer-category__toggle {
-  display: grid;
-  justify-items: center;
-  gap: 3px;
-  color: var(--faint);
-  font-size: 9.5px;
-}
-
-.organizer-category__toggle input { accent-color: var(--accent); }
-
-.organizer-category__main { min-width: 0; }
-.organizer-category__main input {
-  width: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.organizer-category__main p {
-  overflow: hidden;
-  margin: 3px 0 0;
-  color: var(--faint);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.organizer-category__main .organizer-category__redistribution {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.organizer-category__side {
-  display: flex;
-  align-items: stretch;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 150px;
-}
-
-.organizer-category__preview-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 2px 1px;
-  background: none;
-  border: 0;
-  color: var(--muted);
-  text-align: left;
-}
-
-.organizer-category__preview-trigger:hover:not(:disabled) {
-  color: var(--text);
-}
-
-.organizer-category__count {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-}
-
-.organizer-category__count > span {
-  color: var(--faint);
-  font-size: 10px;
-}
-
-.organizer-category__preview-label {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 650;
-}
-
-.organizer-category__preview-label svg {
-  transition: transform 180ms var(--ease);
-}
-
-.organizer-category__preview-trigger[aria-expanded='true'] .organizer-category__preview-label svg {
-  transform: rotate(90deg);
-}
-
-.organizer-category__side select {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--hairline);
-  border-radius: 9px;
-  outline: 0;
-  background: var(--raised);
-  color: var(--muted);
-  font: inherit;
-  font-size: 10.5px;
-}
-
-.organizer-category__preview {
-  grid-column: 1 / -1;
-  min-width: 0;
-  padding-top: 11px;
-  border-top: 1px solid var(--hairline);
-  animation: organizer-preview-in 220ms var(--ease) both;
-}
-
 @keyframes organizer-preview-in {
   from {
     opacity: 0;
@@ -3483,103 +2999,9 @@ h1, h2, h3 {
   }
 }
 
-.organizer-category__preview-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 92px;
-  color: var(--faint);
-  font-size: 11.5px;
-}
-
 .organizer-category__preview-state .spinner {
   width: 14px;
   height: 14px;
-}
-
-.organizer-category__preview-grid {
-  display: grid;
-  grid-auto-columns: 160px;
-  grid-auto-flow: column;
-  gap: 8px;
-  padding-bottom: 5px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-color: var(--field-hover) transparent;
-  scrollbar-width: thin;
-}
-
-.organizer-preview-card {
-  display: flex;
-  min-width: 0;
-  padding: 0 0 9px;
-  overflow: hidden;
-  flex-direction: column;
-  background: var(--raised);
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-  color: var(--text);
-  text-align: left;
-  transition: border-color var(--fast) var(--ease), transform var(--fast) var(--spring);
-}
-
-.organizer-preview-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--hairline));
-  transform: translateY(-2px);
-}
-
-.organizer-preview-card__media {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  overflow: hidden;
-  background: var(--backdrop);
-  color: var(--faint);
-}
-
-.organizer-preview-card__media img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.organizer-preview-card__meta {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  padding: 8px 9px 0;
-  color: var(--muted);
-  font-size: 10.5px;
-}
-
-.organizer-preview-card__meta > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.organizer-preview-card__text {
-  display: -webkit-box;
-  min-height: 28px;
-  margin-top: 5px;
-  padding: 0 9px;
-  overflow: hidden;
-  color: var(--faint);
-  font-size: 10px;
-  line-height: 1.4;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.organizer-category__preview-more {
-  display: block;
-  margin-top: 8px;
-  color: var(--faint);
-  font-size: 10.5px;
-  text-align: right;
 }
 
 .organizer-error {
@@ -3589,8 +3011,6 @@ h1, h2, h3 {
   color: #ef7777 !important;
   font-size: 12px;
 }
-
-.organizer-empty { color: var(--faint); text-align: center; }
 
 .organizer-done__check {
   display: grid;
@@ -3602,8 +3022,6 @@ h1, h2, h3 {
   color: #3ddc97;
   font-size: 30px;
 }
-
-.organizer-foot > div { display: flex; gap: 8px; }
 
 .setting > .segmented {
   flex: none;
@@ -3694,26 +3112,6 @@ h1, h2, h3 {
 .swatch--rose       { background: linear-gradient(118deg, #fb7185, #f43f5e 52%, #c026d3); }
 .swatch--azure      { background: linear-gradient(118deg, #38bdf8, #3b82f6 52%, #6366f1); }
 .swatch--lime       { background: linear-gradient(118deg, #a3e635, #65d94a 52%, #10b981); }
-
-.todo-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.todo-list li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 7px 10px;
-  border-radius: var(--radius-md);
-  background: var(--field);
-  color: var(--muted);
-  font-size: 12.5px;
-}
 
 /* ----------------------------------------------------------------- grille */
 
@@ -4433,25 +3831,9 @@ html.window-is-moving .app *::after {
   overflow: hidden;
 }
 
-.card__platform {
-  position: absolute;
-  top: 9px;
-  left: 9px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity var(--fast) var(--ease);
-  box-shadow: 0 0 0 3px rgb(0 0 0 / 0.4);
-}
-
 .card:hover .card__platform {
   opacity: 1;
 }
-
-.card__platform--instagram { background: #e1306c; }
-.card__platform--x { background: #fff; }
-.card__platform--reddit { background: #ff5c1f; }
 
 /* ================================================================ vue détaillée */
 
@@ -4592,24 +3974,6 @@ html.window-is-moving .app *::after {
   object-fit: contain;
   object-position: center;
   display: block;
-}
-
-.detail__text-media {
-  display: grid;
-  place-items: center;
-  padding: 48px;
-  max-height: 100%;
-  overflow-y: auto;
-}
-
-.detail__text-media p {
-  margin: 0;
-  max-width: 60ch;
-  font-size: 17px;
-  line-height: 1.65;
-  color: var(--text);
-  white-space: pre-wrap;
-  user-select: text;
 }
 
 .detail__media-nav,
@@ -5751,15 +5115,6 @@ html.window-is-moving .app *::after {
 }
 
 /* Barre oblique sur l'icône quand le son est coupé — l'état se lit sans survol. */
-.player__muted {
-  position: absolute;
-  width: 20px;
-  height: 1.8px;
-  background: currentColor;
-  transform: rotate(-45deg);
-  border-radius: 2px;
-}
-
 .player__time {
   flex: none;
   color: rgb(255 255 255 / 0.78);
@@ -6039,21 +5394,6 @@ html.window-is-moving .app *::after {
 }
 
 /* Icône de son barrée quand les aperçus sont muets. */
-.mute-icon {
-  position: relative;
-  display: grid;
-  place-items: center;
-}
-
-.mute-icon__slash {
-  position: absolute;
-  width: 19px;
-  height: 1.8px;
-  background: currentColor;
-  border-radius: 2px;
-  transform: rotate(-45deg);
-}
-
 .icon-btn-ghost.is-active {
   color: var(--accent);
 }

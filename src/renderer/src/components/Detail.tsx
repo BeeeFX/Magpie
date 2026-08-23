@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useModalFocus } from '../useModalFocus'
 import type { CollectionInfo, Post } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import {
@@ -166,6 +167,8 @@ export function Detail(): React.JSX.Element | null {
     }
   }, [post?.id, selectedMedia?.idx, selectedMedia?.kind, selectedMedia?.thumbUrl])
 
+  useModalFocus(index !== null, panelRef)
+
   useEffect(() => {
     if (index === null) return
     void magpie.listCollections().then(setCollections)
@@ -326,6 +329,9 @@ export function Detail(): React.JSX.Element | null {
   return (
     <div
       className={`detail ${entered ? 'is-entered' : ''} ${leaving ? 'is-leaving' : ''} ${nativeFullscreen ? 'is-window-fullscreen' : ''}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label={post?.authorHandle ? `@${post.authorHandle}` : t('detail.title')}
       onMouseDown={requestClose}
       onWheel={onWheel}
     >

@@ -46,5 +46,31 @@ jobs:
       - name: Media streaming checks
         run: npm run check:media
 
+      # Les contrôles ci-dessous ne demandaient aucune base et ne tournaient nulle part :
+      # sur douze scripts `check:`, quatre seulement passaient ici. Celui du schéma est le
+      # plus important — c’est lui qui aurait attrapé `map_labels`, absente de SCHEMA_SQL
+      # et donc de toute installation neuve pendant dix versions.
+      - name: Schema checks
+        run: npm run check:schema
+
+      - name: Cache budget checks
+        run: npm run check:cache-budget
+
+      - name: Library guard checks
+        run: npm run check:library-guard
+
+      - name: Embedding checks
+        run: npm run check:embeddings
+
+      - name: Map density checks
+        run: npm run check:map-density
+
+      - name: Boundary checks
+        run: npm run check:boundaries
+
       - name: Production build
         run: npm run build
+
+      # Après la compilation : il inspecte le fil de projection dans la sortie de build.
+      - name: Map checks
+        run: npm run check:map

@@ -257,7 +257,7 @@ export function Toolbar(): React.JSX.Element {
           <span className="density__cap density__cap--sm" />
         </label>
 
-        <div className="segmented" role="group" aria-label="Mode de grille">
+        <div className="segmented" role="group" aria-label={t('toolbar.gridMode')}>
           <button
             type="button"
             className={mode === 'masonry' ? 'is-active' : ''}

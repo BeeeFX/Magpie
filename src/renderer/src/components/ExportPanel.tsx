@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useModalFocus } from '../useModalFocus'
 import type { ExportSummary } from '@shared/types'
 import { magpie } from '../bridge'
 import { formatBytes } from '../format'
@@ -51,9 +52,19 @@ export function ExportPanel(): React.JSX.Element | null {
     }
   }
 
+  const panelRef = useRef<HTMLDivElement>(null)
+  useModalFocus(true, panelRef)
+
   return (
     <div className="modal" onMouseDown={() => setOpen(false)}>
-      <div className="modal__panel export-panel" onMouseDown={(event) => event.stopPropagation()}>
+      <div
+        ref={panelRef}
+        className="modal__panel export-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('export.title')}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <header className="modal__head">
           <div>
             <strong>{t('export.title')}</strong>

@@ -163,7 +163,9 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
           type="button"
           role="menuitem"
           onClick={run(() => {
-            const names = connected.map((a) => PLATFORM_LABEL[a.platform]).join(' et ')
+            /* La conjonction se traduit : « Instagram et X » arrivait tel quel dans une phrase
+               anglaise par ailleurs traduite. */
+            const names = connected.map((a) => PLATFORM_LABEL[a.platform]).join(` ${t('common.and')} `)
             if (!window.confirm(t('actions.recheckConfirm', { platforms: names }))) return
             for (const account of connected) void magpie.startFullSync(account.platform)
           })}

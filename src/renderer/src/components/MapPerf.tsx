@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { magpie } from '../bridge'
+import { useT } from '../store'
 import { report, setPerfEnabled, summary, type PerfSummary } from '../perf'
 
 /**
@@ -15,6 +16,7 @@ import { report, setPerfEnabled, summary, type PerfSummary } from '../perf'
  * mise au point, pas une fonction.
  */
 export function MapPerf(): React.JSX.Element | null {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [now, setNow] = useState<PerfSummary | null>(null)
   const [copied, setCopied] = useState(false)
@@ -55,21 +57,21 @@ export function MapPerf(): React.JSX.Element | null {
   return (
     <div className="map-perf" role="status">
       <header>
-        <strong>dessin</strong>
+        <strong>{t('perf.title')}</strong>
         <button type="button" onClick={copy}>
-          {copied ? 'copié' : 'copier'}
+          {copied ? t('perf.copied') : t('perf.copy')}
         </button>
-        <button type="button" onClick={() => setOpen(false)}>
+        <button type="button" onClick={() => setOpen(false)} aria-label={t('perf.close')}>
           ×
         </button>
       </header>
       {now ? (
         <>
           <p className="map-perf__head">
-            {now.fps.toFixed(1)}/s · moy {now.average.toFixed(1)} ms · p95 {now.p95.toFixed(1)} ·
-            pire {now.worst.toFixed(1)}
+            {now.fps.toFixed(1)}/s · {t('perf.average')} {now.average.toFixed(1)} ms · p95{' '}
+            {now.p95.toFixed(1)} · {t('perf.worst')} {now.worst.toFixed(1)}
             {/* Les images au-delà de seize millisecondes sont celles qu'on voit passer. */}
-            <span className={now.late > 0 ? 'is-late' : ''}> · en retard {now.late}</span>
+            <span className={now.late > 0 ? 'is-late' : ''}>{` · ${t('perf.late')} ${now.late}`}</span>
           </p>
           <ul>
             {now.parts.map((part) => (
@@ -85,7 +87,7 @@ export function MapPerf(): React.JSX.Element | null {
           </p>
         </>
       ) : (
-        <p className="map-perf__head">bougez la carte…</p>
+        <p className="map-perf__head">{t('perf.idle')}</p>
       )}
     </div>
   )

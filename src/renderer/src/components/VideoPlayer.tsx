@@ -281,7 +281,7 @@ export function VideoPlayer({
       ) : null}
 
       <div className="player__bar">
-        <button type="button" className="player__btn" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
+        <button type="button" className="player__btn" onClick={toggle} aria-label={playing ? t('player.pause') : t('player.play')}>
           {playing ? <span className="player__pause" /> : <IconPlay size={14} />}
         </button>
 
@@ -304,7 +304,7 @@ export function VideoPlayer({
           onKeyUp={endScrub}
           onBlur={endScrub}
           onChange={seek}
-          aria-label="Position"
+          aria-label={t('player.position')}
         />
 
         <span className="player__time">{formatClock(duration)}</span>
@@ -347,7 +347,7 @@ export function VideoPlayer({
             type="button"
             className="player__btn"
             onClick={() => setMuted(!muted)}
-            aria-label="Volume"
+            aria-label={t('player.volume')}
           >
             <IconVolume size={15} waves={!muted && volume > 0} />
           </button>
@@ -362,7 +362,7 @@ export function VideoPlayer({
               setVolume(next)
               if (next > 0 && muted) setMuted(false)
             }}
-            aria-label="Volume"
+            aria-label={t('player.volume')}
           />
         </div>
 

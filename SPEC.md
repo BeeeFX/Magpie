@@ -84,7 +84,7 @@ raison, en connaissance du coût.
 - `better-sqlite3` — synchrone, rapide, FTS5 pour la recherche plein texte
 - `sharp` — génération des vignettes WebP · `ffmpeg-static` — extraction des images de vidéo
 - `@anthropic-ai/sdk` — tagging par le contenu
-- `react` + `vite` + `typescript` + `zustand` (état UI) + `@tanstack/react-virtual` (virtualisation)
+- `react` + `vite` + `typescript` + `zustand` (état UI) + virtualisation maison (`renderer/src/layout.ts`)
 - Pas de framework CSS lourd : CSS modules + variables, thèmes clair/sombre
 
 ---
@@ -494,8 +494,10 @@ est actif, jamais le mobilier.
 purge, accès au dossier de données. Les fonctions non encore livrées y figurent explicitement,
 avec leur jalon — mieux vaut une liste honnête qu'un réglage qui ne fait rien.
 
-**Typographie** : Geist Variable, embarquée dans l'application. Aucune requête réseau, donc
-compatible avec la CSP stricte, et un rendu identique quelles que soient les polices installées.
+**Typographie** : Plus Jakarta Sans Variable, embarquée dans l'application. Aucune requête
+réseau, donc compatible avec la CSP stricte, et un rendu identique quelles que soient les
+polices installées. Ses formes rondes et ses terminaisons douces vont avec les angles
+généreux de l'interface, là où Geist — retenue au départ — restait plus sèche.
 
 ---
 
@@ -563,3 +565,46 @@ spec initiale, tous deux justifiés :
   le pire comportement possible pour cet outil.
 - Le tagging IA est désactivé par défaut ; l'app est pleinement utilisable sans clé API.
 - Langue de l'interface : français, structure prête pour l'i18n.
+
+---
+
+## 12. Ce que ce document décrit et que l’application ne fait pas
+
+*Relevé le 2026-08-23, à la version 0.30.0.*
+
+Une spécification qui promet ce qui n’existe pas cesse d’être lisible : on ne sait plus si une
+absence est un défaut ou un choix. Les intentions ci-dessous gardent leur raison d’être — elles
+restent écrites plus haut, avec leur justification — mais elles ne sont **pas** livrées, et
+aucune n’est en cours.
+
+**§9 — Onglets.** Il n’y en a pas. Ouvrir un post affiche une fenêtre modale par-dessus la
+grille, avec les flèches pour passer d’un post à l’autre et `Échap` pour sortir. La barre
+d’onglets, `Ctrl/Cmd+Tab` et l’onglet Grille permanent n’existent pas. La grille conserve en
+revanche bien son défilement, ses filtres et sa sélection, comme promis.
+
+**§9 — « Voir en vrai ».** Aucune webview. Le bouton ouvre la page dans le navigateur du
+système. Le raisonnement de §11 sur la partition séparée reste valable si la webview revient
+un jour ; en attendant, aucune page distante n’est chargée dans une fenêtre de Magpie, ce qui
+est la position la plus sûre.
+
+**§9 — Raccourcis de la grille.** `Ctrl+B`, `Ctrl+,` et `Ctrl+K` existent. Les flèches, `Espace`
+pour l’aperçu, `F`, `T`, `C`, `Ctrl+A` et `Shift+clic` pour une plage n’existent pas : la
+sélection se fait une carte à la fois, et les actions groupées passent par la barre.
+
+**§9 — Doublons.** L’avertissement est une boîte système avec un décompte, sans « voir
+lesquels » ni « ajouter les autres ».
+
+**§9 — Nitrate en sélection multiple.** Un post à la fois.
+
+**§9 — Complétion des tags.** Le champ est libre, sans suggestions.
+
+**§9 — Couverture de collection.** `collections.cover_post_id` existe en base et n’est posé
+nulle part.
+
+**§10 — Export/import JSON.** Seul l’export Markdown pour assistant existe
+(`ExportPanel`). Il n’y a pas d’import. C’est la seule absence qui contredise un principe
+énoncé — « tu n’es jamais captif » — et donc la première à reprendre si la liste doit se
+raccourcir.
+
+**§9 — Liste des fonctions à venir dans les réglages.** Retirée. Cette section-ci la remplace,
+et vaut mieux : elle est datée, et elle vit à côté de ce qu’elle contredit.
