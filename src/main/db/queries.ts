@@ -1756,6 +1756,23 @@ export function thumbnailPathsForPosts(postIds: string[]): string[] {
   ).map((row) => row.thumb_path)
 }
 
+/**
+ * Oublie des clips évincés du cache.
+ *
+ * Le pendant de `forgetThumbnailPaths`, qui manquait parce que rien n'évinçait jamais de clip.
+ * L'état repasse en `pending` : le clip pourra revenir si son lien tient encore, et sinon la
+ * file le saura.
+ */
+export function forgetVideoPaths(paths: string[]): void {
+  const clean = [...new Set(paths)].filter(Boolean)
+  if (clean.length === 0) return
+  const placeholders = clean.map(() => '?').join(',')
+  getDb()
+    .prepare(`UPDATE media SET video_path = NULL, video_cache_state = 'pending', video_attempts = 0
+      WHERE video_path IN (${placeholders})`)
+    .run(...clean)
+}
+
 export function forgetThumbnailPaths(paths: string[]): void {
   const clean = [...new Set(paths)].filter(Boolean)
   if (clean.length === 0) return

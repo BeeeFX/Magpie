@@ -17,10 +17,11 @@ import {
   setThumbnail,
   setVideo,
   forgetThumbnailPaths,
+  forgetVideoPaths,
   thumbnailPathsForPosts,
 } from '../db/queries'
 import { readSettings } from '../settings'
-import { THUMB_NAME_PATTERN, thumbName, videoName } from './names'
+import { THUMB_NAME_PATTERN, VIDEO_NAME_PATTERN, thumbName, videoName } from './names'
 
 /**
  * Cache de vignettes. Voir SPEC.md §7.
@@ -196,6 +197,66 @@ async function makeThumbnailRoom(bytes: number, protectedName?: string): Promise
   if (usage + bytes > limit) throw new CacheQuotaReached()
 }
 
+/**
+ * Fait de la place pour un clip — dans l'enveloppe des clips.
+ *
+ * Il n'existait pas, et c'est ce qui laissait le dossier grossir sans retour : rien dans ce
+ * code ne supprimait jamais un .mp4. Une fois la part pleine, les clips étaient *refusés*,
+ * jamais *repris* — le dossier ne pouvait donc que croître, ou être vidé en entier. Relevé sur
+ * la machine de référence : dix-huit gigaoctets pour un plafond réglé à cinq.
+ *
+ * Le plus ancien consulté part le premier, comme pour les vignettes. La référence en base est
+ * effacée avec le fichier, sinon la carte du post désignerait un clip absent.
+ *
+ * **Une passe ne rend qu'un peu de place à la fois**, et c'est essentiel. Les liens vidéo des
+ * plateformes sont signés et expirent : un clip supprimé ne se retélécharge que tant que son
+ * lien vaut encore, et sur de l'historique ancien il faut une resynchronisation complète. Or
+ * un dossier très au-dessus du plafond — dix-huit gigaoctets pour cinq, relevé ici — verrait
+ * sinon quatorze gigaoctets partir en une fois, au premier clip demandé, sans un mot. On
+ * revient donc au plafond par paliers, au rythme où le cache sert, et chaque passe le dit.
+ */
+export async function makeVideoRoom(bytes: number): Promise<void> {
+  const limit = budgets().other
+  let usage = (await cacheParts()).other
+  if (usage + bytes + reservedBytes <= limit) return
+
+  const candidates = await Promise.all(
+    (await readdir(mediaDir()))
+      .filter((name) => VIDEO_NAME_PATTERN.test(name))
+      .map(async (name) => {
+        try {
+          const info = await stat(join(mediaDir(), name))
+          return { name, size: info.size, usedAt: Math.max(info.atimeMs, info.mtimeMs) }
+        } catch {
+          return null
+        }
+      })
+  )
+  const removed: string[] = []
+  let freed = 0
+  for (const item of candidates
+    .filter((value): value is NonNullable<typeof value> => Boolean(value))
+    .sort((a, b) => a.usedAt - b.usedAt)) {
+    await rm(join(mediaDir(), item.name), { force: true })
+    removed.push(item.name)
+    usage -= item.size
+    recordCacheDelta(-item.size, 'other')
+    freed += item.size
+    /* On descend un peu sous la cible : évincer un clip par clip téléchargé ferait payer un
+       balayage du dossier à chacun. */
+    if (usage + bytes + reservedBytes <= limit * 0.92) break
+    if (freed >= EVICTION_PASS_LIMIT) break
+  }
+  forgetVideoPaths(removed)
+  if (removed.length > 0) {
+    console.log(
+      `[magpie] ${removed.length} clip(s) évincés, ${(freed / 1024 / 1024).toFixed(0)} Mo rendus ` +
+        `(${(usage / 1024 / 1024 / 1024).toFixed(2)} Go de clips pour un plafond de ` +
+        `${(limit / 1024 / 1024 / 1024).toFixed(2)} Go).`
+    )
+  }
+}
+
 /** Les cartes consultées deviennent les dernières candidates à l'éviction. */
 export async function touchCachedThumbnails(postIds: string[]): Promise<void> {
   const now = new Date()
@@ -206,9 +267,31 @@ export async function touchCachedThumbnails(postIds: string[]): Promise<void> {
   )
 }
 
+/**
+ * Le plafond d'un seul clip, indépendant de la place restante.
+ *
+ * Il n'y en avait aucun : `maxBytes` recevait l'enveloppe entière, donc sur un cache neuf un
+ * seul clip avait droit aux 3,75 Gio de sa part. Un clip de 110 Mo relevé sur la bibliothèque
+ * de référence n'a jamais approché du refus. Un aperçu au survol n'a pas besoin de plus.
+ */
+const MAX_CLIP_BYTES = 96 * 1024 * 1024
+
+/** Ce qu’une seule passe d’éviction rend au plus. Voir `makeVideoRoom`. */
+const EVICTION_PASS_LIMIT = 12 * MAX_CLIP_BYTES
+
+/**
+ * Ce que les téléchargements en cours ont déjà le droit de dépenser.
+ *
+ * La place était lue avant le téléchargement et comptabilisée après, alors que jusqu'à douze
+ * travailleurs tournent de front : chacun lisait la même place libre et se croyait seul à
+ * pouvoir la prendre. On réserve donc d'abord, on libère ensuite — le dépassement ne peut plus
+ * être multiplié par le nombre de travailleurs.
+ */
+let reservedBytes = 0
+
 async function remainingQuota(): Promise<number> {
   const { other: budget } = budgets()
-  return Math.max(0, budget - (await cacheParts()).other)
+  return Math.max(0, budget - (await cacheParts()).other - reservedBytes)
 }
 
 /** Appelé après une purge ou un déplacement de bibliothèque. */
@@ -231,6 +314,7 @@ export async function getCacheBreakdown(): Promise<{
 }
 
 async function cacheAdaptiveVideo(source: string, target: string, signal?: AbortSignal): Promise<void> {
+  await makeVideoRoom(MAX_CLIP_BYTES)
   if ((await remainingQuota()) <= 0) throw new CacheQuotaReached()
   const previousSize = await fileSize(target)
 
@@ -239,7 +323,11 @@ async function cacheAdaptiveVideo(source: string, target: string, signal?: Abort
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
       executable,
-      ['-hide_banner', '-loglevel', 'error', '-y', '-i', source, '-c', 'copy', '-movflags', '+faststart', target],
+      /* `-fs` : le remuxage écrivait un flux entier sans borne, et la taille n’était vérifiée
+         qu'une fois le fichier sur le disque. ffmpeg s'arrête maintenant au plafond. Le fichier
+         tronqué est jeté par le contrôle de taille en sortie. */
+      ['-hide_banner', '-loglevel', 'error', '-y', '-i', source, '-c', 'copy', '-movflags',
+        '+faststart', '-fs', String(MAX_CLIP_BYTES), target],
       { windowsHide: true }
     )
     let error = ''
@@ -350,18 +438,27 @@ export async function cacheVideo(
       if (/\.(?:m3u8|mpd)(?:\?|$)/i.test(source)) {
         await cacheAdaptiveVideo(source, target, signal)
       } else {
-        const available = await remainingQuota()
+        await makeVideoRoom(MAX_CLIP_BYTES)
+        const available = Math.min(await remainingQuota(), MAX_CLIP_BYTES)
         if (available <= 0) throw new CacheQuotaReached()
+        /* Réservé avant, libéré après : deux travailleurs ne peuvent plus se promettre la
+           même place. La réserve porte sur le plafond et non sur la taille réelle — celle-ci
+           n'est connue qu'une fois le fichier écrit. */
+        reservedBytes += available
         try {
           const bytes = await downloadMediaToFile(platform, source, target, available, 180000, signal)
           recordCacheDelta(bytes, 'other')
         } catch (error) {
           if (error instanceof MediaLimitExceeded) throw new CacheQuotaReached()
           throw error
+        } finally {
+          reservedBytes = Math.max(0, reservedBytes - available)
         }
       }
     } else if (existsSync(source)) {
       const bytes = await fileSize(source)
+      if (bytes > MAX_CLIP_BYTES) throw new CacheQuotaReached()
+      await makeVideoRoom(bytes)
       await ensureQuota(bytes)
       await copyFile(source, target)
       recordCacheDelta(bytes, 'other')

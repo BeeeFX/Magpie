@@ -1,6 +1,7 @@
-import { readdirSync } from 'node:fs'
+import { readdirSync, rmSync, statSync } from 'node:fs'
 import { getDb, mediaDir } from '../db'
-import { thumbName, videoName } from '../media/names'
+import { join } from 'node:path'
+import { thumbName, videoName, THUMB_NAME_PATTERN, VIDEO_NAME_PATTERN } from '../media/names'
 
 /**
  * Réparations de données déjà en base.
@@ -43,6 +44,9 @@ export interface CacheReconciliation {
   /** Fichiers présents que la base avait cessé de reconnaître. */
   relinkedThumbs: number
   relinkedVideos: number
+  /** Fichiers que plus aucune ligne ne peut désigner, et les octets rendus. */
+  orphans: number
+  orphanBytes: number
 }
 
 export function repairMissingCacheFiles(): CacheReconciliation {
@@ -51,7 +55,7 @@ export function repairMissingCacheFiles(): CacheReconciliation {
     present = new Set(readdirSync(mediaDir()))
   } catch {
     // Bibliothèque sur un disque absent : on ne touche à rien plutôt que de tout effacer.
-    return { thumbs: 0, videos: 0, relinkedThumbs: 0, relinkedVideos: 0 }
+    return { thumbs: 0, videos: 0, relinkedThumbs: 0, relinkedVideos: 0, orphans: 0, orphanBytes: 0 }
   }
 
   const db = getDb()
@@ -86,7 +90,9 @@ export function repairMissingCacheFiles(): CacheReconciliation {
     thumbs: 0,
     videos: 0,
     relinkedThumbs: 0,
-    relinkedVideos: 0
+    relinkedVideos: 0,
+    orphans: 0,
+    orphanBytes: 0
   }
 
   db.transaction(() => {
@@ -114,6 +120,37 @@ export function repairMissingCacheFiles(): CacheReconciliation {
       }
     }
   })()
+
+  /* Le dernier sens, celui qui manquait : du **fichier** vers la ligne.
+
+     Le rattachement ci-dessus part des lignes et retrouve leur fichier ; un fichier dont la
+     ligne a disparu — post supprimé, carrousel raccourci par `trimMedia`, données de
+     démonstration retirées — n'est atteint par personne et ne le sera jamais. Il occupait
+     pourtant sa place, et rien dans le code ne le supprimait.
+
+     On ne juge que sur le nom : il se déduit du couple (post, index), donc l'ensemble de ce
+     qui est légitime se construit sans lire un octet. Et on ne touche qu'aux deux formes de
+     noms du cache — tout le reste du dossier est laissé tel quel. */
+  const expected = new Set<string>()
+  for (const row of rows) {
+    expected.add(thumbName(row.post_id, row.idx))
+    expected.add(videoName(row.post_id, row.idx))
+    if (row.thumb_path) expected.add(row.thumb_path)
+    if (row.video_path) expected.add(row.video_path)
+  }
+  for (const name of present) {
+    if (expected.has(name)) continue
+    if (!THUMB_NAME_PATTERN.test(name) && !VIDEO_NAME_PATTERN.test(name)) continue
+    try {
+      const size = statSync(join(mediaDir(), name)).size
+      rmSync(join(mediaDir(), name), { force: true })
+      result.orphans += 1
+      result.orphanBytes += size
+    } catch {
+      // Fichier verrouillé ou déjà parti : la place perdue est un désagrément, pas un échec.
+    }
+  }
+
   return result
 }
 

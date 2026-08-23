@@ -22,6 +22,7 @@
     "check:layout": "tsx scripts/check-layout.ts",
     "check:organizer": "tsx --tsconfig tsconfig.node.json scripts/check-organizer.ts",
     "check:media": "tsx --tsconfig tsconfig.node.json scripts/check-media.ts",
+    "check:cache-budget": "tsx --tsconfig tsconfig.node.json scripts/check-cache-budget.mts",
     "check:embeddings": "tsx --tsconfig tsconfig.node.json scripts/check-embeddings.ts",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "check:db": "tsx scripts/check-db.ts",

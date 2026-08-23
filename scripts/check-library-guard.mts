@@ -147,10 +147,14 @@ console.log('\nLes mises à l’écart ne s’accumulent pas')
 console.log('\nUne migration qui échoue n’emporte pas la bibliothèque')
 {
   const { out, files } = play('migration', (dir) => {
-    /* Une base au palier précédent, mais sans la table que la migration suivante altère :
-       le palier lève, la transaction annule tout, et `user_version` reste où il était.
-       C’est exactement la forme du défaut qui a coûté `map_labels`. */
-    makeLibrary(join(dir, 'magpie.db'), SCHEMA_VERSION - 1)
+    /* Une base au tout premier palier, sans aucune des tables que la suite altère : le palier
+       2 lève, la transaction annule tout, et `user_version` reste où il était. C’est la forme
+       exacte du défaut qui a coûté `map_labels`.
+
+       On part de 1 plutôt que de l’avant-dernier palier : celui-ci peut très bien être une
+       migration qui ne lève sur rien — un `DROP TABLE IF EXISTS` en est une — et le banc ne
+       mesurerait alors plus rien sans que personne le remarque. */
+    makeLibrary(join(dir, 'magpie.db'), 1)
     makeLibrary(join(dir, `magpie-before-v${SCHEMA_VERSION}-1.db`), 0)
   })
 
@@ -165,7 +169,7 @@ console.log('\nUne migration qui échoue n’emporte pas la bibliothèque')
   )
   const db = new Database(join(root, 'migration', 'magpie.db'), { readonly: true })
   assert(
-    db.pragma('user_version', { simple: true }) === SCHEMA_VERSION - 1,
+    db.pragma('user_version', { simple: true }) === 1,
     'la base est restée telle quelle'
   )
   db.close()

@@ -29,7 +29,8 @@ import {
   processPendingMedia,
   THUMB_NAME_PATTERN,
   touchCachedThumbnails,
-  VIDEO_NAME_PATTERN
+  VIDEO_NAME_PATTERN,
+  resetCacheUsage
 } from './media/cache'
 import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
@@ -717,6 +718,13 @@ async function bootstrap(): Promise<void> {
     console.log(
       `[magpie] Cache rattaché : ${cache.relinkedThumbs} vignette(s) et ${cache.relinkedVideos} clip(s) retrouvés sur le disque.`
     )
+  }
+  if (cache.orphans > 0) {
+    console.log(
+      `[magpie] Cache balayé : ${cache.orphans} fichier(s) que plus aucune ligne ne désigne, ` +
+        `${(cache.orphanBytes / 1024 / 1024 / 1024).toFixed(2)} Go rendus.`
+    )
+    resetCacheUsage()
   }
 
   const backfilled = backfillRuleTags()
