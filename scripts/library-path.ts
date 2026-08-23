@@ -12,6 +12,12 @@ function defaultLibraryDir(): string {
 }
 
 export function libraryDbPath(): string {
+  /* La même porte que `dataDir()` côté application : elle permet de faire tourner les
+     contrôles sur une **copie** de la vraie base, ce qui est le seul moyen honnête de
+     vérifier une migration avant de la livrer. */
+  const forced = process.env['MAGPIE_DATA_DIR']
+  if (forced) return join(forced, 'magpie.db')
+
   const defaultDir = defaultLibraryDir()
   const locationFile = join(defaultDir, 'library-location.json')
 
