@@ -334,8 +334,15 @@ export const useStore = create<State>()(
       settingsLoading: true,
       isDark: true,
 
+      /* Un rejet ne doit pas laisser la grille éteinte pour toujours.
+
+         Rien n'entourait ce corps : si `listPostPage` échouait — base momentanément
+         inaccessible, IPC coupée à la fermeture — `loading` restait vrai, et l'état vide de
+         la grille est justement conditionné à `!loading`. On n’affichait donc ni posts, ni
+         message, ni explication : une fenêtre vide, sans rien à quoi se raccrocher. */
       refresh: async (reset = false, forceStats = false) => {
         const generation = ++pageGeneration
+        try {
         const query = get().query
         const current = get().posts
         set({
@@ -388,6 +395,10 @@ export const useStore = create<State>()(
           resultTotal: total,
           nextOffset
         })
+        } catch (error) {
+          console.error('[magpie] Page de posts illisible', error)
+          if (generation === pageGeneration) set({ loading: false, loadingMore: false })
+        }
       },
 
       refreshPosts: async (ids) => {
@@ -528,7 +539,10 @@ export const useStore = create<State>()(
       setStepStates: (patch) => set((s) => ({ stepStates: { ...s.stepStates, ...patch } })),
       setStepsRunning: (stepsRunning) => set({ stepsRunning }),
 
+      /* Même raison : `settingsLoading` commande le routage vers la présentation. Un rejet le
+         laissait vrai, et un premier lancement n'affichait plus qu'une coquille vide. */
       loadSettings: async () => {
+        try {
         const settings = await magpie.getSettings()
         const lang = resolveLanguage(settings.language)
         setFormatLanguage(lang)
@@ -556,6 +570,10 @@ export const useStore = create<State>()(
           onboardingDone: settings.onboardingDone,
           settingsLoading: false
         })
+        } catch (error) {
+          console.error('[magpie] Réglages illisibles', error)
+          set({ settingsLoading: false })
+        }
       },
 
       setLanguage: async (language) => {

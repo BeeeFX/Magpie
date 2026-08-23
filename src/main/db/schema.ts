@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 22
+export const SCHEMA_VERSION = 23
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -397,6 +397,25 @@ export const MIGRATION_22_SQL = /* sql */ `
 DROP TABLE IF EXISTS collection_boundaries;
 `
 
+/**
+ * Les colonnes filles des clés étrangères, indexées.
+ *
+ * `collection_posts` a pour clé primaire (collection_id, post_id) : l'index composite sert
+ * les recherches par collection, mais aucune ne part du post. Or trois chemins le font —
+ * `collectionsForPost()` à chaque ouverture du panneau de détail, et la sous-requête
+ * corrélée de l'export, **une fois par post**. Chacun balayait la table entière.
+ *
+ * Même chose pour les autres colonnes filles : avec `foreign_keys = ON`, SQLite les parcourt
+ * à chaque suppression de post pour vérifier la contrainte.
+ */
+export const MIGRATION_23_SQL = /* sql */ `
+CREATE INDEX IF NOT EXISTS idx_collection_posts_post ON collection_posts(post_id);
+CREATE INDEX IF NOT EXISTS idx_collection_removals_post ON collection_removals(post_id);
+CREATE INDEX IF NOT EXISTS idx_collection_feedback_post ON collection_feedback(post_id);
+CREATE INDEX IF NOT EXISTS idx_collections_cover ON collections(cover_post_id)
+  WHERE cover_post_id IS NOT NULL;
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -695,6 +714,13 @@ CREATE TRIGGER IF NOT EXISTS posts_fts_au AFTER UPDATE ON posts BEGIN
   INSERT INTO posts_fts(rowid, text, ai_description, author_handle, transcript)
   VALUES (new.rowid, new.text, new.ai_description, new.author_handle, new.transcript);
 END;
+
+-- Colonnes filles des clés étrangères : voir MIGRATION_23_SQL.
+CREATE INDEX IF NOT EXISTS idx_collection_posts_post ON collection_posts(post_id);
+CREATE INDEX IF NOT EXISTS idx_collection_removals_post ON collection_removals(post_id);
+CREATE INDEX IF NOT EXISTS idx_collection_feedback_post ON collection_feedback(post_id);
+CREATE INDEX IF NOT EXISTS idx_collections_cover ON collections(cover_post_id)
+  WHERE cover_post_id IS NOT NULL;
 `
 
 /**
@@ -728,5 +754,6 @@ export const MIGRATIONS: Record<number, string> = {
   19: MIGRATION_19_SQL,
   20: MIGRATION_20_SQL,
   21: MIGRATION_21_SQL,
-  22: MIGRATION_22_SQL
+  22: MIGRATION_22_SQL,
+  23: MIGRATION_23_SQL
 }

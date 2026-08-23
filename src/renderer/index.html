@@ -4,10 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Le renderer n'a le droit de charger que ce que nous produisons : notre bundle et
-         les vignettes servies par le protocole magpie://. Rien de distant. -->
+         les vignettes servies par le protocole magpie://. Rien de distant.
+
+         `ws:` autorisait n'importe quel hôte en clair, alors qu'il n'existe que pour le
+         rechargement à chaud de Vite — et il partait tel quel dans la version installée.
+         Restreint à la machine locale : le développement continue de fonctionner, la
+         version livrée ne peut plus ouvrir de socket vers l’extérieur.
+
+         `base-uri` et `form-action` ne sont pas couverts par `default-src` : sans eux, une
+         injection pourrait réécrire la base des URLs relatives ou poster ailleurs. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' magpie: data:; media-src 'self' magpie:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' magpie: ws:"
+      content="default-src 'self'; img-src 'self' magpie: data:; media-src 'self' magpie:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' magpie: ws://localhost:* ws://127.0.0.1:*; base-uri 'none'; form-action 'none'"
     />
     <title>Magpie</title>
   </head>

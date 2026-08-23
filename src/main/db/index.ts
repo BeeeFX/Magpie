@@ -187,6 +187,11 @@ function prepareConnection(
   conn.pragma('journal_mode = WAL')
   conn.pragma('synchronous = NORMAL')
   conn.pragma('foreign_keys = ON')
+  /* Attendre plutôt que lever. En WAL les lectures ne bloquent pas, mais deux écritures
+     peuvent se croiser — la file média écrit pendant que la synchronisation range une page —
+     et sans délai d'attente la seconde reçoit SQLITE_BUSY immédiatement. Cinq secondes
+     couvrent largement une transaction de cette base ; au-delà, c’est autre chose. */
+  conn.pragma('busy_timeout = 5000')
 
   /* Comparer deux liens de CDN dans une requête demande de savoir lequel des deux désigne
      le même fichier — ce que seul `mediaIdentity` sait dire. La fonction est déclarée sur

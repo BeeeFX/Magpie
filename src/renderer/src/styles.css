@@ -6746,3 +6746,42 @@ html.window-is-moving .app *::after {
      ferait couper par le bord de la zone de défilement. */
   padding-right: 2px;
 }
+
+/* --- Le filet du rendu : voir ErrorBoundary.tsx --- */
+.crash {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+  max-width: 640px;
+  margin: 15vh auto 0;
+  padding: 28px 32px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  background: var(--raised);
+  color: var(--text);
+}
+.crash h1 {
+  margin: 0;
+  font-size: 20px;
+}
+.crash p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.crash pre {
+  align-self: stretch;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.crash__actions {
+  display: flex;
+  gap: 10px;
+}

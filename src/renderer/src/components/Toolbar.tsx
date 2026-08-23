@@ -55,7 +55,6 @@ export function Toolbar(): React.JSX.Element {
   const clearSelection = useStore((s) => s.clearSelection)
   const favoriteSelection = useStore((s) => s.favoriteSelection)
   const tagSelection = useStore((s) => s.tagSelection)
-  const posts = useStore((s) => s.posts)
 
   const [search, setSearch] = useState(query.search)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -103,6 +102,11 @@ export function Toolbar(): React.JSX.Element {
   }
 
   const copySelection = (): void => {
+    /* Lu au clic, pas par abonnement. S'abonner à `posts` pour ce seul gestionnaire rendait
+       toute la barre — synchronisation, téléchargements, les deux menus, le curseur de
+       densité — à chaque reconstruction du tableau, soit plusieurs fois par seconde pendant
+       un import, pour une valeur qu'aucun rendu ne lit. */
+    const posts = useStore.getState().posts
     const selected = new Set(selectedIds)
     void magpie.copyToClipboard(posts.filter((post) => selected.has(post.id)).map((post) => post.url).join('\n'))
   }

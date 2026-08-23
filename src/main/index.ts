@@ -59,6 +59,24 @@ const isPrimaryInstance = app.requestSingleInstanceLock()
 // la même bibliothèque et multipliait fortement la mémoire et la charge disque.
 if (!isPrimaryInstance) app.quit()
 
+/**
+ * Les échecs que personne n'attrapait.
+ *
+ * Il n'y avait aucun de ces deux gestionnaires, et le code appelle beaucoup de promesses en
+ * `void` — la synchronisation, la file média, la lecture des images, les minuteries. Une
+ * rejetée disparaissait sans laisser de trace : ni journal, ni message, rien à quoi rattacher
+ * le symptôme quand l'utilisateur signalait que « ça s'était arrêté tout seul ».
+ *
+ * On ne quitte pas pour autant. Une étape de fond qui échoue n'a aucune raison d'emporter la
+ * fenêtre : la bibliothèque est intacte, et l'application reste utilisable sans elle.
+ */
+process.on('unhandledRejection', (reason) => {
+  console.error('[magpie] Promesse rejetée sans traitement :', reason)
+})
+process.on('uncaughtException', (error) => {
+  console.error('[magpie] Exception non rattrapée :', error)
+})
+
 // Le raccourci NSIS et le processus doivent annoncer exactement la même identité.
 // Sinon Windows peut créer un second bouton dans la barre des tâches au lancement.
 if (process.platform === 'win32') app.setAppUserModelId(APP_ID)
@@ -672,7 +690,7 @@ async function drainMediaQueue(): Promise<void> {
       }
 
       hasMore = result.hasMore || requestedThumbnailPostIds.size > 0 || preloads.size > 0
-      if (result.total > 0) mainWindow?.webContents.send('library:updated')
+      if (result.total > 0) notifyLibraryUpdated()
       // Rend régulièrement la main à Electron entre deux lots afin que déplacer ou
       // redimensionner la fenêtre reste instantané pendant un gros rattrapage.
       if (hasMore && !mediaPaused) await new Promise((resolve) => setTimeout(resolve, 25))
@@ -685,8 +703,37 @@ async function drainMediaQueue(): Promise<void> {
     const waiters = mediaPauseWaiters
     mediaPauseWaiters = []
     for (const resolve of waiters) resolve()
-    mainWindow?.webContents.send('library:updated')
+    notifyLibraryUpdated(true)
   }
+}
+
+/**
+ * « La bibliothèque a changé », au plus une fois par seconde et demie.
+ *
+ * Le rendu répond à cet événement par un `refreshNow()` sans frein, et `refresh()` demande
+ * toujours la page zéro — or c’est à l’offset zéro que `listPostPage` compte. Le `COUNT(*)`
+ * qu'on avait justement sorti du défilement revenait donc par la porte de derrière, au
+ * rythme des lots de la file média : un comptage complet, une page de trois cents posts,
+ * leurs médias, leurs tags, leurs sources et les statistiques, en synchrone, tous les trois
+ * cent soixante vignettes. On regroupe donc les rafales ; la fin d'une passe, elle, part
+ * tout de suite, parce que plus rien ne suivra pour la relancer.
+ */
+let libraryUpdateTimer: NodeJS.Timeout | null = null
+
+function notifyLibraryUpdated(immediate = false): void {
+  if (immediate) {
+    if (libraryUpdateTimer) {
+      clearTimeout(libraryUpdateTimer)
+      libraryUpdateTimer = null
+    }
+    mainWindow?.webContents.send('library:updated')
+    return
+  }
+  if (libraryUpdateTimer) return
+  libraryUpdateTimer = setTimeout(() => {
+    libraryUpdateTimer = null
+    mainWindow?.webContents.send('library:updated')
+  }, 1500)
 }
 
 async function bootstrap(): Promise<void> {
@@ -845,7 +892,7 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
           void prepareForMode(readSettings().organizeMode)
             .then(() => applyRememberedOrganizerRules())
             .then((result) => {
-              if (result.added > 0) mainWindow?.webContents.send('library:updated')
+              if (result.added > 0) notifyLibraryUpdated(true)
             })
             .catch((error: unknown) => {
               console.error('[magpie] Organisation automatique impossible', error)
@@ -857,7 +904,7 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
 
   aiTagger.subscribe((progress) => {
     mainWindow?.webContents.send('ai:progress', progress)
-    if (!progress.running) mainWindow?.webContents.send('library:updated')
+    if (!progress.running) notifyLibraryUpdated(true)
   })
 
   localOrganizer.subscribe((value) => {

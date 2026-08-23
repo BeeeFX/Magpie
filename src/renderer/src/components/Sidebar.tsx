@@ -38,7 +38,6 @@ export function Sidebar(): React.JSX.Element {
   const setQuery = useStore((s) => s.setQuery)
   const resetQuery = useStore((s) => s.resetQuery)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const posts = useStore((s) => s.posts)
   const contentSources = useStore((s) => s.contentSources)
 
   const [showAllTags, setShowAllTags] = useState(false)
@@ -46,9 +45,18 @@ export function Sidebar(): React.JSX.Element {
   const [creatingCollection, setCreatingCollection] = useState(false)
   const [collectionDraft, setCollectionDraft] = useState('')
 
+  /* Accroché aux statistiques, pas au tableau des posts.
+
+     Ce panneau ne lit `posts` nulle part : il ne s'y abonnait que pour savoir quand
+     redemander les collections. Or `refreshPosts` reconstruit ce tableau toutes les trois
+     cents millisecondes pendant une synchronisation, et une nouvelle identité suffisait à
+     relancer un aller-retour vers le processus principal — `listCollections` joignant et
+        regroupant toute la table `collection_posts` — plus un rendu complet du panneau,
+     plusieurs fois par seconde, pendant tout un import. Les statistiques changent quand le
+     contenu change, et elles sont déjà regroupées à 150 ms. */
   useEffect(() => {
     void magpie.listCollections().then(setCollections)
-  }, [posts])
+  }, [stats])
 
   const togglePlatform = (platform: Platform): void => {
     const active = query.platforms.includes(platform)
