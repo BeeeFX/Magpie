@@ -1,4 +1,6 @@
 import { getDb } from '../db'
+import { organizationItems } from '../db/queries'
+import { embedItems } from './embeddings'
 import { lastCollectionPlan, TOPIC_NAMES } from './organize'
 import { interfaceLanguage } from '../settings'
 import {
@@ -372,6 +374,40 @@ export async function seedFromTopics(): Promise<number> {
     made += 1
   }
   return made
+}
+
+/**
+ * Rejoue la définition de chaque collection à mots-clés sur la bibliothèque entière.
+ *
+ * C'est ce qui manquait après une synchronisation, et le manque était silencieux. Le classement
+ * automatique rejouait des **routes mémorisées** — une catégorie du plan vers une collection —
+ * qui ne sont écrites que par le chemin rapide. Les collections de l'analyse approfondie, elles,
+ * ne sont pas des listes : elles portent une définition, et une définition qu'on ne rejoue jamais
+ * décrit une bibliothèque qui n'existe plus. Elles restaient donc telles que la première analyse
+ * les avait laissées, et rien ne le disait.
+ *
+ * L'encodage vient d'abord, et il n'est pas optionnel : un post arrivé à la dernière synchro n'a
+ * pas de vecteur de texte, et un post qu'on ne sait pas noter ne peut entrer nulle part. Il est
+ * incrémental — seuls les textes dont l'empreinte a changé repassent par le modèle — et il rend
+ * la main entre deux paquets, parce que ceci tourne dans le processus principal.
+ *
+ * Les listes figées ne sont pas touchées : `recompute` refuse tout ce qui n'est pas `query`, et
+ * c'est exactement ce qu'on a promis à l'écran « que garder ».
+ */
+export async function refreshQueryCollections(): Promise<{ collections: number; members: number }> {
+  const ids = (
+    getDb().prepare("SELECT id FROM collections WHERE kind = 'query'").all() as { id: number }[]
+  ).map((row) => row.id)
+  if (ids.length === 0) return { collections: 0, members: 0 }
+
+  await embedItems(organizationItems(), () => new Promise((resolve) => setImmediate(resolve)))
+
+  let members = 0
+  for (const id of ids) {
+    const membership = recompute(id)
+    if (membership) members += membership.members.length
+  }
+  return { collections: ids.length, members }
 }
 
 /** Supprimer une collection. Les appartenances et les mots s'en vont avec elle, en cascade. */

@@ -41,6 +41,7 @@ import {
   localOrganizer,
   prepareForMode
 } from './tagging/organize'
+import { refreshQueryCollections } from './tagging/collections'
 import type { BackgroundState, PostQuery, PreloadRequest, SyncPhase } from '@shared/types'
 import { PUBLIC_PLATFORMS } from '@shared/types'
 import { backgroundTasks } from './tasks'
@@ -889,14 +890,20 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
           if (syncEngine.isRunning()) return
           organizerAfterSyncPending = false
           /* La méthode choisie se rejoue en entier : sa préparation, puis son classement. */
-          void prepareForMode(readSettings().organizeMode)
-            .then(() => applyRememberedOrganizerRules())
-            .then((result) => {
-              if (result.added > 0) notifyLibraryUpdated(true)
-            })
-            .catch((error: unknown) => {
+          void (async () => {
+            try {
+              await prepareForMode(readSettings().organizeMode)
+              /* Puis les collections qui portent une définition la rejouent. Sans ceci, seules
+                 les routes mémorisées rangeaient les nouveaux posts — et elles n'existent que
+                 pour le chemin rapide. Les collections de l'approfondi restaient donc figées
+                 sur la bibliothèque du jour de leur création, sans que rien ne le dise. */
+              const refreshed = await refreshQueryCollections()
+              const result = await applyRememberedOrganizerRules()
+              if (result.added > 0 || refreshed.collections > 0) notifyLibraryUpdated(true)
+            } catch (error) {
               console.error('[magpie] Organisation automatique impossible', error)
-            })
+            }
+          })()
         }, 750)
       }
     }

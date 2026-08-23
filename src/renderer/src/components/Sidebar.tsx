@@ -44,6 +44,15 @@ export function Sidebar(): React.JSX.Element {
   const [collections, setCollections] = useState<CollectionInfo[]>([])
   const [creatingCollection, setCreatingCollection] = useState(false)
   const [collectionDraft, setCollectionDraft] = useState('')
+  /**
+   * La collection dont le nuancier est déplié, s'il y en a une.
+   *
+   * Les sept teintes et leur bouton d'effacement font cent cinquante pixels sur une ligne qui
+   * en fait deux cent trente : au survol, il ne restait du nom que ses trois premières lettres.
+   * Une seule pastille — la couleur actuelle — tient le rôle, et le nuancier ne se déplie que
+   * si on le demande. Un clic de plus pour recolorer, un nom lisible tout le reste du temps.
+   */
+  const [colouring, setColouring] = useState<number | null>(null)
 
   /* Accroché aux statistiques, pas au tableau des posts.
 
@@ -329,7 +338,13 @@ export function Sidebar(): React.JSX.Element {
                du panneau, et rien ne disait qu'il en restait. */
             <div className="sidebar__scroll">
             {collections.map((collection) => (
-              <div key={collection.id} className="collection-row">
+              <div
+                key={collection.id}
+                className="collection-row"
+                onMouseLeave={() =>
+                  setColouring((current) => (current === collection.id ? null : current))
+                }
+              >
                 <button
                   type="button"
                   className={`row ${query.collectionIds.includes(collection.id) ? 'is-active' : ''}`}
@@ -352,11 +367,27 @@ export function Sidebar(): React.JSX.Element {
                     serait invalide, et séparer les deux gestes évite de filtrer par
                     accident en voulant recolorer. */}
                 <div className="collection-row__colour">
-                  <LabelPicker
-                    value={collection.color}
-                    ariaLabel={t('label.collectionColor')}
-                    onChange={(color) => void recolour(collection.id, color)}
-                  />
+                  {colouring === collection.id ? (
+                    <LabelPicker
+                      value={collection.color}
+                      ariaLabel={t('label.collectionColor')}
+                      onChange={(color) => {
+                        void recolour(collection.id, color)
+                        setColouring(null)
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className={`label-dot ${
+                        collection.color ? `label-dot--${collection.color}` : 'label-dot--none'
+                      }`}
+                      title={t('label.collectionColor')}
+                      aria-label={t('label.collectionColor')}
+                      aria-expanded={false}
+                      onClick={() => setColouring(collection.id)}
+                    />
+                  )}
                 </div>
               </div>
             ))}
