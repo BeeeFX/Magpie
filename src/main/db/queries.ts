@@ -1315,12 +1315,14 @@ export interface CollectionRow {
   name: string
   count: number
   color: LabelColor | null
+  /** `query` = définie par ses mots et recalculée ; `manual` = une liste que rien ne touche. */
+  kind: 'query' | 'manual'
 }
 
 export function listCollections(): CollectionRow[] {
   return getDb()
     .prepare(
-      `SELECT c.id, c.name, c.color, COUNT(cp.post_id) AS count
+      `SELECT c.id, c.name, c.color, c.kind, COUNT(cp.post_id) AS count
          FROM collections c
          LEFT JOIN collection_posts cp ON cp.collection_id = c.id
         GROUP BY c.id
@@ -1335,7 +1337,7 @@ export function createCollection(name: string, color: LabelColor | null = null):
   const info = getDb()
     .prepare('INSERT INTO collections (name, color, sort_index) VALUES (?, ?, 0)')
     .run(clean, color)
-  return { id: Number(info.lastInsertRowid), name: clean, count: 0, color }
+  return { id: Number(info.lastInsertRowid), name: clean, count: 0, color, kind: 'manual' }
 }
 
 export function setCollectionColor(collectionId: number, color: LabelColor | null): void {

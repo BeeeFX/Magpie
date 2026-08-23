@@ -176,6 +176,14 @@ export interface CollectionInfo {
   name: string
   count: number
   color: LabelColor | null
+  /**
+   * `query` = définie par ses mots, donc recalculée ; `manual` = une liste figée.
+   *
+   * L'écran en a besoin pour dire lesquelles suivent la bibliothèque et lesquelles ne bougent
+   * plus. La distinction se voyait nulle part, et c'est pourtant elle qui explique qu'une
+   * collection cesse de se remplir.
+   */
+  kind: 'query' | 'manual'
 }
 
 /**

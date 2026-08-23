@@ -288,6 +288,16 @@ const fr = {
   'collections.merge': 'Fondre…',
   'collections.mergeInto': 'Fondre dans…',
   'collections.delete': 'Supprimer',
+  'collections.manage': 'Gérer les collections',
+  'collections.manageTitle': 'Gérer les collections',
+  'collections.manageText':
+    'Renommer, fusionner, supprimer. Les mots qui définissent une collection se règlent sur la carte, là où l’on voit ce qu’ils attrapent.',
+  'collections.defined': 'définie',
+  'collections.definedHint':
+    'Définie par des mots : elle se recalcule après chaque synchronisation, et les nouveaux posts y entrent seuls.',
+  'collections.frozen': 'liste figée',
+  'collections.frozenHint':
+    'Une liste que rien ne recalcule. Elle garde exactement les posts qu’elle a, et n’en prendra pas de nouveaux.',
   'collections.deleteSure': 'Supprimer « {name} » ?',
   'collections.deleteYes': 'Supprimer',
   'map.placeLabel': 'Nommer un endroit',
@@ -860,6 +870,16 @@ const en: Record<TranslationKey, string> = {
   'collections.merge': 'Merge…',
   'collections.mergeInto': 'Merge into…',
   'collections.delete': 'Delete',
+  'collections.manage': 'Manage collections',
+  'collections.manageTitle': 'Manage collections',
+  'collections.manageText':
+    'Rename, merge, delete. The words that define a collection are set on the map, where you can see what they catch.',
+  'collections.defined': 'defined',
+  'collections.definedHint':
+    'Defined by words: it is recomputed after every sync, and new posts join it on their own.',
+  'collections.frozen': 'frozen list',
+  'collections.frozenHint':
+    'A list nothing recomputes. It keeps exactly the posts it has, and will take no new ones.',
   'collections.deleteSure': 'Delete “{name}”?',
   'collections.deleteYes': 'Delete',
   'map.placeLabel': 'Name a place',

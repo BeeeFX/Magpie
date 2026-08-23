@@ -5,6 +5,7 @@ import { magpie } from '../bridge'
 import { PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
+import { CollectionsManager } from './CollectionsManager'
 import { LabelPicker } from './LabelPicker'
 import { Logo } from './Logo'
 import { PlatformIcon } from './PlatformIcon'
@@ -14,6 +15,7 @@ import {
   IconGrid,
   IconHeart,
   IconImage,
+  IconLayers,
   IconLink,
   IconPlus,
   IconSettings,
@@ -53,6 +55,7 @@ export function Sidebar(): React.JSX.Element {
    * si on le demande. Un clic de plus pour recolorer, un nom lisible tout le reste du temps.
    */
   const [colouring, setColouring] = useState<number | null>(null)
+  const [managing, setManaging] = useState(false)
 
   /* Accroché aux statistiques, pas au tableau des posts.
 
@@ -305,6 +308,17 @@ export function Sidebar(): React.JSX.Element {
             >
               {t('sidebar.collections')}
             </button>
+            {/* Le ménage à côté de la création : les deux gestes portent sur la liste
+                elle-même, pas sur ce qu'elle filtre. */}
+            <button
+              type="button"
+              className="title-btn"
+              disabled={collections.length === 0}
+              onClick={() => setManaging(true)}
+              title={t('collections.manage')}
+            >
+              <IconLayers size={13} />
+            </button>
             <button
               type="button"
               className="title-btn"
@@ -441,6 +455,14 @@ export function Sidebar(): React.JSX.Element {
           <span className="row__kbd">Ctrl ,</span>
         </button>
       </div>
+
+      {managing ? (
+        <CollectionsManager
+          collections={collections}
+          onClose={() => setManaging(false)}
+          onChanged={() => void magpie.listCollections().then(setCollections)}
+        />
+      ) : null}
     </aside>
   )
 }

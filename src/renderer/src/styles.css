@@ -6166,3 +6166,128 @@ html.window-is-moving .app *::after {
   display: flex;
   gap: 10px;
 }
+
+/**
+ * Le ménage des collections, en liste.
+ *
+ * Une ligne par collection et tout visible d'un coup : renommer, fusionner, supprimer. Ces
+ * gestes se décident en regardant l'ensemble — on fusionne parce qu'on voit deux noms qui
+ * disent la même chose — et un menu par ligne les aurait cachés un par un.
+ */
+.collections-manager__panel {
+  width: min(780px, 100%);
+}
+
+.collections-manager .modal__head p {
+  margin: 3px 0 0;
+  max-width: 62ch;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.manager__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+}
+
+.manager__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto 150px auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  border-radius: 10px;
+}
+
+.manager__row:hover {
+  background: var(--field-hover);
+}
+
+.manager__name {
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Le champ ne se déclare qu'au moment où l'on écrit : une liste de dix bordures ressemblerait
+   à un formulaire, alors qu'on vient surtout lire des noms. */
+.manager__name:hover {
+  border-color: var(--hairline);
+}
+
+.manager__name:focus {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--hairline));
+  background: var(--field);
+  outline: none;
+}
+
+.manager__kind {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--field);
+  color: var(--faint);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.manager__kind.is-defined {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+.manager__count {
+  min-width: 3.5ch;
+  text-align: right;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.manager__merge {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.manager__confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn--danger {
+  background: color-mix(in srgb, var(--danger, #e0574f) 20%, var(--field));
+  color: var(--danger, #e0574f);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger, #e0574f) 32%, var(--field));
+}
+
+@media (max-width: 720px) {
+  .manager__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-auto-flow: dense;
+  }
+  .manager__merge {
+    grid-column: 1 / -1;
+  }
+}
