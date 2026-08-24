@@ -1023,7 +1023,8 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
 function projectionFingerprint(layout: MapLayout = 'equilibre'): string {
   const recipe = MAP_LAYOUTS[layout]
   return [
-    'v1',
+    /* v2 : le cadre se prend désormais sur les centiles et non sur les extrêmes. */
+    'v2',
     `n=${TUNING.neighbours}`,
     `d=${TUNING.minDist}`,
     `s=${TUNING.spread}`,

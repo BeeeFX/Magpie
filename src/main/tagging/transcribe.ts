@@ -39,6 +39,8 @@ const MAX_SECONDS = 600
  * pour toujours.
  */
 const MAX_ATTEMPTS = 3
+/** Reconnaissances refusées d'affilée avant de conclure à la panne et d'arrêter la passe. */
+const GIVE_UP = 5
 
 type Recogniser = (
   audio: Float32Array,
@@ -280,6 +282,9 @@ export function transcribeAll(): Promise<void> {
     const fallbackLanguage = libraryLanguage()
     try {
       const recognise = await load()
+      /* Reconnaissances refusées d'affilée. Remise à zéro dès qu'une réussit : ce qu'on
+         surveille est une panne franche, pas un taux d'échec. */
+      let refused = 0
       for (;;) {
         if (controller.signal.aborted) break
         if (backgroundTasks.isPaused() || backgroundTasks.isTaskPaused('transcribe')) {
@@ -297,42 +302,69 @@ export function transcribeAll(): Promise<void> {
           continue
         }
 
+        /* Deux temps, et deux verdicts qui ne se confondent plus.
+
+           **Extraire le son** peut échouer, et la source dit alors quoi en conclure. Sur un
+           fichier local, l'échec porte sur la vidéo : le cas courant est un clip sans la
+           moindre piste audio, et le réessayer ne changera jamais rien — c'est un verdict. Sur
+           une source distante, il porte sur la descente, une URL de CDN expirée avant tout, et
+           la reprise vaut quelque chose : le clip aura peut-être été mis en cache d'ici là.
+
+           **Reconnaître la parole**, en revanche, n'apprend rien sur la vidéo quand ça échoue.
+           On avait le son : si le modèle lève, c'est le modèle qui a un problème, pas le clip.
+           Confondre les deux a coûté cher — 4 529 vidéos définitivement déclarées muettes sur
+           une bibliothèque réelle, alors que leur piste audio était intacte et que la même
+           reconnaissance, rejouée depuis, les transcrit sans broncher. Une passe qui échoue ne
+           doit rien conclure. */
+        let audio: Float32Array
         try {
-          const audio = await extractAudio(source, controller.signal)
-          if (audio.length < SAMPLE_RATE) {
-            /* Moins d'une seconde depuis un fichier local : il n'y a rien à transcrire, pas
-               la peine de réveiller le modèle. Depuis une source distante en revanche, un
-               flux vide ne prouve rien sur la vidéo — seulement sur la descente. */
-            if (candidate.videoPath) saveTranscript(candidate.postId, null)
-            else noteTranscriptFailure(candidate.postId)
-          } else {
-            const output = await recognise(audio, {
-              task: 'transcribe',
-              // Sans langue explicite, Whisper écoute tout en anglais et invente le reste.
-              language: listeningLanguage(candidate.caption, fallbackLanguage),
-              // Whisper ne lit que trente secondes d'un coup ; le recouvrement évite de
-              // couper un mot à la frontière de deux tranches.
-              chunk_length_s: 30,
-              stride_length_s: 5
-            })
-            saveTranscript(candidate.postId, tidyTranscript(String(output.text ?? '')))
-          }
+          audio = await extractAudio(source, controller.signal)
         } catch (error) {
           if (controller.signal.aborted) break
-          /* Un clip illisible ne doit pas arrêter la file — mais tous les échecs ne se valent
-             pas, et c'est la source qui les sépare.
-             Sur un fichier local, l'échec porte sur la vidéo : le cas courant est un clip sans
-             la moindre piste audio (quatre sur douze au relevé), et le réessayer deux fois de
-             plus ne changera jamais rien. C'est donc un verdict. Sur une source distante, il
-             porte sur la descente — une URL de CDN expirée avant tout —, et c'est exactement là
-             qu'une reprise vaut quelque chose : le clip aura peut-être été mis en cache d'ici
-             la prochaine passe, et la lecture se fera alors sur le disque.
-             Le risque assumé : un fichier local corrompu par un téléchargement incomplet est
-             classé définitif. Il coûte une transcription ; l'inverse coûtait mille relances de
-             ffmpeg sur des vidéos muettes. */
-          console.warn('[magpie] Transcription impossible', candidate.postId, error)
+          console.warn('[magpie] Son inextractible', candidate.postId, error)
           if (candidate.videoPath) saveTranscript(candidate.postId, null)
           else noteTranscriptFailure(candidate.postId)
+          continue
+        }
+
+        if (audio.length < SAMPLE_RATE) {
+          /* Moins d'une seconde depuis un fichier local : il n'y a rien à transcrire, pas la
+             peine de réveiller le modèle. Depuis une source distante en revanche, un flux vide
+             ne prouve rien sur la vidéo — seulement sur la descente. */
+          if (candidate.videoPath) saveTranscript(candidate.postId, null)
+          else noteTranscriptFailure(candidate.postId)
+          continue
+        }
+
+        try {
+          const output = await recognise(audio, {
+            task: 'transcribe',
+            // Sans langue explicite, Whisper écoute tout en anglais et invente le reste.
+            language: listeningLanguage(candidate.caption, fallbackLanguage),
+            // Whisper ne lit que trente secondes d'un coup ; le recouvrement évite de couper
+            // un mot à la frontière de deux tranches.
+            chunk_length_s: 30,
+            stride_length_s: 5
+          })
+          saveTranscript(candidate.postId, tidyTranscript(String(output.text ?? '')))
+          refused = 0
+        } catch (error) {
+          if (controller.signal.aborted) break
+          console.warn('[magpie] Reconnaissance impossible', candidate.postId, error)
+          noteTranscriptFailure(candidate.postId)
+          refused += 1
+          /* Et surtout : on s'arrête. Une reconnaissance qui échoue d'affilée sur des clips
+             dont on a bien tiré le son n'est pas une suite de malchances, c'est une panne —
+             modèle absent, machine hors ligne, format refusé. Continuer brûlerait la
+             bibliothèque entière à raison d'une tentative par vidéo, en silence. Mieux vaut une
+             étape qui échoue franchement et qu'on peut relancer. */
+          if (refused >= GIVE_UP) {
+            throw new Error(
+              `La reconnaissance a échoué ${refused} fois de suite alors que le son était ` +
+                `disponible. L'étape s'arrête sans rien conclure sur ces vidéos : ` +
+                `${error instanceof Error ? error.message : String(error)}`
+            )
+          }
         }
 
         if (!counted.has(candidate.postId)) {
