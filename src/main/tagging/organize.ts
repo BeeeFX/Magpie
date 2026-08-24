@@ -817,6 +817,17 @@ export function lastCollectionPlan(): AiCollectionPlan | null {
 const layoutProjections = new Map<string, ProjectedPoint[]>()
 
 /**
+ * Les étages de noms, rangés par regard comme les projections.
+ *
+ * Ils étaient refaits à **chaque** demande de carte, y compris quand la projection était déjà en
+ * mémoire : une relecture de toute la bibliothèque et l'extraction des mots de chaque post, en
+ * synchrone, dans le processus principal. Pendant ce temps l'application ne répond à rien — et
+ * comme la carte se redemande à chaque changement de filtre, le gel revenait sans cesse.
+ * Ils ne dépendent que des positions et du plan : calculés avec eux, jetés avec eux.
+ */
+const layoutLabels = new Map<string, MapLabel[]>()
+
+/**
  * Oublie tout ce qui est gardé en mémoire sur la carte.
  *
  * Sert au geste « refaire la carte » : effacer les positions en base ne suffit pas, le
@@ -824,6 +835,7 @@ const layoutProjections = new Map<string, ProjectedPoint[]>()
  */
 export function forgetMapCache(): void {
   layoutProjections.clear()
+  layoutLabels.clear()
 }
 
 export async function buildLocalCollectionPlan(
@@ -984,6 +996,7 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
       lastRawText = vectors
       // Les regards déjà calculés portent sur un autre nuage : ils ne valent plus rien.
       layoutProjections.clear()
+      layoutLabels.clear()
     }
   } catch (error) {
     console.warn('[magpie] Embeddings indisponibles, tri par mots-clés seul :', error)
@@ -1054,7 +1067,7 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
   const kept = layoutProjections.get(layout)
   if (kept && kept.length === vectors.size) {
     const shown = withGroups(kept, plan)
-    return { plan, points: shown, labels: nestedLabels(shown) }
+    return { plan, points: shown, labels: layoutLabels.get(layout) ?? [] }
   }
 
   try {
@@ -1097,7 +1110,9 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
     saveMapFingerprint(projectionFingerprint(layout), layout)
     layoutProjections.set(layout, projected)
     const shown = withGroups(projected, plan)
-    return { plan, points: shown, labels: nestedLabels(shown) }
+    const labels = nestedLabels(shown)
+    layoutLabels.set(layout, labels)
+    return { plan, points: shown, labels }
   } finally {
     // Toujours, y compris sur échec : sinon l'indicateur reste violet et animé sans fin.
     setProgress({ stage: 'idle', done: 0, total: 0, running: false })
