@@ -272,6 +272,9 @@ const previewApi: MagpieApi = {
       }))
     return {
       points,
+      /* L'aperçu navigateur ne construit pas d'étages de noms : il sert à regarder la
+         grille, pas à simuler l'analyse. */
+      labels: [],
       plan: {
         suggestions,
         routes: [],

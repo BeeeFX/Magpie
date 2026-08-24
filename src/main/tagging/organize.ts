@@ -4,6 +4,7 @@ import type {
   AiCollectionRoute,
   AiCollectionSuggestion,
   Language,
+  MapLabel,
   OrganizerMap,
   OrganizerProgress
 } from '@shared/types'
@@ -30,6 +31,7 @@ import {
 } from '../db/queries'
 import { centreVectors, embedItems, embedTexts } from './embeddings'
 import { blend, encodeTopicPrompts, toVector, topicStandoff, MAP_LAYOUTS, type MapLayout } from './vision'
+import { buildMapLabels } from './map-labels'
 import { propagateByImage } from './propagate'
 import { project, TUNING, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
@@ -1039,7 +1041,7 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
      toute l'analyse une seconde fois — chargement des vignettes, regroupement, tout. */
   const plan = lastPlan ?? (await proposeVideoCollections())
   const base = lastSemanticVectors
-  if (!base || base.size === 0) return { points: [], plan }
+  if (!base || base.size === 0) return { points: [], plan, labels: [] }
 
   /* Un autre regard, ce sont les mêmes blocs remixés à d'autres poids. L'équilibré est déjà
      mélangé — c'est celui que l'analyse produit — et les autres se refont ici, ce qui ne coûte
@@ -1050,7 +1052,10 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
       : blend(lastRawText ?? new Map(), postImageEmbeddings(), MAP_LAYOUTS[layout])
 
   const kept = layoutProjections.get(layout)
-  if (kept && kept.length === vectors.size) return { plan, points: withGroups(kept, plan) }
+  if (kept && kept.length === vectors.size) {
+    const shown = withGroups(kept, plan)
+    return { plan, points: shown, labels: nestedLabels(shown) }
+  }
 
   try {
     /* La carte figée passe avant tout calcul, et désormais pour **chaque** regard.
@@ -1091,11 +1096,35 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
     )
     saveMapFingerprint(projectionFingerprint(layout), layout)
     layoutProjections.set(layout, projected)
-    return { plan, points: withGroups(projected, plan) }
+    const shown = withGroups(projected, plan)
+    return { plan, points: shown, labels: nestedLabels(shown) }
   } finally {
     // Toujours, y compris sur échec : sinon l'indicateur reste violet et animé sans fin.
     setProgress({ stage: 'idle', done: 0, total: 0, running: false })
   }
+}
+
+/**
+ * Les noms qui se découvrent au zoom, sous ceux des amas.
+ *
+ * Les mots viennent d'où viennent déjà les catégories — légende, tags, transcription — et passent
+ * le même tamis que dans `createChoices` : ni facettes, ni mots vides, ni mots qui *sont* déjà un
+ * thème. Un sous-amas nommé « vidéo » à l'intérieur de « Film et vidéo » n'apprendrait rien.
+ */
+function nestedLabels(points: OrganizerMap['points']): MapLabel[] {
+  const terms = new Map<string, Set<string>>()
+  for (const item of organizationItems()) {
+    const kept = new Set<string>()
+    for (const term of prepareTerms(item).keys()) {
+      if (term.startsWith(FACET)) continue
+      if (term.length < 3 || term.length > 35) continue
+      if (topicKeyword.has(term) || STOP_WORDS.has(term)) continue
+      if (term.split(' ').some((word) => STOP_WORDS.has(word))) continue
+      kept.add(term)
+    }
+    terms.set(item.id, kept)
+  }
+  return buildMapLabels(points, terms)
 }
 
 /**

@@ -34,6 +34,19 @@ const BUCKET = 0.02
  * l'affichage doivent s'accorder — accepter d'en créer une sur trois voisins puis la montrer
  * sur un seul reviendrait à nommer le vide.
  */
+/**
+ * À quelle échelle apparente chaque étage de noms apparaît.
+ *
+ * L'index est le niveau : les amas sont toujours là, leurs sous-amas se découvrent en zoomant,
+ * et l'étage du dessous plus tard encore. C'est le geste d'une carte routière — le pays, puis
+ * les villes, puis les rues — et il vaut ici pour la même raison : on ne peut pas lire cent
+ * noms d'un coup, mais on veut savoir ce qu'il y a dans un amas dès qu'on s'en approche.
+ */
+const NESTED_AT = [0, 2.2, 4.6]
+
+/** Les sous-noms se lisent comme des annotations : la couleur reste aux amas. */
+const NESTED_TONE = 'rgba(255, 255, 255, 0.58)'
+
 const LABEL_RADIUS = 0.08
 const LABEL_ANCHORS = 24
 const LABEL_MIN_ANCHORS = 3
@@ -1393,9 +1406,29 @@ export function OrganizerMap({
       faded: !includedGroups.has(island.group),
       members: null as Set<string> | null
     }))
+    /* Les étages sous les amas. Posés **après** les noms d'amas : l'évitement des
+       chevauchements traite la liste dans l'ordre, donc un nom de sous-amas cède la place à
+       celui de son parent, et jamais l'inverse. */
+    const nested =
+      showLabels && apparent >= NESTED_AT[1]
+        ? data.labels
+            .filter((label) => apparent >= (NESTED_AT[label.level] ?? Infinity))
+            .map((label) => ({
+              key: label.id,
+              text: label.text,
+              tone: NESTED_TONE,
+              x: label.x,
+              y: label.y,
+              count: label.count,
+              near: label.count,
+              faded: false,
+              members: null as Set<string> | null
+            }))
+        : []
     const labelled = [
       ...(showLabels ? groupTitles : []),
-      ...(showCollectionNames ? collectionSpots : [])
+      ...(showCollectionNames ? collectionSpots : []),
+      ...nested
     ]
     for (const island of labelled) {
       const name = island.text

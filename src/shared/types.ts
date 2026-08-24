@@ -547,6 +547,21 @@ export interface OrganizerMapPoint {
   sources: ContentSource[]
 }
 
+/**
+ * Un nom d'endroit sur la carte, sous celui de son amas.
+ *
+ * `level` dit à quelle profondeur de zoom il apparaît : 1 juste sous les amas, 2 en dessous.
+ * Le niveau 0 n'est pas ici — ce sont les amas eux-mêmes, que la carte tient déjà de son plan.
+ */
+export interface MapLabel {
+  id: string
+  level: number
+  text: string
+  x: number
+  y: number
+  count: number
+}
+
 /** Ce qu'un export a produit. Sert à décrire le dossier avant de l'ouvrir. */
 export interface ExportSummary {
   path: string
@@ -561,6 +576,8 @@ export interface ExportSummary {
 
 export interface OrganizerMap {
   points: OrganizerMapPoint[]
+  /** Les noms qui se découvrent au zoom, sous ceux des amas. */
+  labels: MapLabel[]
   /** Le plan qui a servi à colorer la carte : mêmes identifiants que `points.group`. */
   plan: AiCollectionPlan
 }
