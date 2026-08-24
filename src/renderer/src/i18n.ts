@@ -307,10 +307,10 @@ const fr = {
   'map.titlesOwn': 'Mes étiquettes',
   'map.titles': 'Noms affichés',
   'map.colours': 'Couleur des points',
-  'map.lens': "Coup d'œil style",
-  'map.lensBack': '‹ Revenir à la carte',
-  'map.lensWait':
-    'Le premier coup d’œil replace les points, environ une minute. Les suivants se lisent en base, et sont immédiats.',
+  'map.byStyle': 'Regrouper par style',
+  'map.bySubject': 'Regrouper par sujet',
+  'map.byStyleWait':
+    'Le premier regroupement par style replace les points, environ une minute. Les suivants se lisent en base, et sont immédiats.',
   'organizer.colourGroup': 'Par amas',
   'organizer.colourCollection': 'Par collection',
   'organizer.colourPlatform': 'Par plateforme',
@@ -889,10 +889,10 @@ const en: Record<TranslationKey, string> = {
   'map.titlesOwn': 'My labels',
   'map.titles': 'Names shown',
   'map.colours': 'Dot colour',
-  'map.lens': 'Style lens',
-  'map.lensBack': '‹ Back to the map',
-  'map.lensWait':
-    'The first look lays the points out again, about a minute. Later ones are read from the library, and are instant.',
+  'map.byStyle': 'Group by style',
+  'map.bySubject': 'Group by subject',
+  'map.byStyleWait':
+    'Grouping by style lays the points out again the first time, about a minute. Later ones are read from the library, and are instant.',
   'organizer.colourGroup': 'By cluster',
   'organizer.colourCollection': 'By collection',
   'organizer.colourPlatform': 'By platform',
