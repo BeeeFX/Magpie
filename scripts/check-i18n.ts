@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { translate, type TranslationKey } from '../src/renderer/src/i18n'
 import { STEP_ORDER, STEPS_WITH_LOSS } from '../src/renderer/src/steps'
 import {
@@ -121,8 +123,59 @@ if (!missing('fr', 'label.__inexistante__')) {
   console.error("  ✗ le contrôle lui-même est aveugle : une clé absente n'est pas détectée")
 }
 
+/**
+ * Deuxième famille de trous : une phrase à variable appelée sans sa variable.
+ *
+ * `translate` remplace `{quality}` par ce qu'on lui donne — et laisse l'accolade telle quelle
+ * quand on ne lui donne rien. Le texte s'affiche alors avec son gabarit apparent, « Vidéos en
+ * {quality} », ce qu'aucun compilateur ne voit et qu'aucune recherche de clé manquante n'attrape :
+ * la clé existe, c'est son appel qui est incomplet.
+ *
+ * On relit donc les sources : toute clé dont le texte porte une accolade doit être appelée avec un
+ * second argument. Un `t('clé')` nu sur une telle clé est un gabarit qui part à l'écran.
+ */
+function sources(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry)
+    if (statSync(path).isDirectory()) sources(path, out)
+    else if (/\.(ts|tsx)$/.test(entry) && !path.endsWith('i18n.ts')) out.push(path)
+  }
+  return out
+}
+
+console.log('\nPhrases à variable, appelées sans leur variable\n')
+
+const dictionary = readFileSync('src/renderer/src/i18n.ts', 'utf8')
+/* Les clés du dictionnaire dont la valeur porte une accolade. Le nom suffit : on ne cherche pas
+   à savoir quelles variables, seulement qu'il en faut. */
+const templated = new Set<string>()
+for (const match of dictionary.matchAll(/^ {2}'([a-zA-Z][\w.]*)':/gm)) {
+  const key = match[1]
+  /* Le texte vient du dictionnaire lui-même, pas d'une découpe du fichier : lire la source à
+     coups de tranches attrapait la valeur de l'entrée suivante, et cinquante-cinq clés
+     innocentes se retrouvaient accusées. */
+  const text = translate('fr', key as TranslationKey) as string | undefined
+  if (text && /\{\w+\}/.test(text)) templated.add(key)
+}
+
+const files = sources('src')
+const bare: string[] = []
+for (const key of [...templated].sort()) {
+  const naked = new RegExp(`\\bt\\(\\s*['\`"]${key.replace(/\./g, '\\.')}['\`"]\\s*\\)`)
+  for (const file of files) {
+    if (naked.test(readFileSync(file, 'utf8'))) bare.push(`${key} — ${file.replace(/\\/g, '/')}`)
+  }
+}
+
+if (bare.length === 0) {
+  console.log(`  ✓ ${templated.size} phrases à variable, toutes appelées avec la leur`)
+} else {
+  failures += bare.length
+  for (const hole of bare) console.error(`  ✗ ${hole}`)
+}
+
 if (failures > 0) {
-  console.error(`\n${failures} clé(s) manquante(s).`)
+  console.error(`\n${failures} problème(s).`)
   process.exit(1)
 }
 console.log('\nToutes les familles sont complètes dans les deux langues.')
