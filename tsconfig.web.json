@@ -20,5 +20,15 @@
       "@/*": ["./src/renderer/src/*"]
     }
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/preload/index.ts"]
+  "include": [
+    "src/renderer/src/**/*",
+    "src/shared/**/*",
+    "src/preload/index.ts",
+    // Le relief des régions est de la géométrie pure — aucune API d'Electron, aucun accès à la
+    // base — et c'est le banc de la carte qui en a besoin : sans régions, `/map-bench.html` ne
+    // peut pas exercer les étiquettes de régions, qui sont pourtant ce qu'on y règle. Symétrique
+    // des fichiers du renderer que `tsconfig.node.json` accepte pour ses propres bancs.
+    "src/main/tagging/islands.ts",
+    "src/main/tagging/projection-core.ts"
+  ]
 }

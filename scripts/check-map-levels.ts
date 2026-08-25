@@ -44,6 +44,7 @@ console.log('étage   régions   couverture   la plus grosse   médiane   ms')
 
 const counts: number[] = []
 const spans: number[] = []
+const covers: number[] = []
 for (const [level, tuning] of ISLAND_LEVELS.entries()) {
   const started = process.hrtime.bigint()
   const islands = findIslands(points, termsOf, tuning, level)
@@ -52,6 +53,7 @@ for (const [level, tuning] of ISLAND_LEVELS.entries()) {
   const sizes = islands.map((island) => island.size).sort((a, b) => a - b)
   counts.push(islands.length)
   spans.push(sizes.length > 0 ? sizes[sizes.length - 1] / points.length : 0)
+  covers.push(held / points.length)
   console.log(
     `${String(level).padStart(5)}${String(islands.length).padStart(10)}` +
       `${`${((held / points.length) * 100).toFixed(1)} %`.padStart(13)}` +
@@ -64,18 +66,28 @@ for (const [level, tuning] of ISLAND_LEVELS.entries()) {
 console.log('')
 /* Ce qu'un étage doit être : un étage. Sans écart franc entre les trois, la carte montrerait
    trois fois la même chose et le zoom n'apprendrait rien. */
+const last = counts.length - 1
 assert(
-  counts[0] < counts[1] && counts[1] < counts[2],
+  counts.every((count, level) => level === 0 || count > counts[level - 1]),
   `de moins en moins de monde en s'approchant (${counts.join(' → ')} régions)`
 )
 assert(
-  counts[2] >= counts[0] * 3,
-  `et l'étage le plus fin en montre au moins trois fois plus (${counts[0]} → ${counts[2]})`
+  counts[last] >= counts[0] * 10,
+  `et l'étage le plus fin en montre au moins dix fois plus (${counts[0]} → ${counts[last]})`
 )
 assert(
-  spans[0] > spans[2],
-  `la plus grosse région rétrécit d'un étage à l'autre ` +
-    `(${(spans[0] * 100).toFixed(0)} % → ${(spans[2] * 100).toFixed(0)} %)`
+  spans[0] > spans[last] * 5,
+  `la plus grosse région fond d'un bout à l'autre ` +
+    `(${(spans[0] * 100).toFixed(0)} % → ${(spans[last] * 100).toFixed(1)} %)`
+)
+/* Un étage qui ne nomme presque personne ne sert à rien : le grain le plus fin doit encore
+   couvrir la carte, sinon on aurait découpé du bruit. Le dernier a droit à un dixième de
+   perte — à ce grain, les posts isolés tombent sous le plancher du relief, et il n'y a de
+   toute façon rien à nommer là où il n'y a qu'un post. Au-delà l'affaire se gâte vite :
+   descendre encore d'un cran fait tomber la couverture à 79 %. */
+assert(
+  covers.every((part, level) => part > (level === covers.length - 1 ? 0.85 : 0.9)),
+  `chaque étage couvre encore la carte (${covers.map((p) => `${(p * 100).toFixed(0)} %`).join(' ')})`
 )
 /* Le relief se recalcule avec la projection, jamais entre deux : il doit être déterministe. */
 const again = findIslands(points, termsOf, ISLAND_LEVELS[1], 1)

@@ -51,13 +51,18 @@ const NESTED_TONE = 'rgba(255, 255, 255, 0.58)'
 /**
  * À quelle échelle apparente chaque étage de régions se lit.
  *
- * Le pays dès l'ouverture, les villes en approchant, les rues une fois dedans. Et surtout :
- * chaque étage **s'efface** quand le suivant arrive, sans quoi la carte accumulerait cinquante
- * noms au zoom maximal. C'est ce qui manquait — les régions restaient toutes affichées, de la
- * même taille, à toutes les distances, si bien qu'en approchant on ne gagnait aucune
- * information et qu'on ne savait plus lequel de ces noms parlait de ce qu'on avait sous les yeux.
+ * Le pays dès l'ouverture, les villes en approchant, les rues une fois dedans, puis le pâté de
+ * maisons et l'adresse. Et surtout : chaque étage **s'efface** quand le suivant arrive, sans quoi
+ * la carte accumulerait tous ses noms au zoom maximal.
+ *
+ * Les seuils montent en gros du simple au double et demi, parce que le zoom lui-même est
+ * géométrique — chaque cran multiplie l'échelle par 1,16. Trois étages s'arrêtaient à 6,5
+ * d'échelle apparente alors que la molette monte jusqu'à une centaine : passé quelques crans, on
+ * approchait sans plus rien découvrir, et le fond du zoom était muet — un seul nom à l'écran,
+ * mesuré. Six étages couvrent toute la course, le dernier arrivant assez tôt pour être
+ * pleinement lisible avant la butée.
  */
-const REGION_AT = [0, 2.6, 6.5]
+const REGION_AT = [0, 2.6, 6.5, 16, 36, 70]
 
 /** Ce qu'il reste d'un nom de région quand l'étage du dessous a pris le relais. */
 const REGION_GHOST = 0.12
@@ -1826,9 +1831,25 @@ export function OrganizerMap({
           ring.arc(x, y, halo, 0, Math.PI * 2)
         }
       }
-      const shade = WEB.dotFar + WEB.dotNear * closeness
+      /**
+       * Ce qu'on isole doit se **voir**, et c'est ce qui manquait.
+       *
+       * Les opacités de `paintDots` valent pour une carte entière, où la toile porte le dessin
+       * et où les pastilles ne font qu'y poser des jalons : un dixième d'opacité pour le corps,
+       * deux centièmes pour le halo une fois zoomé. Mais un amas isolé n'a **pas** sa toile —
+       * ses arêtes sont dispersées dans tous les paquets, et les reconstruire coûterait une
+       * passe sur cent trente-cinq mille. Il ne reste donc que les pastilles, et les remettre à
+       * leur opacité d'origine sur un fond assombri de 86 % ne montre rien du tout.
+       *
+       * On les relève franchement — **mais seulement dans ce cas-là**. Un amas, lui, est un
+       * groupe des courbes : `restoreGroup` vient de rallumer sa toile à sa luminance exacte,
+       * et surexposer ses pastilles par-dessus le montrerait autrement qu'il n'est. C'est
+       * précisément la faute que `restoreGroup` avait été écrit pour réparer.
+       */
+      const faithful = WEB.dotFar + WEB.dotNear * closeness
+      const shade = isolated ? Math.min(1, faithful * 6) : faithful
       context.globalCompositeOperation = 'lighter'
-      context.globalAlpha = shade * glow
+      context.globalAlpha = isolated ? Math.min(1, shade * Math.max(glow, 0.5)) : shade * glow
       for (const [tone, ring] of rings) {
         context.fillStyle = tone
         context.fill(ring)
@@ -1922,7 +1943,12 @@ export function OrganizerMap({
       const here = ramp(REGION_AT[level] ?? Infinity)
       const below = REGION_AT[level + 1]
       const taken = below === undefined ? 0 : ramp(below)
-      return here * (1 - (1 - REGION_GHOST) * taken)
+      /* Et il s'éteint tout à fait quand l'étage **suivant le suivant** arrive : avec cinq
+         étages, garder un fantôme de chacun finirait par empiler quatre générations de noms
+         au zoom maximal. Un cran de mémoire, pas quatre. */
+      const under = REGION_AT[level + 2]
+      const gone = under === undefined ? 0 : ramp(under)
+      return here * (1 - (1 - REGION_GHOST) * taken) * (1 - gone)
     }
     const regionTitles = (data.islands ?? []).map((island) => ({
       key: island.id,

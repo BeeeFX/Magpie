@@ -120,7 +120,27 @@ export const ISLAND_LEVELS: IslandTuning[] = [
   /* La ville. C'est le réglage mesuré au banc, celui qui tenait seul jusqu'ici. */
   { field: 160, radius: 8, floor: 0.05, persistence: 0.04, minimum: 25 },
   /* La rue. Grain fin et plancher bas : des endroits qui n'existent que de près. */
-  { field: 200, radius: 4, floor: 0.04, persistence: 0.02, minimum: 10 }
+  { field: 200, radius: 4, floor: 0.04, persistence: 0.02, minimum: 10 },
+  /* Le pâté de maisons, puis l'adresse. Le zoom de la carte va jusqu'à cent cinquante fois le
+     cadre de référence ; s'arrêter à trois étages laissait tout ce domaine sans un seul nom
+     nouveau — on approchait et on relisait les mêmes. Le grain descend jusqu'à deux cases de
+     rayon, et le plancher jusqu'à quatre posts : en dessous, ce n'est plus un endroit, c'est
+     un post. */
+  { field: 256, radius: 3, floor: 0.03, persistence: 0.015, minimum: 6 },
+  { field: 320, radius: 2, floor: 0.02, persistence: 0.01, minimum: 4 },
+  /**
+   * L'adresse — le grain le plus fin qui tienne encore debout.
+   *
+   * Balayé jusqu'au bout : à rayon 1 et champ 400, on obtient 704 régions d'une médiane de sept
+   * posts en couvrant encore 90 % de la carte. Descendre plus bas ne rend rien — champ 512
+   * donne 904 régions mais la couverture tombe à 79 %, c'est-à-dire qu'un post sur cinq n'est
+   * plus dans aucune région : le relief est devenu si fin que le plancher noie les creux.
+   *
+   * Il en faut autant parce que le zoom va loin : à l'échelle maximale, le cadre ne montre plus
+   * que quatre dix-millièmes de la surface de la carte. Sept cents régions y donnent quelques
+   * noms sous les yeux ; deux cent cinquante n'en donnaient aucun.
+   */
+  { field: 400, radius: 1, floor: 0.02, persistence: 0.005, minimum: 3 }
 ]
 
 /**

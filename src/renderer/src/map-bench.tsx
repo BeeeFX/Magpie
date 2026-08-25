@@ -3,6 +3,7 @@ import type { OrganizerMap as MapData, OrganizerMapPoint } from '@shared/types'
 import { OrganizerMap, type ColourMode } from './components/OrganizerMap'
 import './styles.css'
 import sandbox from '../../../map-sandbox.json'
+import { findIslandLevels } from '../../main/tagging/islands'
 
 /**
  * Banc de mesure de la carte : `npm run preview:web`, puis /map-bench.html.
@@ -27,10 +28,24 @@ const points: OrganizerMapPoint[] = sandbox.points.map((point, index) => ({
   sources: ['saved']
 }))
 
+/**
+ * Les régions, calculées ici même.
+ *
+ * Le relief est de la géométrie pure : il n'a besoin ni de la base ni d'Electron, seulement de
+ * positions. Le banc peut donc exercer les étiquettes de régions — leurs étages, leur teinte,
+ * leur ancrage, leur clic — ce qui était impossible tant qu'il les laissait vides.
+ *
+ * Le vocabulaire est synthétique : le groupe de chaque point tient lieu de mot, faute de
+ * bibliothèque à relire. Les noms ne veulent donc rien dire, mais leur **nombre**, leur place
+ * et leur étage sont ceux de la vraie carte.
+ */
+const words = new Map(sandbox.points.map((point, index) => [String(index), [`sujet${point.g}`]]))
+const islands = findIslandLevels(points, (id) => words.get(id) ?? [])
+
 const data: MapData = {
   points,
   labels: [],
-  islands: [],
+  islands,
   plan: {
     suggestions: sandbox.groups.map((group) => ({
       id: String(group.id),
@@ -63,6 +78,7 @@ createRoot(document.getElementById('root')!).render(
     includedGroups={included}
     groupNames={names}
     showLabels
+    showRegionNames
     onLasso={() => {}}
     onHover={() => {}}
     onOpen={() => {}}
