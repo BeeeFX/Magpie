@@ -29,6 +29,7 @@ const points: OrganizerMapPoint[] = sandbox.points.map((point, index) => ({
 
 const data: MapData = {
   points,
+  islands: [],
   plan: {
     suggestions: sandbox.groups.map((group) => ({
       id: String(group.id),

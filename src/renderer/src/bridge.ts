@@ -272,6 +272,8 @@ const previewApi: MagpieApi = {
       }))
     return {
       points,
+      /* Le bac à sable ne calcule pas de relief : il n'a pas les légendes qui le nommeraient. */
+      islands: [],
       plan: {
         suggestions,
         routes: [],

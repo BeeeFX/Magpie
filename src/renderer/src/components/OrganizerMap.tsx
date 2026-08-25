@@ -111,6 +111,15 @@ interface Props {
   collections?: { id: number; name: string; tone: string; members: Set<string> }[]
   /** Les noms des collections, posés au milieu de leurs posts. */
   showCollectionNames?: boolean
+  /**
+   * Les noms des **régions** — ce que le relief de la carte contient à cet endroit.
+   *
+   * Ils ne disent pas la même chose que les noms d'amas : un amas est une catégorie décidée dans
+   * les vecteurs, qui peut se répartir en trois taches et dont le nom se pose alors sur la plus
+   * grosse ; une région est un endroit, et son nom décrit ce qu'on y trouve. Les deux couches se
+   * superposent sans se contredire, et c'est pour ça qu'elles ont chacune leur bouton.
+   */
+  showRegionNames?: boolean
   /** Les étiquettes posées à la main. */
   showOwnLabels?: boolean
   /**
@@ -251,6 +260,7 @@ export function OrganizerMap({
   onRemoveLabel,
   collections,
   showCollectionNames = false,
+  showRegionNames = false,
   showOwnLabels = true,
   menuOnRightClick = false,
   heat = null,
@@ -1393,7 +1403,22 @@ export function OrganizerMap({
       faded: !includedGroups.has(island.group),
       members: null as Set<string> | null
     }))
+    /* Les régions passent **en premier** : la boucle qui suit écarte une étiquette quand elle
+       en recouvre une déjà posée, donc l'ordre est une priorité. Un nom de région décrit
+       l'endroit où on est, ce qui est la première chose qu'on lit sur une carte. */
+    const regionTitles = (data.islands ?? []).map((island) => ({
+      key: island.id,
+      text: island.name.toLocaleLowerCase(),
+      tone: 'rgba(226,228,238,.94)',
+      x: island.x,
+      y: island.y,
+      count: island.size,
+      near: island.size,
+      faded: false,
+      members: null as Set<string> | null
+    }))
     const labelled = [
+      ...(showRegionNames ? regionTitles : []),
       ...(showLabels ? groupTitles : []),
       ...(showCollectionNames ? collectionSpots : [])
     ]
@@ -1578,6 +1603,8 @@ export function OrganizerMap({
     focusGroup,
     hoverLabel,
     showLabels,
+    showRegionNames,
+    data.islands,
     view,
     zooming
   ])

@@ -37,6 +37,8 @@
     // Idem : le réglage de la toile n'est qu'une fonction de l'empan et du nombre d'arêtes,
     // vérifiée par `scripts/check-map-density.ts`.
     "src/renderer/src/map-render.ts",
+    // Idem : le rangement en damier n'est qu'une affectation, mesurée par `bench:map-grid`.
+    "src/renderer/src/map-grid.ts",
     // Les dictionnaires et le vocabulaire des étapes ne sont que des données : `check:i18n`
     // les relit sous Node pour vérifier les clés assemblées à la volée.
     "src/renderer/src/i18n.ts",

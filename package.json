@@ -43,7 +43,13 @@
     "bench:map-style": "tsx --tsconfig tsconfig.node.json scripts/bench-map-style.mts",
     "check:boundaries": "tsx --tsconfig tsconfig.node.json scripts/check-boundaries.ts",
     "check:map-density": "tsx scripts/check-map-density.ts",
-    "check:transcribe": "tsx --tsconfig tsconfig.node.json scripts/check-transcribe.ts"
+    "check:transcribe": "tsx --tsconfig tsconfig.node.json scripts/check-transcribe.ts",
+    "bench:map-quality": "tsx --tsconfig tsconfig.node.json scripts/bench-map-quality.mts",
+    "map:compare": "tsx --tsconfig tsconfig.node.json scripts/map-compare.mts",
+    "bench:map-regions": "tsx --tsconfig tsconfig.node.json scripts/bench-map-regions.mts",
+    "bench:map-grid": "tsx --tsconfig tsconfig.node.json scripts/bench-map-grid.mts",
+    "check:islands": "tsx --tsconfig tsconfig.node.json scripts/check-islands.ts",
+    "map:regions": "tsx --tsconfig tsconfig.node.json scripts/map-regions-preview.mts"
   },
   "dependencies": {
     "@fontsource-variable/plus-jakarta-sans": "^5.3.0",

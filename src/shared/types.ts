@@ -559,10 +559,27 @@ export interface ExportSummary {
   at: number
 }
 
+/**
+ * Une région de la carte, trouvée dans la carte elle-même.
+ *
+ * À ne pas confondre avec une collection, qui est une requête sur le sens et peut se répartir
+ * en trois endroits. Une région est un relief : un endroit, et le nom de ce qu'on y trouve.
+ */
+export interface MapIsland {
+  id: string
+  name: string
+  /** Le sommet du relief, en repère unité — l'endroit où poser le nom. */
+  x: number
+  y: number
+  size: number
+}
+
 export interface OrganizerMap {
   points: OrganizerMapPoint[]
   /** Le plan qui a servi à colorer la carte : mêmes identifiants que `points.group`. */
   plan: AiCollectionPlan
+  /** Les régions du relief, nommées par ce qu'elles contiennent. */
+  islands: MapIsland[]
 }
 
 export interface AiCollectionChoice {

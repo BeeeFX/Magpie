@@ -84,7 +84,12 @@ export function LibraryMap(): React.JSX.Element {
    * la troisième n'avait aucun bouton. Les amas sortent de l'analyse, les collections de ce que
    * l'utilisateur a écrit, les étiquettes de ce qu'il a nommé lui-même.
    */
-  const [titles, setTitles] = useState({ groups: true, collections: true, own: true })
+  const [titles, setTitles] = useState({
+    regions: true,
+    groups: true,
+    collections: true,
+    own: true
+  })
   /** Les collections, pour teinter les points et poser leurs noms. */
   const [rooms, setRooms] = useState<CollectionMembership[]>([])
   /**
@@ -392,10 +397,13 @@ export function LibraryMap(): React.JSX.Element {
             </button>
           ))}
         </div>
-        {/* Les trois familles de noms. Poser une étiquette se fait au clic droit sur la carte :
-            le bouton qui armait un mode a disparu avec le mode. */}
+        {/* Les quatre familles de noms. « Régions » vient de la carte elle-même — le relief des
+            posts, découpé aux vallées et nommé par ce qu'il contient —, les amas viennent de
+            l'analyse, les collections de ce que l'utilisateur a défini, les étiquettes de ce
+            qu'il a nommé à la main. Poser une étiquette se fait au clic droit sur la carte : le
+            bouton qui armait un mode a disparu avec le mode. */}
         <div className="library-map__titles" role="group" aria-label={t('map.titles')}>
-          {(['groups', 'collections', 'own'] as const).map((kind) => (
+          {(['regions', 'groups', 'collections', 'own'] as const).map((kind) => (
             <button
               key={kind}
               type="button"
@@ -432,6 +440,7 @@ export function LibraryMap(): React.JSX.Element {
         includedGroups={includedGroups}
         groupNames={groupNames}
         showLabels={titles.groups}
+        showRegionNames={titles.regions}
         onRegenerate={() => {
           /* On jette la carte rangée, puis on redemande : `attempt` est le seul moyen de
              refaire tourner l'effet, aucun autre état ne change. */

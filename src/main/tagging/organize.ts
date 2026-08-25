@@ -34,6 +34,8 @@ import { propagateByImage } from './propagate'
 import { project, TUNING, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
+import { STOP_WORDS, normalizePhrase, words, postTerms } from './terms'
+import { findIslands } from './islands'
 
 const MAX_CATEGORIES = 24
 /** Marque les termes de facette — forme du post, plateforme. Jamais un thème, jamais un nom.
@@ -176,9 +178,6 @@ const TOPICS: Topic[] = [
   { id: 'learning', fr: 'Apprendre et comprendre', en: 'Learning & ideas', keywords: ['tutorial', 'tutoriel', 'howto', 'how to', 'learn', 'apprendre', 'education', 'éducation', 'explained', 'explication', 'science', 'history', 'histoire'] }
 ]
 
-const STOP_WORDS = new Set(
-  `a about above after again against ai all am an and any are arent as at avec avoir be because been before being below between both but by can could dans de des did do does doing dont down during each elle en encore est et few for from further get got had has have having he her here hers herself him himself his how i if in into is it its itself je just la le les lui mais me more most my myself ne no nor not nous of off on once only or other our ours ourselves out over own pas plus pour que qui re really same she should so some such sur than that the their theirs them themselves then there these they this those through to too très under until up very vous was we were what when where which while who why will with you your yours yourself yourselves ça comme cette ces ce une un video videos reel reels post posts instagram reddit twitter tiktok x com http https www fyp fy foryou foryoupage viral trending trend explore explorepage follow like likes share watch link bio indie`.split(/\s+/)
-)
 
 /**
  * Texte représentatif de chaque thème, à encoder pour le comparer aux posts.
@@ -278,24 +277,7 @@ function language(): Language {
   return app.getLocale().toLowerCase().startsWith('fr') ? 'fr' : 'en'
 }
 
-function normalizePhrase(value: string): string {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLocaleLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/[^\p{L}\p{N}+# ]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
 
-function words(value: string): string[] {
-  return normalizePhrase(value)
-    .replace(/https?\s+\S+/g, ' ')
-    .split(' ')
-    .map((word) => word.replace(/^#+/, ''))
-    .filter((word) => word.length >= 2 && !STOP_WORDS.has(word) && !/^\d+$/.test(word))
-}
 
 function addTerms(target: Map<string, number>, values: string[], weight: number): void {
   for (const value of values) {
@@ -1030,6 +1012,9 @@ function projectionFingerprint(layout: MapLayout = 'equilibre'): string {
     `s=${TUNING.spread}`,
     `pca=${TUNING.pcaDims}`,
     `u=${TUNING.unit ? 1 : 0}`,
+    /* Le départ de la descente en fait partie : il change toutes les positions, et une carte
+       rangée sous l'ancien serait relue comme si elle disait la même chose. */
+    `i=${TUNING.init ?? 'random'}`,
     `mix=${recipe.text}/${recipe.structure}/${recipe.meaning}`
   ].join('|')
 }
@@ -1039,7 +1024,7 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
      toute l'analyse une seconde fois — chargement des vignettes, regroupement, tout. */
   const plan = lastPlan ?? (await proposeVideoCollections())
   const base = lastSemanticVectors
-  if (!base || base.size === 0) return { points: [], plan }
+  if (!base || base.size === 0) return { points: [], plan, islands: [] }
 
   /* Un autre regard, ce sont les mêmes blocs remixés à d'autres poids. L'équilibré est déjà
      mélangé — c'est celui que l'analyse produit — et les autres se refont ici, ce qui ne coûte
@@ -1050,7 +1035,9 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
       : blend(lastRawText ?? new Map(), postImageEmbeddings(), MAP_LAYOUTS[layout])
 
   const kept = layoutProjections.get(layout)
-  if (kept && kept.length === vectors.size) return { plan, points: withGroups(kept, plan) }
+  if (kept && kept.length === vectors.size) {
+    return { plan, points: withGroups(kept, plan), islands: regionsOf(kept) }
+  }
 
   try {
     /* La carte figée passe avant tout calcul, et désormais pour **chaque** regard.
@@ -1091,11 +1078,28 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
     )
     saveMapFingerprint(projectionFingerprint(layout), layout)
     layoutProjections.set(layout, projected)
-    return { plan, points: withGroups(projected, plan) }
+    return { plan, points: withGroups(projected, plan), islands: regionsOf(projected) }
   } finally {
     // Toujours, y compris sur échec : sinon l'indicateur reste violet et animé sans fin.
     setProgress({ stage: 'idle', done: 0, total: 0, running: false })
   }
+}
+
+/**
+ * Les régions du relief, nommées par les mots de leurs posts.
+ *
+ * Le nommage lit les légendes déjà chargées pour l'analyse — aucune requête de plus — et le
+ * calcul entier tient dans quelques dizaines de millisecondes sur dix mille posts : un relief de
+ * 160 × 160, un tri de ses cases, et deux parcours de la bibliothèque pour les mots. On le refait
+ * donc à chaque construction de la carte plutôt que de le ranger, ce qui évite d'avoir à décider
+ * quand il devient caduc.
+ */
+function regionsOf(points: ProjectedPoint[]): OrganizerMap['islands'] {
+  const items = new Map(organizationItems().map((item) => [item.id, item]))
+  return findIslands(points, (id) => {
+    const item = items.get(id)
+    return item ? postTerms(item.text, item.tags) : []
+  })
 }
 
 /**
