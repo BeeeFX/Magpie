@@ -47,6 +47,20 @@ const NESTED_AT = [0, 2.2, 4.6]
 /** Les sous-noms se lisent comme des annotations : la couleur reste aux amas. */
 const NESTED_TONE = 'rgba(255, 255, 255, 0.58)'
 
+/**
+ * La largeur du fondu, en part du seuil.
+ *
+ * Un étage qui apparaît d'un coup fait sursauter la carte : au cran de molette près, six noms
+ * surgissent et un autre s'éteint. Chacun traverse donc une plage — de 0,8 à 1,25 fois son seuil
+ * — pendant laquelle il monte en opacité. Le geste devient continu, et deux crans de zoom ne
+ * changent jamais brutalement ce qu'on lit.
+ */
+const FADE_BELOW = 0.8
+const FADE_ABOVE = 1.25
+
+/** Ce qu'il reste d'un nom d'amas quand ses enfants ont pris le relais. */
+const PARENT_GHOST = 0.14
+
 const LABEL_RADIUS = 0.08
 const LABEL_ANCHORS = 24
 const LABEL_MIN_ANCHORS = 3
@@ -1395,6 +1409,25 @@ export function OrganizerMap({
     perf.note('aretes', pathCache.current.list.length)
     perf.note('tampon', covers ? 'recopie' : paintJob.current ? 'en cours' : 'pose')
     perf.begin('noms')
+    /* Combien de ce nom est visible à cette échelle : zéro avant sa plage, un après. */
+    const ramp = (threshold: number): number => {
+      if (threshold <= 0) return 1
+      const from = threshold * FADE_BELOW
+      const to = threshold * FADE_ABOVE
+      return Math.max(0, Math.min(1, (apparent - from) / (to - from)))
+    }
+
+    /* La part la plus visible des enfants de chaque amas. C'est elle qui décide de combien le
+       parent s'efface : le relais est continu, et il suit la parenté plutôt qu'un seuil de zoom
+       arbitraire — un amas sans enfant nommé garde son nom à tous les zooms. */
+    const takeover = new Map<string, number>()
+    if (showLabels) {
+      for (const label of data.labels) {
+        const alpha = ramp(NESTED_AT[label.level] ?? Infinity)
+        if (alpha > (takeover.get(label.group) ?? 0)) takeover.set(label.group, alpha)
+      }
+    }
+
     const groupTitles = islands.map((island) => ({
       key: island.group,
       text: groupNames.get(island.group)?.trim().toLocaleLowerCase() ?? '',
@@ -1404,32 +1437,42 @@ export function OrganizerMap({
       count: island.count,
       near: island.near,
       faded: !includedGroups.has(island.group),
+      /* On ne descend jamais à zéro : un fantôme de nom garde le repère du continent qu'on
+         vient de quitter, alors qu'une disparition franche perd le lecteur. */
+      alpha: 1 - (1 - PARENT_GHOST) * (takeover.get(island.group) ?? 0),
       members: null as Set<string> | null
     }))
     /* Les étages sous les amas. Posés **après** les noms d'amas : l'évitement des
        chevauchements traite la liste dans l'ordre, donc un nom de sous-amas cède la place à
        celui de son parent, et jamais l'inverse. */
-    const nested =
-      showLabels && apparent >= NESTED_AT[1]
-        ? data.labels
-            .filter((label) => apparent >= (NESTED_AT[label.level] ?? Infinity))
-            .map((label) => ({
-              key: label.id,
-              text: label.text,
-              tone: NESTED_TONE,
-              x: label.x,
-              y: label.y,
-              count: label.count,
-              near: label.count,
-              faded: false,
-              members: null as Set<string> | null
-            }))
-        : []
+    const nested = showLabels
+      ? data.labels
+          .map((label) => ({
+            key: label.id,
+            text: label.text,
+            tone: NESTED_TONE,
+            x: label.x,
+            y: label.y,
+            count: label.count,
+            near: label.count,
+            faded: false,
+            alpha: ramp(NESTED_AT[label.level] ?? Infinity),
+            members: null as Set<string> | null
+          }))
+      : []
+
+    /* L'ordre décide qui garde sa place quand deux noms se touchent, et il suit désormais la
+       visibilité : au zoom lointain les amas passent devant, une fois qu'ils se sont effacés
+       ce sont leurs enfants. La priorité change donc en même temps que la lecture, au lieu
+       d'être figée sur la hiérarchie. Sous six pour cent, un nom ne se dessine plus et cesse
+       d'occuper la place. */
     const labelled = [
       ...(showLabels ? groupTitles : []),
-      ...(showCollectionNames ? collectionSpots : []),
+      ...(showCollectionNames ? collectionSpots.map((spot) => ({ ...spot, alpha: 1 })) : []),
       ...nested
     ]
+      .filter((island) => island.alpha > 0.06)
+      .sort((left, right) => right.alpha - left.alpha)
     for (const island of labelled) {
       const name = island.text
       if (!name) continue
@@ -1476,7 +1519,7 @@ export function OrganizerMap({
       if (Number.isNaN(y)) continue
       drawn.push({ group: island.key, x: centreX, y, half, size })
       const faded = island.faded
-      context.globalAlpha = faded ? 0.28 : 1
+      context.globalAlpha = (faded ? 0.28 : 1) * island.alpha
       if (y !== centreY) {
         /* Le trait de rappel dit de quel amas le nom déplacé parle, et prend la teinte du
            groupe quel que soit le mode de couleur. Le faire passer par `colourFor` obligeait

@@ -176,6 +176,7 @@ function distinctiveTerm(
 
 function walk(
   points: OrganizerMapPoint[],
+  group: string,
   level: number,
   terms: Map<string, Set<string>>,
   taken: Set<string>,
@@ -191,6 +192,7 @@ function walk(
     taken.add(term)
     out.push({
       id: `${level}:${term}:${out.length}`,
+      group,
       level,
       text: term,
       x: cluster.x,
@@ -198,7 +200,7 @@ function walk(
       count: cluster.points.length
     })
     if (cluster.points.length >= MIN_FOR_DEEPER) {
-      walk(cluster.points, level + 1, terms, taken, out)
+      walk(cluster.points, group, level + 1, terms, taken, out)
     }
   }
 }
@@ -227,9 +229,9 @@ export function buildMapLabels(
      de la carte qui portent le même nom ne s'expliquent pas l'un l'autre, ils se contredisent.
      Le premier sous-amas qui mérite « guitare » le garde. */
   const taken = new Set<string>()
-  for (const [, members] of groups) {
+  for (const [group, members] of groups) {
     if (members.length < MIN_POSTS * 2) continue
-    walk(members, 1, terms, taken, out)
+    walk(members, group, 1, terms, taken, out)
   }
   return out
 }

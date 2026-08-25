@@ -555,6 +555,8 @@ export interface OrganizerMapPoint {
  */
 export interface MapLabel {
   id: string
+  /** L'amas dont il descend : c'est lui qui s'efface quand ses enfants prennent le relais. */
+  group: string
   level: number
   text: string
   x: number
