@@ -90,7 +90,10 @@ export function LibraryMap(): React.JSX.Element {
        couverte de texte. Elles s'allument d'un bouton, à côté des trois autres familles. */
     regions: false,
     groups: true,
-    collections: true,
+    /* Éteintes par défaut elles aussi : une collection et un amas disent presque la même chose
+       au même endroit — l'une vient de ce que l'utilisateur a écrit, l'autre de ce que
+       l'analyse a trouvé — et les afficher ensemble empile deux noms sur la même tache. */
+    collections: false,
     own: true
   })
   /** Les collections, pour teinter les points et poser leurs noms. */

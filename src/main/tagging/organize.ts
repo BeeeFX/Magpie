@@ -38,7 +38,7 @@ import { project, TUNING, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
 import { STOP_WORDS, normalizePhrase, words, postTerms } from './terms'
-import { findIslands } from './islands'
+import { findIslandLevels } from './islands'
 
 const MAX_CATEGORIES = 24
 /** Marque les termes de facette — forme du post, plateforme. Jamais un thème, jamais un nom.
@@ -1153,10 +1153,14 @@ function nestedLabels(points: OrganizerMap['points']): MapLabel[] {
  * Le relief lui-même est de la géométrie — 160 × 160 cases, un tri, une union-find — et coûte
  * quelques dizaines de millisecondes. Le nommage, lui, relit toute la bibliothèque : c'est
  * pourquoi le résultat se range dans `layoutIslands` et ne se refait qu'avec la projection.
+ *
+ * Trois étages désormais, donc trois reliefs : le pays, la ville et la rue. Le coût est
+ * triplé et reste dans la même poignée de millisecondes, alors que le nommage — la partie
+ * chère — ne relit la bibliothèque qu'une fois par étage sur des listes déjà constituées.
  */
 function regionsOf(points: ProjectedPoint[]): OrganizerMap['islands'] {
   const items = new Map(organizationItems().map((item) => [item.id, item]))
-  return findIslands(points, (id) => {
+  return findIslandLevels(points, (id) => {
     const item = items.get(id)
     return item ? postTerms(item.text, item.tags) : []
   })

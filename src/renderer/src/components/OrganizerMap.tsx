@@ -48,8 +48,36 @@ const NESTED_AT = [0, 2.2, 4.6]
 /** Les sous-noms se lisent comme des annotations : la couleur reste aux amas. */
 const NESTED_TONE = 'rgba(255, 255, 255, 0.58)'
 
-/** Les noms de régions aussi : ils disent l'endroit, pas l'appartenance. */
+/**
+ * À quelle échelle apparente chaque étage de régions se lit.
+ *
+ * Le pays dès l'ouverture, les villes en approchant, les rues une fois dedans. Et surtout :
+ * chaque étage **s'efface** quand le suivant arrive, sans quoi la carte accumulerait cinquante
+ * noms au zoom maximal. C'est ce qui manquait — les régions restaient toutes affichées, de la
+ * même taille, à toutes les distances, si bien qu'en approchant on ne gagnait aucune
+ * information et qu'on ne savait plus lequel de ces noms parlait de ce qu'on avait sous les yeux.
+ */
+const REGION_AT = [0, 2.6, 6.5]
+
+/** Ce qu'il reste d'un nom de région quand l'étage du dessous a pris le relais. */
+const REGION_GHOST = 0.12
+
+/** Le gris de repli, pour une région dont on ne sait pas teindre les membres. */
 const REGION_TONE = 'rgba(226, 228, 238, 0.86)'
+
+/** Lit une couleur CSS telle que `colourFor` les produit : `#rrggbb`, `rgb()` ou `rgba()`. */
+function readRgb(colour: string): [number, number, number] | null {
+  if (colour.startsWith('#') && colour.length === 7) {
+    return [
+      parseInt(colour.slice(1, 3), 16),
+      parseInt(colour.slice(3, 5), 16),
+      parseInt(colour.slice(5, 7), 16)
+    ]
+  }
+  const parts = colour.match(/-?\d+(\.\d+)?/g)
+  if (!parts || parts.length < 3) return null
+  return [Number(parts[0]), Number(parts[1]), Number(parts[2])]
+}
 
 /**
  * La largeur du fondu, en part du seuil.
@@ -815,6 +843,56 @@ export function OrganizerMap({
       })
       .sort((left, right) => right.count - left.count)
   }, [data.points])
+
+  /**
+   * La teinte de chaque région : la moyenne de celles de ses posts.
+   *
+   * Les noms de régions étaient tous du même gris, et c'était le défaut : rien ne reliait un
+   * nom à la matière qu'il désigne. Un nom teinté de la moyenne de sa région se rattache à
+   * l'œil sans qu'on ait à suivre un trait — et il suit le mode de couleur, donc il dit
+   * quelque chose de différent selon ce qu'on a choisi de lire.
+   *
+   * La moyenne se fait sur le nuage **entier** et non sur les points affichés : un filtre
+   * change ce qu'on regarde, pas la couleur de l'endroit.
+   */
+  const regionTones = useMemo(() => {
+    const islandList = data.islands ?? []
+    if (islandList.length === 0) return new Map<string, string>()
+    const at = new Map((allPoints ?? data.points).map((point) => [point.id, point]))
+    const tones = new Map<string, string>()
+    for (const island of islandList) {
+      let red = 0
+      let green = 0
+      let blue = 0
+      let seen = 0
+      for (const id of island.members) {
+        const point = at.get(id)
+        if (!point) continue
+        const parsed = readRgb(colourFor(point, colourMode, groupIndex, heat, collectionTint))
+        if (!parsed) continue
+        red += parsed[0]
+        green += parsed[1]
+        blue += parsed[2]
+        seen += 1
+      }
+      if (seen === 0) continue
+      /* Une moyenne de teintes tire vers le gris. On la relève vers sa propre couleur, sinon
+         tous les noms finiraient de la même boue : c'est la lisibilité qui décide, la moyenne
+         ne sert qu'à désigner la famille. */
+      const mean = [red / seen, green / seen, blue / seen]
+      const grey = (mean[0] + mean[1] + mean[2]) / 3
+      const lift = (value: number): number =>
+        Math.round(Math.max(0, Math.min(255, grey + (value - grey) * 1.8 + 40)))
+      tones.set(island.id, `rgb(${lift(mean[0])}, ${lift(mean[1])}, ${lift(mean[2])})`)
+    }
+    return tones
+  }, [data.islands, data.points, allPoints, colourMode, groupIndex, heat, collectionTint])
+
+  /** Les membres de chaque région, pour l'isolement au clic. */
+  const regionMembers = useMemo(
+    () => new Map((data.islands ?? []).map((island) => [island.id, new Set(island.members)])),
+    [data.islands]
+  )
 
   const reduced = useMemo(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -1694,7 +1772,13 @@ export function OrganizerMap({
        * arêtes coûterait une passe sur cent trente mille. On rallume donc ses **points** seuls,
        * ce qui dit exactement ce qu'on veut savoir : où elle est, et comment elle est répartie.
        */
-      const isolated = collectionSpots.find((spot) => spot.key === focusGroup)?.members ?? null
+      /* Une collection ou une région : dans les deux cas on tient la liste de ses posts, et
+         c'est tout ce qu'il faut. Un amas, lui, est un groupe des courbes — on peut donc
+         rallumer sa toile, ce que les deux autres ne permettent pas. */
+      const isolated =
+        collectionSpots.find((spot) => spot.key === focusGroup)?.members ??
+        regionMembers.get(focusGroup) ??
+        null
       context.save()
       /* Le voile s'applique à l'écran, pas à la carte : sans remettre le repère, la similitude
          de l'atterrissage le rétrécirait avec le reste et il ne couvrirait plus le cadre. */
@@ -1705,8 +1789,19 @@ export function OrganizerMap({
       context.fillRect(0, 0, width, height)
       context.restore()
       if (!isolated) restoreGroup(focusGroup)
-      // Les points retenus, repeints par-dessus : ils viennent d'être effacés avec le reste.
+      /**
+       * Les points retenus, repeints par-dessus — halo compris.
+       *
+       * Le halo manquait, et c'est ce qui rendait l'isolement illisible : de loin, le corps
+       * d'une pastille est peint à un dixième d'opacité et ne porte rien du tout, c'est la
+       * lueur autour qui lui donne sa présence. On remettait donc le dixième et on oubliait
+       * les neuf autres — sur un fond assombri de 86 %, isoler une région revenait à éteindre
+       * la carte sans rien rallumer. Mêmes rayons et mêmes opacités que `paintDots` : on
+       * remet ce qui a été effacé, on ne rehausse toujours pas.
+       */
       const bodies = new Map<string, Path2D>()
+      const rings = new Map<string, Path2D>()
+      const halo = dotRadius * (2.4 + 1.4 * closeness)
       for (const point of data.points) {
         if (isolated ? !isolated.has(point.id) : point.group !== focusGroup) continue
         const [ux, uy] = at(point)
@@ -1721,10 +1816,24 @@ export function OrganizerMap({
         }
         body.moveTo(x + dotRadius, y)
         body.arc(x, y, dotRadius, 0, Math.PI * 2)
+        if (glow > 0.01) {
+          let ring = rings.get(tone)
+          if (!ring) {
+            ring = new Path2D()
+            rings.set(tone, ring)
+          }
+          ring.moveTo(x + halo, y)
+          ring.arc(x, y, halo, 0, Math.PI * 2)
+        }
       }
+      const shade = WEB.dotFar + WEB.dotNear * closeness
       context.globalCompositeOperation = 'lighter'
-      // Même opacité que dans `paintDots` : on remet, on ne rehausse pas.
-      context.globalAlpha = WEB.dotFar + WEB.dotNear * closeness
+      context.globalAlpha = shade * glow
+      for (const [tone, ring] of rings) {
+        context.fillStyle = tone
+        context.fill(ring)
+      }
+      context.globalAlpha = shade
       for (const [tone, body] of bodies) {
         context.fillStyle = tone
         context.fill(body)
@@ -1797,23 +1906,48 @@ export function OrganizerMap({
       /* On ne descend jamais à zéro : un fantôme de nom garde le repère du continent qu'on
          vient de quitter, alors qu'une disparition franche perd le lecteur. */
       alpha: 1 - (1 - PARENT_GHOST) * (takeover.get(island.group) ?? 0),
-      members: null as Set<string> | null
+      members: null as Set<string> | null,
+      anchored: false
     }))
     /* Les noms de régions — le relief de la carte, pas les catégories de l'analyse. Ils
        existent à tous les zooms, donc une visibilité pleine ; mais ils passent **après** les
        amas dans la liste, et l'égalité d'opacité laisse l'ordre d'insertion décider : un nom
        de région ne déloge jamais un nom d'amas, il occupe ce que celui-ci laisse libre. */
+    /**
+     * L'opacité d'un étage de régions : il monte à son seuil, et s'éteint quand le suivant
+     * monte au sien. Un fantôme reste — assez pour garder le repère du continent qu'on vient
+     * de quitter, pas assez pour se disputer la place avec les noms de rues.
+     */
+    const regionAlpha = (level: number): number => {
+      const here = ramp(REGION_AT[level] ?? Infinity)
+      const below = REGION_AT[level + 1]
+      const taken = below === undefined ? 0 : ramp(below)
+      return here * (1 - (1 - REGION_GHOST) * taken)
+    }
     const regionTitles = (data.islands ?? []).map((island) => ({
       key: island.id,
       text: island.name.toLocaleLowerCase(),
-      tone: REGION_TONE,
+      tone: regionTones.get(island.id) ?? REGION_TONE,
       x: island.x,
       y: island.y,
       count: island.size,
       near: island.size,
       faded: false,
-      alpha: 1,
-      members: null as Set<string> | null
+      alpha: regionAlpha(island.level),
+      /* Les membres voyagent avec le nom : c'est ce qui rend la région cliquable, par le même
+         chemin que les collections — on n'a pas deux façons d'isoler quelque chose. */
+      members: new Set(island.members) as Set<string> | null,
+      /**
+       * Une région ne s'écarte pas de sa place.
+       *
+       * Les noms d'amas, eux, se déplacent avec un trait de rappel quand deux se gênent : un
+       * amas anonyme était le principal reproche fait à la carte. Une **région** n'a pas ce
+       * problème — elle nomme un endroit, et un nom d'endroit qui glisse de soixante pixels ne
+       * nomme plus rien. C'est ce qui donnait l'impression qu'ils bougeaient au zoom : ce
+       * n'était pas la carte qui glissait sous eux, c'était l'évitement qui les repoussait
+       * ailleurs à chaque fois que le voisinage changeait.
+       */
+      anchored: true
     }))
 
     /* Les étages sous les amas. Posés **après** les noms d'amas : l'évitement des
@@ -1831,7 +1965,8 @@ export function OrganizerMap({
             near: label.count,
             faded: false,
             alpha: ramp(NESTED_AT[label.level] ?? Infinity),
-            members: null as Set<string> | null
+            members: null as Set<string> | null,
+            anchored: false
           }))
       : []
 
@@ -1843,7 +1978,9 @@ export function OrganizerMap({
     const labelled = [
       ...(showLabels ? groupTitles : []),
       ...(showRegionNames ? regionTitles : []),
-      ...(showCollectionNames ? collectionSpots.map((spot) => ({ ...spot, alpha: 1 })) : []),
+      ...(showCollectionNames
+        ? collectionSpots.map((spot) => ({ ...spot, alpha: 1, anchored: false }))
+        : []),
       ...nested
     ]
       .filter((island) => island.alpha > 0.06)
@@ -1883,13 +2020,20 @@ export function OrganizerMap({
             Math.abs(other.y - candidate) < (other.size + size) * 0.62
         )
       let y = centreY
-      for (let step = 1; !fits(y); step += 1) {
-        if (step > 5) {
-          y = NaN
-          break
+      if (island.anchored) {
+        /* Ancrée : elle prend sa place ou elle se tait. Un nom d'endroit qui s'écarte de son
+           endroit ne nomme plus rien — et comme l'écart dépend du voisinage, il changeait à
+           chaque cran de zoom : c'est ce qu'on voyait glisser. */
+        if (!fits(y)) continue
+      } else {
+        for (let step = 1; !fits(y); step += 1) {
+          if (step > 5) {
+            y = NaN
+            break
+          }
+          const away = reach + 12 + Math.ceil(step / 2) * (size + 7)
+          y = step % 2 === 1 ? centreY - away : centreY + away
         }
-        const away = reach + 12 + Math.ceil(step / 2) * (size + 7)
-        y = step % 2 === 1 ? centreY - away : centreY + away
       }
       if (Number.isNaN(y)) continue
       drawn.push({ group: island.key, x: centreX, y, half, size })
@@ -2029,6 +2173,8 @@ export function OrganizerMap({
     rasterise,
     ownLabelSpots,
     focusGroup,
+    regionMembers,
+    regionTones,
     hoverLabel,
     showLabels,
     showRegionNames,

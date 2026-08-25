@@ -38,6 +38,17 @@ export interface Island {
   x: number
   y: number
   size: number
+  /**
+   * L'étage : 0 se lit de loin, 2 ne se découvre qu'en approchant.
+   *
+   * C'est le geste d'une carte routière — le pays, puis les villes, puis les rues — et il vaut
+   * ici pour la même raison : on ne peut pas lire cent noms d'un coup, mais on veut savoir ce
+   * qu'il y a sous les yeux à chaque distance. Une carte qui montre les mêmes vingt et un noms
+   * à tous les zooms ne dit plus rien une fois qu'on est entré dedans.
+   */
+  level: number
+  /** Les posts de la région. C'est ce qui permet de la teinter, et de l'isoler d'un clic. */
+  members: string[]
 }
 
 export interface IslandTuning {
@@ -88,6 +99,53 @@ export interface IslandTuning {
  * séparées par une frontière qui ne veut rien dire — c'est ce défaut-là qu'un lecteur voit, et
  * aucune pureté ne l'attrape.
  */
+/**
+ * Les trois étages, et pourquoi ces réglages-là.
+ *
+ * Deux boutons commandent la finesse, et ils ne disent pas la même chose. La **persistance**
+ * fusionne les bassins que rien ne sépare vraiment : la monter donne moins de régions, plus
+ * grandes, mais toujours dans le même ordre de grandeur — le balayage en tête de fichier va de
+ * 23 régions à 0,01 jusqu'à 9 à 0,30, pas de 200 à 2. Le **rayon** décide de la grosseur du
+ * grain du relief lui-même : le réduire fait apparaître des bosses que le lissage effaçait.
+ *
+ * Pour descendre jusqu'aux « rues », il faut donc les deux, plus un plancher de taille plus bas :
+ * une région de dix posts n'a pas de sens de loin, elle en a un quand on est dedans.
+ */
+export const ISLAND_LEVELS: IslandTuning[] = [
+  /* Le pays. Peu de noms, très gros : ce qu'on lit en ouvrant la carte. À cet étage c'est le
+     **plancher de taille** qui décide, pas la persistance — balayé sur la vraie projection, de
+     0,12 à 0,30 le compte ne bouge qu'entre quatre et cinq régions. On prend le couple qui en
+     donne cinq plutôt que trois : trois noms sur une carte entière, ce n'est plus une lecture. */
+  { field: 160, radius: 10, floor: 0.05, persistence: 0.18, minimum: 250 },
+  /* La ville. C'est le réglage mesuré au banc, celui qui tenait seul jusqu'ici. */
+  { field: 160, radius: 8, floor: 0.05, persistence: 0.04, minimum: 25 },
+  /* La rue. Grain fin et plancher bas : des endroits qui n'existent que de près. */
+  { field: 200, radius: 4, floor: 0.04, persistence: 0.02, minimum: 10 }
+]
+
+/**
+ * Les régions des trois étages, d'un coup.
+ *
+ * Chaque étage est un relief complet — quelques dizaines de millisecondes — et ils ne
+ * s'emboîtent pas exactement : un bassin fin n'est pas toujours inclus dans un bassin large,
+ * parce que le lissage déplace les cols. C'est sans conséquence ici : les étages ne servent pas
+ * à ranger les posts, ils servent à **dire ce qu'il y a là** à la distance où l'on regarde.
+ */
+export function findIslandLevels(
+  points: ProjectedPoint[],
+  termsOf: (id: string) => Iterable<string>,
+  levels: IslandTuning[] = ISLAND_LEVELS
+): Island[] {
+  return levels.flatMap((tuning, level) =>
+    findIslands(points, termsOf, tuning, level).map((island) => ({
+      ...island,
+      /* L'identifiant porte l'étage : deux bassins de deux reliefs différents peuvent tomber
+         sur la même case, et se confondre ferait clignoter l'un à la place de l'autre. */
+      id: `${island.id}-n${level}`
+    }))
+  )
+}
+
 export const ISLAND_TUNING: IslandTuning = {
   field: 160,
   /* Huit cases sur cent soixante, soit un vingtième de la carte : assez large pour qu'un amas
@@ -265,7 +323,8 @@ function name(
 export function findIslands(
   points: ProjectedPoint[],
   termsOf: (id: string) => Iterable<string>,
-  tuning: IslandTuning = ISLAND_TUNING
+  tuning: IslandTuning = ISLAND_TUNING,
+  level = 0
 ): Island[] {
   if (points.length === 0) return []
   const { field, radius, floor, persistence, minimum } = tuning
@@ -299,11 +358,17 @@ export function findIslands(
       /* La case du sommet, qui *est* la racine de l'union-find : c'est la seule case du bassin
          que rien ne surplombe, donc l'endroit où poser le nom. */
       id: `island-${basin}`,
-      name: name(list, termsOf, everywhere, average) || 'Sans nom',
+      name: name(list, termsOf, everywhere, average),
       x: ((basin % field) + 0.5) / field,
       y: (Math.floor(basin / field) + 0.5) / field,
-      size: list.length
+      size: list.length,
+      level,
+      members: list
     }))
+    /* Une région dont aucun mot ne sort n'a rien à dire : elle s'appelait « Sans nom » et
+       occupait la place d'un nom utile. Aux étages fins, où les régions sont petites et le
+       vocabulaire maigre, c'est un cas courant. */
+    .filter((island) => island.name !== '')
     .sort((left, right) => right.size - left.size)
 }
 

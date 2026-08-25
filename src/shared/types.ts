@@ -589,6 +589,10 @@ export interface MapIsland {
   x: number
   y: number
   size: number
+  /** L'étage de lecture : 0 se lit de loin, 2 ne se découvre qu'en approchant. */
+  level: number
+  /** Les posts de la région : de quoi la teindre, et de quoi l'isoler d'un clic. */
+  members: string[]
 }
 
 export interface OrganizerMap {

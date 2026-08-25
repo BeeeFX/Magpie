@@ -77,7 +77,7 @@ jobs:
       # sa réécriture, et un glissement continu ne doit pas relancer le tracé à chaque image.
       # Deux calculs purs, donc rien n'empêche de les vérifier ici.
       - name: Map web and pan checks
-        run: npm run check:map-links && npm run check:map-pan
+        run: npm run check:map-links && npm run check:map-pan && npm run check:map-levels
 
       # Régions du relief et rangement en damier : de la géométrie pure, sans base ni modèle,
       # donc rien n'empêche de la vérifier ici — et c'est le seul endroit où la méthode
