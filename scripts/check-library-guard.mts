@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
@@ -195,6 +195,48 @@ console.log('\nUne ouverture réussie fait le ménage')
   const backups = files.filter((name) => /^magpie-before-v\d+-\d+\.db$/.test(name))
   assert(quarantined.length === 2, `deux mises à l’écart au plus (${quarantined.length})`)
   assert(backups.length === 1, `une seule sauvegarde de migration (${backups.length})`)
+}
+
+console.log('\nUn fichier qu’on ne peut pas retirer n’arrête pas le ménage')
+{
+  /* Relevé sur la vraie installation : trois mises à l’écart et deux sauvegardes avaient
+     survécu au balayage, un gigaoctet et demi, et la seule trace était des `-wal` orphelins
+     dont le `.db` avait bien été retiré. La cause est un `rmSync` qui lève — sous Windows, un
+     journal encore ouvert par un autre processus donne `EBUSY` — au milieu d’une boucle
+     enveloppée dans un seul `try` : tout ce qui restait à retirer était abandonné.
+
+     On ne peut pas verrouiller un fichier de façon portable ; un **dossier** à la place du
+     fichier attendu produit exactement la même chose, `rmSync` sans `recursive` levant dessus. */
+  const { out, files } = play('locked', (dir) => {
+    makeLibrary(join(dir, 'magpie.db'), SCHEMA_VERSION)
+    for (let index = 0; index < 5; index += 1) {
+      const name = `magpie-illisible-2020-01-0${index + 1}T00-00-00-000Z.db`
+      makeLibrary(join(dir, name), 0)
+      /* Des dates franchement distinctes : le balayage trie par date et garde les deux plus
+         récentes, donc sans cela l'ordre de passage dépendrait de la milliseconde d'écriture —
+         et la scène passerait ou non selon l'humeur du disque. */
+      const when = new Date(2020, 0, index + 1)
+      utimesSync(join(dir, name), when, when)
+    }
+    /* Le journal de la **première** que le balayage voudra retirer, c'est-à-dire la
+       troisième plus récente : son retrait lève, et c'est là que tout s'arrêtait. */
+    mkdirSync(join(dir, 'magpie-illisible-2020-01-03T00-00-00-000Z.db-wal'))
+    for (let index = 0; index < 3; index += 1) {
+      makeLibrary(join(dir, `magpie-before-v9-${index + 1}.db`), 0)
+    }
+  })
+
+  assert(out.includes('OUVERT'), 'la bibliothèque s’ouvre quand même')
+  const quarantined = files.filter((name) => /^magpie-illisible-.*\.db$/.test(name))
+  const backups = files.filter((name) => /^magpie-before-v\d+-\d+\.db$/.test(name))
+  assert(
+    quarantined.length === 2,
+    `les autres mises à l’écart sont retirées malgré l’échec (${quarantined.length})`
+  )
+  assert(
+    backups.length === 1,
+    `et les sauvegardes de migration aussi (${backups.length})`
+  )
 }
 rmSync(root, { recursive: true, force: true })
 console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} échec(s).`)

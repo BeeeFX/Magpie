@@ -334,10 +334,21 @@ function pruneQuarantine(): void {
       .sort((a, b) => b.at - a.at)
       .slice(QUARANTINE_KEEP)
     for (const { name } of stale) {
+      /* Chaque fichier pour lui-même. Sous Windows, un `.db-wal` encore ouvert par un autre
+         processus lève `EBUSY` : la boucle sortait alors sur l'échappement, et **tout le reste
+         du ménage était abandonné**. Relevé sur la vraie installation — trois mises à l'écart
+         et deux sauvegardes survivaient au balayage, un gigaoctet et demi, avec pour seule
+         trace des `-wal` orphelins dont le `.db` avait bien été retiré. */
+      let removed = true
       for (const suffix of ['', '-wal', '-shm']) {
-        rmSync(join(dataDir(), `${name}${suffix}`), { force: true })
+        try {
+          rmSync(join(dataDir(), `${name}${suffix}`), { force: true })
+        } catch (error) {
+          removed = false
+          console.warn(`[magpie] ${name}${suffix} n’a pas pu être retiré`, error)
+        }
       }
-      console.log(`[magpie] Mise à l'écart périmée retirée : ${name}.`)
+      if (removed) console.log(`[magpie] Mise à l'écart périmée retirée : ${name}.`)
     }
   } catch (error) {
     // La place perdue est un désagrément ; refuser d'ouvrir la bibliothèque en serait un autre.
@@ -395,8 +406,14 @@ function pruneMigrationBackups(keep?: string): void {
         .sort((a, b) => b.at - a.at)[0]?.name
     for (const name of readdirSync(dataDir())) {
       if (name === survivor || !BACKUP_NAME_PATTERN.test(name)) continue
-      rmSync(join(dataDir(), name), { force: true })
-      console.log(`[magpie] Sauvegarde de migration périmée retirée : ${name}.`)
+      /* Même raison qu'au-dessus : une sauvegarde verrouillée ne doit pas emporter le ménage
+         des suivantes. C'est une copie de trois cents mégaoctets par entrée laissée derrière. */
+      try {
+        rmSync(join(dataDir(), name), { force: true })
+        console.log(`[magpie] Sauvegarde de migration périmée retirée : ${name}.`)
+      } catch (error) {
+        console.warn(`[magpie] ${name} n’a pas pu être retiré`, error)
+      }
     }
   } catch (error) {
     // Un fichier verrouillé ne doit pas empêcher la migration : la place perdue est un

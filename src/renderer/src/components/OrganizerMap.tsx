@@ -4,6 +4,7 @@ import { useT } from '../store'
 import { neededArea, paintArea, stillCovers, ZOOM_HEADROOM } from '../map-coverage'
 import * as perf from '../perf'
 import { edgeKeep, edgeKept, REFERENCE_FRAME, WEB, webTuning } from '../map-render'
+import { neighbourLinks } from '../map-links'
 
 /**
  * La carte sémantique.
@@ -86,6 +87,18 @@ const MAX_SCALE = 60
 /** Part de l'image effacée pour les groupes qu'on ne regarde pas. Assez pour qu'ils s'éteignent,
  *  pas au point de perdre le contexte : on doit encore voir *où* le groupe se situe. */
 const FOCUS_FADE = 0.86
+/**
+ * Côté de l'aperçu, en pixels. Toute la carte y tient.
+ *
+ * Mille vingt-quatre : quatre mégaoctets, et de quoi rester lisible étiré sur un grand écran
+ * sans prétendre à la netteté — il ne doit pas *pouvoir* passer pour le tracé net, sinon on
+ * ne saurait pas que la carte est encore en train de se poser.
+ */
+const OVERVIEW = 1024
+
+/** Durée de l'atterrissage. Hors du composant : l'ordonnanceur de dessin s'en sert aussi. */
+const LANDING_MS = 700
+
 /** Plafond du tampon, en pixels physiques. Sur un grand écran à 200 %, le cadre plus sa marge
  *  dépasserait les cent mégaoctets : on rogne alors la marge, pas la mémoire. */
 const WEB_BUDGET = 24_000_000
@@ -456,6 +469,31 @@ export function OrganizerMap({
   } | null>(null)
   /** Le tampon libre, prêt à recevoir le prochain tracé. */
   const spareBuffer = useRef<HTMLCanvasElement | null>(null)
+  /**
+   * L'aperçu : toute la carte, en petit, gardé sous la main.
+   *
+   * C'est le remède aux bords vides. Le tampon net ne couvre que le cadre et sa marge ; dès
+   * qu'un geste franc sort de cette zone, il reste un moment où l'écran demande de la carte
+   * là où rien n'a été peint — et jusqu'ici cet endroit était **noir**, ce qui se lit comme
+   * une panne plutôt que comme une attente.
+   *
+   * On garde donc une réduction de la carte entière, qu'on étire dans le trou pendant que le
+   * tracé net rattrape : flou, donc manifestement provisoire, mais on voit *où l'on est*.
+   * C'est le geste des cartes en ligne, et il ne coûte presque rien ici parce que l'image
+   * n'est jamais peinte pour elle-même : c'est une **recopie réduite** du tampon net, prise au
+   * moment où celui-ci contient la carte entière — ce qui est le cas à l'ouverture, et à
+   * chaque fois qu'on se recule assez. Une recopie, deux millisecondes, une fois par tracé.
+   *
+   * `left/top/right/bottom` sont l'emprise couverte, dans le repère unité de la carte : c'est
+   * ce qui permet de la reposer à la bonne place à n'importe quel zoom.
+   */
+  const overview = useRef<{
+    canvas: HTMLCanvasElement
+    left: number
+    top: number
+    right: number
+    bottom: number
+  } | null>(null)
   /** La toile et les points déjà peints, l'échelle à laquelle ils l'ont été, et la zone de
    *  la carte qu'ils couvrent — en coordonnées de cette échelle. */
   const webCache = useRef<{
@@ -508,6 +546,21 @@ export function OrganizerMap({
     () => new Map(data.plan.suggestions.map((suggestion, index) => [suggestion.id, index])),
     [data.plan.suggestions]
   )
+
+  /**
+   * Le jeu de points, en un jeton.
+   *
+   * Il manquait aux deux caches — celui des courbes et celui du tampon — et personne ne s'en
+   * apercevait : l'atterrissage entrait dans la clé et se rejouait à chaque changement de
+   * points, donc tout était reconstruit de toute façon. Retirer l'atterrissage de la clé
+   * découvrait le trou : filtrer aurait redessiné l'ancienne toile. La dépendance est donc
+   * écrite en clair, là où elle aurait dû l'être depuis le début.
+   */
+  const pointsToken = useRef(0)
+  const pointsKey = useMemo(() => {
+    pointsToken.current += 1
+    return pointsToken.current
+  }, [data.points])
 
   /**
    * Le calque des frontières : un contour et un aplat par collection, peints une fois.
@@ -575,46 +628,47 @@ export function OrganizerMap({
      ne retient pas les mêmes arêtes : un point dont tous les proches sont « avant » lui
      allait en chercher vingt-quatre plus loin, et le total montait à 210 794 au lieu des
      133 810 sur lesquels le rendu est réglé. Mesuré sur la vraie bibliothèque, à ×3 centré :
-     494 ms par image contre 219. */
-  const links = useMemo(() => {
-    const rank = new Map(data.points.map((point, index) => [point.id, index]))
-    const seen = new Set<string>()
-    const pairs: [OrganizerMapPoint, OrganizerMapPoint][] = []
-    for (const point of data.points) {
-      const near: { other: OrganizerMapPoint; distance: number }[] = []
-      const cellX = Math.floor(point.x / BUCKET)
-      const cellY = Math.floor(point.y / BUCKET)
-      for (let dx = -1; dx <= 1; dx += 1) {
-        for (let dy = -1; dy <= 1; dy += 1) {
-          for (const other of buckets.get(`${cellX + dx}:${cellY + dy}`) ?? []) {
-            if (other.id === point.id) continue
-            const distance = Math.hypot(other.x - point.x, other.y - point.y)
-            if (distance < LINK_RADIUS) near.push({ other, distance })
-          }
-        }
-      }
-      near.sort((left, right) => left.distance - right.distance)
-      for (const entry of near.slice(0, LINKS_PER_POINT)) {
-        const here = rank.get(point.id) ?? 0
-        const there = rank.get(entry.other.id) ?? 0
-        const key = here < there ? `${here}:${there}` : `${there}:${here}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        pairs.push([point, entry.other])
-      }
-    }
-    return pairs
-  }, [buckets, data.points])
+     494 ms par image contre 219.
+     Le calcul lui-même est dans `map-links`, où il se mesure hors écran : c'est le plus cher de
+     l'ouverture — 345 ms, refaits à **chaque changement de filtre**, puisque le nuage affiché
+     change alors d'identité. Ramené à 57 ms pour les mêmes arêtes (`npm run check:map-links`). */
+  const links = useMemo(
+    () => neighbourLinks(data.points, LINK_RADIUS, LINKS_PER_POINT, BUCKET),
+    [data.points]
+  )
 
   /* Sans étiquettes, neuf mille points colorés ne sont qu'une tache : on voit qu'il y a des
      amas, jamais lesquels. C'est ce qui sépare une jolie image d'une carte. */
-  /* On retient les positions qu'on quitte, à chaque changement de jeu de points. */
+  /**
+   * On retient les positions qu'on quitte — et on ne rejoue le fondu que si elles ont bougé.
+   *
+   * Il s'armait à **chaque** changement de jeu de points, donc à chaque frappe dans la
+   * recherche. Or un filtre ne déplace rien : il retire des points, les autres restent où ils
+   * sont. Le fondu ne faisait donc que forcer un dessin complet par image pendant six cent
+   * cinquante millisecondes, pour interpoler chaque point entre sa position et elle-même.
+   *
+   * Il garde tout son sens là où il a été écrit : une reprojection — changement de regard,
+   * carte refaite — où les neuf mille points sautent vraiment d'un endroit à l'autre.
+   */
+  const lastPlaces = useRef<Map<string, { x: number; y: number }> | null>(null)
   useEffect(() => {
-    const previous = new Map(data.points.map((point) => [point.id, { x: point.x, y: point.y }]))
-    return () => {
-      morphFrom.current = previous
-      morphStart.current = performance.now()
+    const next = new Map(data.points.map((point) => [point.id, { x: point.x, y: point.y }]))
+    const previous = lastPlaces.current
+    if (previous) {
+      let moved = false
+      for (const [id, place] of next) {
+        const was = previous.get(id)
+        if (was && (was.x !== place.x || was.y !== place.y)) {
+          moved = true
+          break
+        }
+      }
+      if (moved) {
+        morphFrom.current = previous
+        morphStart.current = performance.now()
+      }
     }
+    lastPlaces.current = next
   }, [data.points])
 
   /**
@@ -744,13 +798,20 @@ export function OrganizerMap({
     []
   )
 
-  const LANDING_MS = 700
   const landingAt = (): number =>
     reduced ? 1 : Math.min(1, (performance.now() - landingStartRef.current) / LANDING_MS)
 
+  /**
+   * L'atterrissage se joue à l'ouverture, une fois.
+   *
+   * Il repartait à chaque changement de jeu de points : filtrer, chercher, décocher un amas
+   * rejouait « les points se posent depuis le centre » — une animation d'arrivée sur un geste
+   * qui n'est pas une arrivée. Ce que sa propre documentation dit, d'ailleurs : *les points qui
+   * se posent depuis le centre à l'ouverture*.
+   */
   useEffect(() => {
     landingStartRef.current = performance.now()
-  }, [data.points])
+  }, [])
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -798,8 +859,6 @@ export function OrganizerMap({
       : 1
     if (morph >= 1) morphFrom.current = null
     const at = (point: { x: number; y: number; id?: string }): [number, number] => {
-      // L'atterrissage tire les points depuis le centre : ils se posent au lieu de surgir.
-      const eased = 1 - Math.pow(1 - landing, 3)
       /* Pendant le fondu, le point est entre là où il était et là où il va. Adouci aux deux
          bouts, sinon le nuage démarre et s'arrête d'un coup. */
       if (morph < 1 && point.id && morph > 0) {
@@ -812,12 +871,39 @@ export function OrganizerMap({
           }
         }
       }
-      const cx = 0.5 + (point.x - 0.5) * eased
-      const cy = 0.5 + (point.y - 0.5) * eased
       return [
-        (cx * size + (width - size) / 2) * view.scale,
-        (cy * size + (height - size) / 2) * view.scale
+        (point.x * size + (width - size) / 2) * view.scale,
+        (point.y * size + (height - size) / 2) * view.scale
       ]
+    }
+
+    /**
+     * L'atterrissage, appliqué à l'image entière — et c'est ce qui le rend fluide.
+     *
+     * Il tire tous les points depuis le centre du carré unité. C'est donc une **similitude** :
+     * un point qui finit en `P` est, à l'instant `e`, en `C + e·(P − C)` où `C` est le centre de
+     * la carte à l'écran. Rien dans l'image n'échappe à cette règle — ni la toile, ni les
+     * points, ni les noms — donc au lieu de la faire porter par chaque coordonnée, on la pose
+     * une fois sur le canevas et on dessine l'image d'arrivée.
+     *
+     * Ce que ça change : l'atterrissage n'oblige plus à repeindre. Il coûtait cent cinquante
+     * millisecondes par image — les cent trente-cinq mille courbes retracées à chaque pas de
+     * l'animation, plus leur reconstruction — donc sept cents millisecondes d'animation se
+     * jouaient en quatre images, et l'application ne répondait pas pendant ce temps. Le tampon
+     * est maintenant peint une fois, et chaque image de l'atterrissage n'est qu'une recopie
+     * mise à l'échelle : soixante images par seconde.
+     *
+     * Une nuance assumée : les épaisseurs et la taille des points suivent l'échelle, là où
+     * elles restaient constantes avant. C'est ce que fait une carte qui s'ouvre depuis un
+     * point, et c'était de toute façon invisible à quatre images par seconde.
+     */
+    const eased = 1 - Math.pow(1 - landing, 3)
+    if (eased < 1) {
+      const centreX = originX + span / 2 + view.x
+      const centreY = originY + span / 2 + view.y
+      context.translate(centreX, centreY)
+      context.scale(Math.max(0.0001, eased), Math.max(0.0001, eased))
+      context.translate(-centreX, -centreY)
     }
 
     /* La toile, en trois passes par couleur : deux tracés larges et très faibles qui font la
@@ -832,7 +918,19 @@ export function OrganizerMap({
     const paintWebFrom = (
       target: CanvasRenderingContext2D,
       from: number,
-      deadline: number | null
+      deadline: number | null,
+      /**
+       * La zone que ce tracé doit couvrir, dans le repère de la carte avant déplacement.
+       *
+       * Elle était déduite du **cadre**, et le tampon, lui, est peint plus large. Les paquets
+       * qui tombaient dans la marge du tampon sans toucher le cadre étaient donc écartés : ils
+       * n'étaient jamais peints, et le déplacement suivant — qui n'a rien à retracer puisque la
+       * zone est réputée couverte — découvrait une bande de toile vide. C'est ce qu'on voyait
+       * « pas généré » sur les bords, et c'était le plus visible au zoom d'ouverture, où la
+       * carte entière tient dans le tampon : plus de la moitié de ses tuiles n'étaient jamais
+       * tracées.
+       */
+      area: { left: number; top: number; right: number; bottom: number }
     ): number => {
       if (edgeAlpha <= 0.002 || heat?.only) return Number.MAX_SAFE_INTEGER
       /* Ni l'échelle ni la zone visible n'entrent dans la clé, et c'est le remède au gel.
@@ -845,8 +943,25 @@ export function OrganizerMap({
          irréductible. La zone y avait été mise pour éviter de bâtir cent trente mille courbes
          dont trois cents tombent dans le cadre ; le problème disparaît quand on ne les bâtit
          qu'une fois pour toute la session. */
+      /* L'atterrissage n'est plus dans la clé, et c'est le second remède au gel. Il y était
+         parce que les courbes étaient bâties à ses coordonnées : chacune des images de
+         l'atterrissage — comme de chaque changement de filtre, qui le relançait — reconstruisait
+         les cent trente-cinq mille courbes, 35 ms mesurées, avant de les tracer. Elles sont
+         maintenant bâties à l'arrivée et l'atterrissage s'applique en transformation, ce qui
+         donne exactement le même dessin : une similitude transporte les points de contrôle d'une
+         courbe de Bézier aussi bien que ses extrémités.
+
+         Vérifié au pixel près : à l'arrivée, les deux versions rendent la **même image, sans
+         un bit d'écart**. Pendant l'atterrissage, elles diffèrent — non par la géométrie, mais
+         parce que le découpage en tuiles se fait désormais sur les coordonnées d'arrivée, donc
+         deux courbes ne se retrouvent pas toujours dans le même paquet. Or un `stroke` sur un
+         paquet compose une fois l'union de ses courbes, là où deux paquets composent deux fois :
+         la densité change à la marge dans les zones chargées. Mesuré à paquets égaux, l'écart
+         retombe à 129 pixels d'au plus 25 niveaux sur 255 — l'ordre de grandeur de l'arrondi que
+         le tampon introduit déjà, et sur une animation de sept cents millisecondes. */
       const key = [
-        landing.toFixed(3),
+        /* Le jeu de points : filtrer change les arêtes, donc les courbes. */
+        pointsKey,
         colourMode,
         /* La *présence* d'une chaleur, pas son contenu : entrer ou sortir du mode change la
            teinte des fils (ils s'éteignent), régler l'ampleur ne la change pas. Mettre le jeton
@@ -872,18 +987,15 @@ export function OrganizerMap({
             bottom: number
           }
         >()
-        /* L'atterrissage tire les points depuis le centre ; on garde le même adoucissement,
-           mais en coordonnées de carte, pour que les courbes soient indépendantes du zoom. */
-        const eased = 1 - Math.pow(1 - landing, 3)
-        const unitOf = (point: { x: number; y: number }): [number, number] => [
-          0.5 + (point.x - 0.5) * eased,
-          0.5 + (point.y - 0.5) * eased
-        ]
+        /* Les courbes sont bâties **à l'arrivée**, en coordonnées de carte : indépendantes du
+           zoom, et désormais de l'atterrissage, qui s'applique en transformation au tracé. */
         for (let index = 0; index < links.length; index += 1) {
           if (!edgeKept(index, keep)) continue
           const [from, to] = links[index]
-          const [x1, y1] = unitOf(from)
-          const [x2, y2] = unitOf(to)
+          const x1 = from.x
+          const y1 = from.y
+          const x2 = to.x
+          const y2 = to.y
           /* Un fil ne prend une couleur que s'il relie deux posts de la même couleur.
              Colorer chaque fil d'après son seul point de départ mettait de la couleur partout :
              les catégories de l'organiseur ne sont pas des zones — elles suivent le sens, pas
@@ -957,13 +1069,13 @@ export function OrganizerMap({
       target.save()
       target.translate(originX, originY)
       target.scale(span, span)
-      /* Le cadre, ramené en coordonnées de carte. La marge absorbe le débord du halo, qui est
-         large : un fil juste hors cadre y projette encore de la lueur. */
+      /* La zone à couvrir, ramenée en coordonnées de carte. La marge absorbe le débord du halo,
+         qui est large : un fil juste hors zone y projette encore de la lueur. */
       const slack = (core * WEB.bloomWidth) / span + 0.01
-      const seenLeft = (-originX - view.x) / span - slack
-      const seenTop = (-originY - view.y) / span - slack
-      const seenRight = (width - originX - view.x) / span + slack
-      const seenBottom = (height - originY - view.y) / span + slack
+      const seenLeft = (area.left - originX) / span - slack
+      const seenTop = (area.top - originY) / span - slack
+      const seenRight = (area.right - originX) / span + slack
+      const seenBottom = (area.bottom - originY) / span + slack
       const entries = pathCache.current.list
       let at = Math.max(0, from)
       for (; at < entries.length; at += 1) {
@@ -1000,8 +1112,11 @@ export function OrganizerMap({
     }
 
     /** Toute la toile d'un coup. Pour l'atterrissage, et pour le premier tracé. */
-    const paintWeb = (target: CanvasRenderingContext2D): void => {
-      paintWebFrom(target, 0, null)
+    const paintWeb = (
+      target: CanvasRenderingContext2D,
+      area: { left: number; top: number; right: number; bottom: number }
+    ): void => {
+      paintWebFrom(target, 0, null, area)
     }
 
     /**
@@ -1065,7 +1180,6 @@ export function OrganizerMap({
       target: CanvasRenderingContext2D,
       area: { left: number; top: number; right: number; bottom: number }
     ): void => {
-      const fade = 0.3 + 0.7 * landing
       const full = new Map<string, Path2D>()
       const dim = new Map<string, Path2D>()
       const halosFull = new Map<string, Path2D>()
@@ -1099,7 +1213,7 @@ export function OrganizerMap({
       }
       // Les exclus gardent leur couleur mais s'effacent : on les voit sans les lire.
       const shadeOf = (dimmed: boolean): number =>
-        (WEB.dotFar + WEB.dotNear * closeness) * (dimmed ? 0.2 : 1) * fade
+        (WEB.dotFar + WEB.dotNear * closeness) * (dimmed ? 0.2 : 1)
       target.globalCompositeOperation = 'lighter'
       for (const [rings, dimmed] of [
         [halosFull, false],
@@ -1147,7 +1261,7 @@ export function OrganizerMap({
     const frame = { width, height, scale: view.scale, x: view.x, y: view.y }
     const needed = neededArea(frame, content)
     const painted = webCache.current
-    const key = `${colourMode}|${ratio}|${heat?.token ?? ''}|${tintToken}|${[...includedGroups].sort().join(',')}`
+    const key = `${pointsKey}|${colourMode}|${ratio}|${heat?.token ?? ''}|${tintToken}|${[...includedGroups].sort().join(',')}`
     const usable =
       painted.canvas !== null && painted.key === key && stillCovers(painted, needed, view.scale)
     // Étirer ne vaut que le temps du geste : à l'arrêt, la toile doit être nette.
@@ -1170,14 +1284,106 @@ export function OrganizerMap({
      */
     const covers = usable && (sharp || zooming || !sharpenNow.current)
 
-    if (landing < 1) {
-      /* Pendant l'atterrissage, les coordonnées bougent à chaque image : peindre dans un
+    /** Garde une réduction du tampon net : c'est l'aperçu qui bouchera les trous. */
+    const keepOverview = (job: {
+      canvas: HTMLCanvasElement
+      left: number
+      top: number
+      width: number
+      height: number
+    }): void => {
+      let store = overview.current
+      if (!store) {
+        const canvas = document.createElement('canvas')
+        canvas.width = OVERVIEW
+        canvas.height = OVERVIEW
+        store = { canvas, left: 0, top: 0, right: 1, bottom: 1 }
+        overview.current = store
+      }
+      const paint = store.canvas.getContext('2d')
+      if (!paint) return
+      /* L'emprise est retenue dans le repère unité de la carte, jamais en pixels : c'est ce
+         qui permet de reposer l'image à la bonne place à n'importe quel zoom, et de survivre
+         à un changement de taille du cadre. */
+      store.left = (job.left - originX) / span
+      store.top = (job.top - originY) / span
+      store.right = (job.left + job.width - originX) / span
+      store.bottom = (job.top + job.height - originY) / span
+      paint.setTransform(1, 0, 0, 1, 0, 0)
+      paint.clearRect(0, 0, OVERVIEW, OVERVIEW)
+      paint.drawImage(job.canvas, 0, 0, OVERVIEW, OVERVIEW)
+    }
+
+    /** L'aperçu étiré, là où le tampon net ne couvre pas encore. */
+    const paintOverview = (web: {
+      canvas: HTMLCanvasElement | null
+      scale: number
+      left: number
+      top: number
+      width: number
+      height: number
+    }): void => {
+      const store = overview.current
+      if (!store) return
+      const snap = (value: number): number => Math.round(value * ratio) / ratio
+      let left = 0
+      let top = 0
+      let right = width
+      let bottom = height
+      if (web.canvas) {
+        const zoom = web.scale > 0 ? view.scale / web.scale : 1
+        /* Un pixel de recouvrement, volontairement : au bord, mieux vaut une ligne d'un pixel
+           deux fois exposée — invisible — qu'un cheveu de fond entre les deux images. */
+        left = snap(web.left * zoom + view.x) + 1
+        top = snap(web.top * zoom + view.y) + 1
+        right = left + web.width * zoom - 2
+        bottom = top + web.height * zoom - 2
+        if (left <= 0 && top <= 0 && right >= width && bottom >= height) return
+      }
+      const l = Math.max(0, Math.min(width, left))
+      const r = Math.max(0, Math.min(width, right))
+      const t = Math.max(0, Math.min(height, top))
+      const b = Math.max(0, Math.min(height, bottom))
+      perf.begin('apercu')
+      context.save()
+      context.globalAlpha = landing < 1 ? 0.3 + 0.7 * landing : 1
+      if (web.canvas) {
+        const gap = new Path2D()
+        if (t > 0) gap.rect(0, 0, width, t)
+        if (b < height) gap.rect(0, b, width, height - b)
+        if (l > 0) gap.rect(0, t, l, b - t)
+        if (r < width) gap.rect(r, t, width - r, b - t)
+        context.clip(gap)
+      }
+      context.drawImage(
+        store.canvas,
+        originX + store.left * span + view.x,
+        originY + store.top * span + view.y,
+        (store.right - store.left) * span,
+        (store.bottom - store.top) * span
+      )
+      context.restore()
+      perf.end()
+    }
+
+    /**
+     * Le fondu de reprojection est la seule animation qui déplace vraiment les points, donc la
+     * seule qui oblige à repeindre à chaque image.
+     *
+     * L'atterrissage, lui, ne déplace rien dans le repère de la carte : c'est une similitude
+     * posée sur le canevas, et le tampon la traverse sans être retracé. C'est tout l'écart
+     * entre les deux — l'un coûte cent cinquante millisecondes par image, l'autre une recopie.
+     * Et le fondu ne s'arme plus que sur une vraie reprojection, où l'on vient d'attendre une
+     * minute de calcul : quelques images lourdes y passent inaperçues.
+     */
+    if (morph < 1) {
+      /* Pendant le fondu, les coordonnées bougent à chaque image : peindre dans un
          tampon qu'on jetterait aussitôt n'ajouterait qu'une recopie. */
       webCache.current.key = ''
       const area = { left: -view.x, top: -view.y, right: -view.x + width, bottom: -view.y + height }
       context.save()
       context.translate(view.x, view.y)
-      paintWeb(context)
+      paintWeb(context, area)
       paintDots(context, area)
       context.restore()
     } else {
@@ -1195,14 +1401,34 @@ export function OrganizerMap({
         const mustFinishNow = painted.canvas === null
 
         let job = paintJob.current
+        /**
+         * Un tracé en cours survit au déplacement.
+         *
+         * Il était jeté dès que la zone à peindre bougeait d'un demi-pixel — or elle est centrée
+         * sur le cadre, donc **chaque** image d'un glissement la déplaçait. Le tracé repartait
+         * de zéro à chaque image, n'arrivait jamais au bout, et la carte restait sur son ancien
+         * tampon pendant tout le geste : c'est le trou qui suivait le curseur quand on tirait
+         * vite vers un bord. Il repayait au passage l'effacement du tampon à chaque image.
+         *
+         * La bonne question n'est pas « la zone a-t-elle bougé » mais « ce qui est en train
+         * d'être peint couvre-t-il encore ce que le cadre demande ». Tant que oui, on continue
+         * où on en était ; le tracé finit, et le tampon prend la relève.
+         */
         const stale =
           job !== null &&
           (job.key !== key ||
             job.scale !== view.scale ||
-            job.width !== bufferWidth ||
-            job.height !== bufferHeight ||
-            Math.abs(job.left - area.left) > 0.5 ||
-            Math.abs(job.top - area.top) > 0.5)
+            !stillCovers(
+              {
+                scale: job.scale,
+                left: job.left,
+                top: job.top,
+                width: job.width,
+                height: job.height
+              },
+              needed,
+              view.scale
+            ))
         if (stale) job = null
 
         if (!job) {
@@ -1245,10 +1471,18 @@ export function OrganizerMap({
         }
 
         /* Six millisecondes par image : de quoi avancer franchement en laissant respirer le
-           reste — les points, les étiquettes, et surtout les événements de la souris. */
-        const deadline = mustFinishNow ? null : performance.now() + 6
+           reste — les points, les étiquettes, et surtout les événements de la souris.
+           Douze quand le tampon ne couvre plus le cadre : là, ce qui manque à l'écran n'est
+           pas de la netteté mais de la carte, et il vaut mieux une image à vingt millisecondes
+           qu'un aperçu étiré deux fois plus longtemps. */
+        const deadline = mustFinishNow ? null : performance.now() + (usable ? 6 : 12)
         perf.begin('toile')
-        job.at = paintWebFrom(job.paint, job.at, deadline)
+        job.at = paintWebFrom(job.paint, job.at, deadline, {
+          left: job.left,
+          top: job.top,
+          right: job.left + job.width,
+          bottom: job.top + job.height
+        })
         perf.end()
         perf.note('paquets', `${job.at}/${pathCache.current.list.length}`)
         const webDone = job.at >= pathCache.current.list.length
@@ -1281,15 +1515,32 @@ export function OrganizerMap({
           }
           paintJob.current = null
           sharpenNow.current = false
+          /* La carte entière tient dans ce tampon : on en garde une réduction. Seulement dans
+             ce cas — un tampon zoomé ne contient qu'un bout, et l'aperçu deviendrait un
+             assemblage de morceaux pris à des réglages différents. Reculé, on a la carte ;
+             zoomé, on garde celle d'avant, qui est justement ce qu'il faut montrer quand on
+             sort du cadre. */
+          const whole =
+            job.left <= content.left + 0.5 &&
+            job.top <= content.top + 0.5 &&
+            job.left + job.width >= content.right - 0.5 &&
+            job.top + job.height >= content.bottom - 0.5
+          if (whole) keepOverview(job)
         } else {
-          /* Pas fini : on reprendra à l'image suivante, et l'écran montre en attendant la
-             recopie étirée du tracé précédent. */
-          window.requestAnimationFrame(() => drawRef.current())
+          /* Pas fini : on reprendra à l'image suivante, et l'écran montre en attendant
+             l'aperçu étiré. Par l'ordonnanceur, sinon deux dessins se déclenchent dans la même
+             image dès qu'un geste est en cours. */
+          scheduleRef.current()
         }
       } else {
         sharpenNow.current = false
       }
       const web = webCache.current
+      /* Le trou d'abord : ce que le tampon net ne couvre pas reçoit l'aperçu, étiré. Découpé
+         au ciseau sur le complémentaire du tampon, sans quoi les deux images s'ajouteraient —
+         la toile est peinte en `lighter` sur du transparent, donc superposer l'aperçu sous le
+         tampon net doublerait la densité partout où celui-ci laisse passer le fond. */
+      paintOverview(web)
       if (web.canvas) {
         /* Recopie calée sur la grille des pixels physiques. À 125 % ou 150 % — le cas courant
            sous Windows — un décalage entier en points d'interface tombe entre deux pixels de
@@ -1298,6 +1549,11 @@ export function OrganizerMap({
         const zoom = web.scale > 0 ? view.scale / web.scale : 1
         perf.begin('recopie')
         const snap = (value: number): number => Math.round(value * ratio) / ratio
+        /* Le fondu d'arrivée. Il vivait dans les points, qui sont désormais peints une fois
+           dans le tampon : il s'y serait figé à la valeur du premier tracé. Porté par la
+           recopie, il éclaircit toute la carte au lieu des seuls points — ce qui est le geste
+           qu'on voulait, la toile arrivant avec eux. */
+        context.globalAlpha = landing < 1 ? 0.3 + 0.7 * landing : 1
         context.drawImage(
           web.canvas,
           snap(web.left * zoom + view.x),
@@ -1305,6 +1561,7 @@ export function OrganizerMap({
           web.width * zoom,
           web.height * zoom
         )
+        context.globalAlpha = 1
         perf.end()
       }
 
@@ -1356,6 +1613,9 @@ export function OrganizerMap({
        */
       const isolated = collectionSpots.find((spot) => spot.key === focusGroup)?.members ?? null
       context.save()
+      /* Le voile s'applique à l'écran, pas à la carte : sans remettre le repère, la similitude
+         de l'atterrissage le rétrécirait avec le reste et il ne couvrirait plus le cadre. */
+      context.setTransform(ratio, 0, 0, ratio, 0, 0)
       context.globalCompositeOperation = 'destination-out'
       context.globalAlpha = FOCUS_FADE
       context.fillStyle = '#000'
@@ -1681,6 +1941,7 @@ export function OrganizerMap({
     tintToken,
     islands,
     links,
+    pointsKey,
     ownLabelSpots,
     focusGroup,
     hoverLabel,
@@ -1697,23 +1958,60 @@ export function OrganizerMap({
      superposaient au centre exact du canvas. */
   const drawRef = useRef(draw)
   drawRef.current = draw
+  const scheduleRef = useRef<() => void>(() => {})
+
+  /**
+   * Un dessin par image, et un seul.
+   *
+   * Trois endroits en réclamaient un : l'atterrissage, le changement d'apparence, et le tracé
+   * étalé qui redemande la main pour sa tranche suivante. Ils s'ignoraient, donc pendant un
+   * glissement qui retrace, **deux** dessins partaient dans la même image — la tranche de
+   * tracé était payée deux fois, les étiquettes et les points aussi. C'est précisément le
+   * moment où l'on demande à l'application d'être légère.
+   *
+   * Une seule demande en vol, donc, et elle appelle toujours le dessin le plus récent : rien
+   * ne se perd à coalescer, puisque `drawRef` porte le dernier état connu.
+   *
+   * Elle **remplace** la précédente au lieu de s'y ajouter — et pas seulement pour la garder
+   * unique. Une demande peut ne jamais aboutir : une fenêtre masquée ne compose pas, donc
+   * `requestAnimationFrame` ne se déclenche pas. Une règle « s'il y en a déjà une, ne rien
+   * faire » laisserait alors la carte muette pour toujours, chaque changement se heurtant à
+   * une demande morte. En annulant, on repart à chaque fois d'une demande vivante.
+   */
+  /* `landingAt` se referme sur le rendu courant ; l'ordonnanceur, lui, vit hors des rendus.
+     Les deux animations qui se rejouent d'elles-mêmes : l'arrivée, et le fondu de reprojection. */
+  const landingRef = useRef<() => boolean>(() => false)
+  landingRef.current = () => landingAt() < 1 || morphFrom.current !== null
+  const framePending = useRef(0)
+  const scheduleDraw = useCallback((): void => {
+    if (framePending.current) cancelAnimationFrame(framePending.current)
+    framePending.current = window.requestAnimationFrame(() => {
+      framePending.current = 0
+      drawRef.current()
+      /* Les animations se rejouent d'elles-mêmes tant qu'elles courent. Le tracé étalé, lui,
+         redemande la main depuis le dessin — c'est lui qui sait s'il a fini sa tranche. */
+      if (landingRef.current()) scheduleDraw()
+    })
+  }, [])
+  scheduleRef.current = scheduleDraw
 
   useEffect(() => {
-    let frame = 0
-    const tick = (): void => {
-      drawRef.current()
-      if (landingAt() < 1) frame = requestAnimationFrame(tick)
-    }
-    frame = requestAnimationFrame(tick)
+    scheduleDraw()
     /* Filet : sans composition — fenêtre masquée, onglet en arrière-plan — aucune image
        n'est demandée et la boucle ne démarre jamais. Ce dessin final garantit que la carte
        est juste quand on revient dessus. */
     const settle = setTimeout(() => drawRef.current(), LANDING_MS + 60)
-    return () => {
-      cancelAnimationFrame(frame)
-      clearTimeout(settle)
-    }
-  }, [data.points])
+    return () => clearTimeout(settle)
+  }, [data.points, scheduleDraw])
+
+  /* Au démontage, la demande en vol ne doit pas peindre dans un canevas décroché. */
+  useEffect(
+    () => () => {
+      if (framePending.current) cancelAnimationFrame(framePending.current)
+      framePending.current = 0
+    },
+    []
+  )
 
   // Tout changement d'apparence — survol, couleur, zoom, exclusion — redessine une fois.
   /**
@@ -1731,14 +2029,8 @@ export function OrganizerMap({
    * qu'aucun geste ne perçoit — et c'est ce qui rend la main.
    */
   useEffect(() => {
-    let frame = requestAnimationFrame(() => {
-      frame = 0
-      draw()
-    })
-    return () => {
-      if (frame) cancelAnimationFrame(frame)
-    }
-  }, [draw])
+    scheduleDraw()
+  }, [draw, scheduleDraw])
 
   /* Par `draw`, cet effet se redéfaisait à chaque déplacement : l'observateur se démontait
      et se remontait, et surtout `canvas.width` était réaffecté — ce qui vide la mémoire du

@@ -68,6 +68,17 @@ jobs:
       - name: Boundary checks
         run: npm run check:boundaries
 
+      # Les dictionnaires : un nettoyage a déjà emporté cinq clés assemblées à la volée, et les
+      # boutons se sont affichés vides. Le contrôle est une seconde de lecture de données.
+      - name: Dictionary checks
+        run: npm run check:i18n
+
+      # La carte : le voisinage de la toile doit relier exactement les mêmes points qu'avant
+      # sa réécriture, et un glissement continu ne doit pas relancer le tracé à chaque image.
+      # Deux calculs purs, donc rien n'empêche de les vérifier ici.
+      - name: Map web and pan checks
+        run: npm run check:map-links && npm run check:map-pan
+
       # Régions du relief et rangement en damier : de la géométrie pure, sans base ni modèle,
       # donc rien n'empêche de la vérifier ici — et c'est le seul endroit où la méthode
       # hongroise et la fusion par persistance sont éprouvées sur des cas dont on connaît la

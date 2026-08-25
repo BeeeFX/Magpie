@@ -39,6 +39,9 @@
     "src/renderer/src/map-render.ts",
     // Idem : le rangement en damier n'est qu'une affectation, mesurée par `bench:map-grid`.
     "src/renderer/src/map-grid.ts",
+    // Idem : le voisinage de la toile n'est qu'un calcul sur des coordonnées, et c'est le plus
+    // cher de l'ouverture de la carte. `check:map-links` le rejoue contre sa version d'origine.
+    "src/renderer/src/map-links.ts",
     // Les dictionnaires et le vocabulaire des étapes ne sont que des données : `check:i18n`
     // les relit sous Node pour vérifier les clés assemblées à la volée.
     "src/renderer/src/i18n.ts",
