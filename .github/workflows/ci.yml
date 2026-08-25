@@ -68,6 +68,13 @@ jobs:
       - name: Boundary checks
         run: npm run check:boundaries
 
+      # Régions du relief et rangement en damier : de la géométrie pure, sans base ni modèle,
+      # donc rien n'empêche de la vérifier ici — et c'est le seul endroit où la méthode
+      # hongroise et la fusion par persistance sont éprouvées sur des cas dont on connaît la
+      # réponse.
+      - name: Region and grid checks
+        run: npm run check:islands
+
       - name: Production build
         run: npm run build
 
