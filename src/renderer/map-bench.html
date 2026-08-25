@@ -9,6 +9,20 @@
       html, body, #root { margin: 0; height: 100%; }
       .organizer-map { height: 100vh; }
     </style>
+    <script>
+      /* `?hauteur=1600` : un cadre plus grand que la fenêtre, pour mesurer ce que coûte la
+         carte plein écran sans avoir un plein écran sous la main. Posé avant le module, sinon
+         le premier `resize` lit la hauteur d'avant — et sur une page masquée, l'observateur de
+         taille ne se déclenche jamais pour rattraper. */
+      const asked = Number(new URLSearchParams(location.search).get('hauteur'))
+      if (asked > 0) {
+        document.write(
+          '<style>.organizer-map { height: ' + Math.min(8000, asked) + 'px !important; }</style>'
+        )
+      }
+    </script>
+    <style>
+    </style>
   </head>
   <body>
     <div id="root"></div>

@@ -60,6 +60,20 @@ export function end(): void {
   spanName = ''
 }
 
+/**
+ * Une durée déjà mesurée, imputée à une portion.
+ *
+ * Le complément indispensable de `begin`/`end`, qui ne s'imbriquent pas : une portion qui en
+ * contient une autre voyait la sienne **effacée** par l'appel intérieur, et son temps
+ * disparaissait du relevé sans que la somme ne cloche visiblement. C'est ce qui a caché le
+ * coût du tracé de la toile pendant tout ce temps — `toile` contenait `courbes`, donc `toile`
+ * n'était jamais consigné. L'appelant qui mesure lui-même n'a pas ce problème.
+ */
+export function add(name: string, ms: number): void {
+  if (!enabled || !open) return
+  open.parts[name] = (open.parts[name] ?? 0) + ms
+}
+
 /** Un fait à afficher tel quel : nombre d'arêtes, empan, état du tampon. */
 export function note(key: string, value: number | string): void {
   if (!enabled || !open) return

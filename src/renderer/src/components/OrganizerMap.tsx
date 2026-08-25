@@ -464,11 +464,34 @@ export function OrganizerMap({
     height: number
     /** Prochain paquet de courbes à tracer. */
     at: number
+    /**
+     * Combien de paquets tracer par image, réglé sur le coût observé.
+     *
+     * Les paquets sont très inégaux — un amas dense coûte cinquante fois un bord vide — donc
+     * un nombre fixe donnerait tantôt une image vide, tantôt un gel. On part petit et on suit.
+     */
+    slice: number
     /** Les points sont peints en dernier, une fois la toile finie. */
     dotsDone: boolean
   } | null>(null)
   /** Le tampon libre, prêt à recevoir le prochain tracé. */
   const spareBuffer = useRef<HTMLCanvasElement | null>(null)
+  /**
+   * Un canevas d'un pixel, pour forcer l'exécution de ce qui vient d'être tracé.
+   *
+   * On y recopie le tampon en réduction, puis on lit ce pixel : le moteur n'a pas le choix, il
+   * doit rasteriser tout ce qu'il avait mis en attente. Lire directement dans le tampon aurait
+   * le même effet, mais **le condamne** — quelques lectures suffisent à ce que le moteur le
+   * bascule en rendu logiciel, dont l'anticrénelage n'est pas le même : mesuré, 332 739 octets
+   * d'écart sur la même toile. Par le brouillon, l'écart est de zéro.
+   */
+  const scratch = useRef<CanvasRenderingContext2D | null>(null)
+  if (!scratch.current) {
+    const tiny = document.createElement('canvas')
+    tiny.width = 1
+    tiny.height = 1
+    scratch.current = tiny.getContext('2d', { willReadFrequently: true })
+  }
   /**
    * L'aperçu : toute la carte, en petit, gardé sous la main.
    *
@@ -813,6 +836,21 @@ export function OrganizerMap({
     landingStartRef.current = performance.now()
   }, [])
 
+  /**
+   * Force l'exécution de ce qui vient d'être tracé dans un canevas.
+   *
+   * Un `stroke` n'exécute rien : il enregistre. Mesuré sur la vraie toile — écrire les 135 271
+   * courbes coûte 4 ms, les rasteriser 1 130. Sans ce point de rendez-vous, une tranche
+   * mesurée « à six millisecondes » n'a rien peint du tout, et la facture tombe d'un bloc sur
+   * le premier qui réclame les pixels.
+   */
+  const rasterise = useCallback((target: CanvasRenderingContext2D): void => {
+    const tiny = scratch.current
+    if (!tiny) return
+    tiny.drawImage(target.canvas, 0, 0, 1, 1)
+    tiny.getImageData(0, 0, 1, 1)
+  }, [])
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     const context = canvas?.getContext('2d')
@@ -918,7 +956,13 @@ export function OrganizerMap({
     const paintWebFrom = (
       target: CanvasRenderingContext2D,
       from: number,
-      deadline: number | null,
+      /**
+       * Combien de paquets tracer avant de rendre la main, ou `null` pour tout tracer d'un
+       * coup. **Ce n'est pas une échéance**, et c'est tout le sujet : `performance.now()` ne
+       * mesure pas le tracé, il mesure le temps d'en *écrire la commande*. L'appelant compte
+       * donc en paquets et règle ce nombre sur le coût réellement observé.
+       */
+      slice: number | null,
       /**
        * La zone que ce tracé doit couvrir, dans le repère de la carte avant déplacement.
        *
@@ -1078,11 +1122,12 @@ export function OrganizerMap({
       const seenBottom = (area.bottom - originY) / span + slack
       const entries = pathCache.current.list
       let at = Math.max(0, from)
+      /* On compte les paquets **tracés**, pas les paquets examinés : un paquet hors zone ne
+         coûte rien, et le compter reviendrait à rendre la main sans avoir rien peint. */
+      let drawn = 0
       for (; at < entries.length; at += 1) {
+        if (slice !== null && drawn >= slice) break
         const entry = entries[at]
-        /* L'échéance n'est consultée qu'un paquet sur trente-deux : `performance.now()` est
-           bon marché, mais pas au point d'être appelé cent trente mille fois. */
-        if (deadline !== null && (at & 31) === 31 && performance.now() >= deadline) break
         const { path, tone } = entry
         if (
           entry.right < seenLeft ||
@@ -1104,8 +1149,25 @@ export function OrganizerMap({
         target.lineWidth = core / span
         target.globalAlpha = edgeAlpha
         target.stroke(path)
+        drawn += 1
       }
       target.restore()
+      /**
+       * La rasterisation, forcée — et c'est la correction qui compte.
+       *
+       * Un `stroke` sur un canevas 2D n'exécute rien : il **enregistre** une commande, que le
+       * moteur exécutera au premier moment où quelqu'un a besoin des pixels. Mesuré sur la
+       * vraie toile dans un tampon de 4288 × 2720 : écrire les 135 271 courbes en trois passes
+       * coûte **1,8 ms**, et la rasterisation qui suit **583**. Le découpage en tranches
+       * consultait donc une horloge qui ne mesurait rien, rendait la main en croyant avoir
+       * dépensé six millisecondes, et toute la facture tombait d'un bloc sur le premier qui
+       * réclamait les pixels — la recopie. C'est exactement ce que le témoin montrait :
+       * `courbes 0,00 ms`, `recopie 871,8 ms au pire`.
+       *
+       * Lire un pixel force l'exécution de ce qui précède. La tranche mesure alors du vrai
+       * travail, et l'appelant peut enfin la régler.
+       */
+      if (slice !== null && drawn > 0) rasterise(target)
       target.globalCompositeOperation = 'source-over'
       target.globalAlpha = 1
       return at
@@ -1388,17 +1450,23 @@ export function OrganizerMap({
       context.restore()
     } else {
       if (!covers) {
-        /* On peint le cadre élargi d'une marge, recoupé au contenu : un déplacement court
-           reste dedans, et ce qui déborde de la carte ne coûte rien à laisser de côté. */
-        const budget = WEB_BUDGET / (ratio * ratio)
-        const area = paintArea(frame, content, budget, ZOOM_HEADROOM, WEB_MARGIN)
-        const bufferWidth = Math.max(1, Math.ceil(area.right - area.left))
-        const bufferHeight = Math.max(1, Math.ceil(area.bottom - area.top))
-
         /* Rien à montrer en attendant : il faut peindre maintenant, sinon l'écran garderait un
            trou. C'est le premier tracé, et les déplacements qui sortent de la zone peinte — que
            la marge est justement là pour rendre rares. Partout ailleurs on étale. */
         const mustFinishNow = painted.canvas === null
+        /* On peint le cadre élargi d'une marge, recoupé au contenu : un déplacement court
+           reste dedans, et ce qui déborde de la carte ne coûte rien à laisser de côté.
+           **Sauf au tout premier tracé**, qui ne peut pas être étalé — il n'y a encore rien à
+           montrer en attendant — et qui se limite donc au cadre nu. La marge est trois fois
+           plus grande que lui, et la rasterisation se paie au pixel : 583 ms mesurées pour le
+           tampon complet d'un plein écran, contre 200 pour le cadre seul. La marge est bâtie
+           juste après, en tranches, sans que personne l'attende. */
+        const budget = WEB_BUDGET / (ratio * ratio)
+        const area = mustFinishNow
+          ? paintArea(frame, content, budget, 1, 0)
+          : paintArea(frame, content, budget, ZOOM_HEADROOM, WEB_MARGIN)
+        const bufferWidth = Math.max(1, Math.ceil(area.right - area.left))
+        const bufferHeight = Math.max(1, Math.ceil(area.bottom - area.top))
 
         let job = paintJob.current
         /**
@@ -1465,38 +1533,53 @@ export function OrganizerMap({
             width: bufferWidth,
             height: bufferHeight,
             at: 0,
+            /* On part d'un seul paquet : c'est la granularité la plus fine dont on dispose, et
+               la boucle ouvrira la vanne dès la deuxième image si le tracé est bon marché.
+               Partir large ferait payer une image lourde avant de pouvoir la corriger. */
+            slice: 1,
             dotsDone: false
           }
           paintJob.current = job
         }
 
-        /* Six millisecondes par image : de quoi avancer franchement en laissant respirer le
-           reste — les points, les étiquettes, et surtout les événements de la souris.
-           Douze quand le tampon ne couvre plus le cadre : là, ce qui manque à l'écran n'est
-           pas de la netteté mais de la carte, et il vaut mieux une image à vingt millisecondes
-           qu'un aperçu étiré deux fois plus longtemps. */
-        const deadline = mustFinishNow ? null : performance.now() + (usable ? 6 : 12)
-        perf.begin('toile')
-        job.at = paintWebFrom(job.paint, job.at, deadline, {
+        /* Le budget d'une image : de quoi avancer franchement en laissant respirer le reste —
+           les points, les étiquettes, et surtout les événements de la souris. Plus large quand
+           le tampon ne couvre plus le cadre : là, ce qui manque à l'écran n'est pas de la
+           netteté mais de la carte, et il vaut mieux une image un peu longue qu'un aperçu
+           étiré deux fois plus longtemps. */
+        const frameBudget = usable ? 10 : 18
+        const before = performance.now()
+        job.at = paintWebFrom(job.paint, job.at, mustFinishNow ? null : job.slice, {
           left: job.left,
           top: job.top,
           right: job.left + job.width,
           bottom: job.top + job.height
         })
-        perf.end()
-        perf.note('paquets', `${job.at}/${pathCache.current.list.length}`)
+        const spent = performance.now() - before
+        perf.add('toile', spent)
+        /* On suit le coût observé, sans jamais plus que doubler ni moins que moitié d'une
+           image à l'autre : les paquets étant très inégaux, un asservissement brutal
+           oscillerait entre une image vide et un gel. */
+        const wanted = (job.slice * frameBudget) / Math.max(0.5, spent)
+        job.slice = Math.max(1, Math.min(256, Math.round(
+          Math.max(job.slice / 2, Math.min(job.slice * 2, wanted))
+        )))
+        perf.note('paquets', `${job.at}/${pathCache.current.list.length} par ${job.slice}`)
         const webDone = job.at >= pathCache.current.list.length
         if (webDone && !job.dotsDone) {
           /* Les points en une fois : neuf mille pastilles groupées par teinte, c'est deux ou
              trois millisecondes — le découpage n'y gagnerait rien et compliquerait la reprise. */
-          perf.begin('points')
+          const dotsAt = performance.now()
           paintDots(job.paint, {
             left: job.left,
             top: job.top,
             right: job.left + job.width,
             bottom: job.top + job.height
           })
-          perf.end()
+          /* Les pastilles sont enregistrées comme le reste : sans cette lecture, leur coût
+             irait grossir la première recopie au lieu d'être imputé ici. */
+          rasterise(job.paint)
+          perf.add('points', performance.now() - dotsAt)
           job.dotsDone = true
         }
 
@@ -1678,6 +1761,7 @@ export function OrganizerMap({
      * c'est ce qui permet à une collection d'apparaître ici avec la couleur que l'utilisateur
      * lui a donnée, sans que la boucle ait à savoir de quelle famille elle vient.
      */
+    perf.note('tampon-px', `${Math.round(webCache.current.width * ratio)}x${Math.round(webCache.current.height * ratio)}`)
     perf.note('empan', Math.round(span))
     perf.note('aretes', pathCache.current.list.length)
     perf.note('tampon', covers ? 'recopie' : paintJob.current ? 'en cours' : 'pose')
@@ -1942,6 +2026,7 @@ export function OrganizerMap({
     islands,
     links,
     pointsKey,
+    rasterise,
     ownLabelSpots,
     focusGroup,
     hoverLabel,
