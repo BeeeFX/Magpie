@@ -78,13 +78,15 @@ export interface IslandTuning {
  * la moitié de la bibliothèque.
  *
  * **Ce que le relief apporte, et où il ne l'apporte pas.** Comparé à un k-moyennes du plan au
- * même nombre de régions, il ne gagne rien en pureté — 47,9 % contre 51,3 % à 17 régions — et
- * rien en information mutuelle : 49,3 % pour les deux. Découper le plan en cellules régulières
- * range les posts tout aussi bien. Ce qui change est **où passe la frontière** : la densité
- * moyenne le long des bords vaut 80,4 % de la densité habitée pour le relief, contre 104,0 %
- * pour le k-moyennes. Autrement dit le relief coupe dans les vallées, et le découpage naïf coupe
- * en plein milieu des amas — deux moitiés parfaitement pures séparées par une frontière qui ne
- * veut rien dire. C'est ce défaut-là qu'un lecteur voit, et aucune pureté ne l'attrape.
+ * même nombre de régions — vingt et une —, il ne gagne rien : 54,2 % de pureté contre 56,3 %,
+ * 51,1 % d'information mutuelle contre 51,4 %. Découper le plan en cellules régulières range les
+ * posts tout aussi bien, et il faut le dire.
+ *
+ * Ce qui change est **où passe la frontière**. La densité moyenne le long des bords vaut 84,0 %
+ * de la densité habitée pour le relief, contre 98,9 % pour le k-moyennes : le relief coupe dans
+ * les vallées, le découpage naïf coupe en plein milieu des amas. Deux moitiés parfaitement pures
+ * séparées par une frontière qui ne veut rien dire — c'est ce défaut-là qu'un lecteur voit, et
+ * aucune pureté ne l'attrape.
  */
 export const ISLAND_TUNING: IslandTuning = {
   field: 160,
