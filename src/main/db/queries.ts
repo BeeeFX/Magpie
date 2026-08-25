@@ -118,10 +118,45 @@ export function postFilter(query: PostQuery): { condition: string; params: unkno
     params.push(...query.tags)
   }
 
+  /**
+   * La recherche : l'index plein texte, plus deux endroits qu'il ne voit pas.
+   *
+   * L'index porte quatre colonnes et **deux sont vides** sur une bibliothèque réelle :
+   * `ai_description` n'existe que si le rangement par modèle distant a tourné, et `transcript`
+   * que si la transcription a tourné — relevé sur 9 850 posts, zéro et un respectivement. Il
+   * reste donc la légende et le pseudo, et c'est tout ce qu'on pouvait chercher.
+   *
+   * Deux gisements étaient à portée sans rien migrer. Le **nom affiché** de l'auteur, distinct
+   * du pseudo, rempli sur 9 791 posts : chercher « Studio Ghibli » ne trouvait rien parce que
+   * le compte s'appelle `@ghibli_intl`. Et les **tags**, 12 506 liens pour 4 852 mots distincts :
+   * la plupart sont des mots-dièse déjà présents dans la légende, mais ceux qui viennent d'un
+   * sous-forum, d'un domaine ou d'un compte n'y sont nulle part.
+   *
+   * Un post est retenu s'il répond à l'index, **ou** si tous les mots cherchés sont dans le nom
+   * de l'auteur, **ou** s'ils sont tous dans ses tags. Trois façons de dire oui plutôt qu'une :
+   * la règle reste prévisible, et personne ne perd un résultat qu'il avait avant.
+   */
   const match = toFtsQuery(query.search)
   if (match) {
-    where.push('p.rowid IN (SELECT rowid FROM posts_fts WHERE posts_fts MATCH ?)')
+    const words = searchWords(query.search)
+    const clauses = ['p.rowid IN (SELECT rowid FROM posts_fts WHERE posts_fts MATCH ?)']
     params.push(match)
+    if (words.length > 0) {
+      clauses.push(words.map(() => 'p.author_name LIKE ?').join(' AND '))
+      params.push(...words.map((word) => `%${word}%`))
+      clauses.push(
+        words
+          .map(
+            () => `EXISTS (
+        SELECT 1 FROM post_tags pt JOIN tags t ON t.id = pt.tag_id
+        WHERE pt.post_id = p.id AND t.name LIKE ?
+      )`
+          )
+          .join(' AND ')
+      )
+      params.push(...words.map((word) => `%${word}%`))
+    }
+    where.push(`(${clauses.join(' OR ')})`)
   }
 
   return { condition: where.join(' AND '), params }
@@ -1862,6 +1897,26 @@ export function pendingVideos(rawLimit = 150): PendingMedia[] {
  * sens dans la syntaxe FTS pour qu'une apostrophe ou un guillemet ne fasse pas planter la
  * recherche, et on ajoute `*` au dernier terme pour chercher au fil de la frappe.
  */
+/**
+ * Les mots de la saisie, pour les recherches qui ne passent pas par l'index.
+ *
+ * Mêmes coupes que `toFtsQuery` — c'est la même saisie qu'on lit — puis on retire les deux
+ * jokers de `LIKE`. Les retirer plutôt que les échapper évite d'avoir à porter un `ESCAPE` sur
+ * chaque comparaison : personne ne cherche un pour-cent, et un mot vidé de ses jokers cherche
+ * encore ce qu'on voulait.
+ *
+ * Six mots au plus : au-delà, chaque mot ajoute deux comparaisons par post, et une saisie
+ * pareille ne cherche plus rien.
+ */
+function searchWords(raw: string): string[] {
+  return raw
+    .replace(/["'()*:^-]/g, ' ')
+    .split(/\s+/)
+    .map((word) => word.replace(/[%_]/g, ''))
+    .filter((word) => word.length > 1)
+    .slice(0, 6)
+}
+
 function toFtsQuery(raw: string): string | null {
   const terms = raw
     .replace(/["'()*:^-]/g, ' ')
