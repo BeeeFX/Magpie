@@ -340,10 +340,13 @@ h1, h2, h3 {
 
 /* Intertitres en casse normale plutôt qu'en capitales espacées : moins administratif,
    et ils s'effacent derrière les lignes qu'ils regroupent. */
+/* Les commandes se tiennent ensemble, à droite du titre. Avec `space-between`, deux boutons
+   se retrouvaient écartés l'un de l'autre par toute la largeur restante : ils se lisaient
+   comme deux choses sans rapport, alors qu'ils portent tous deux sur la liste. */
 .sidebar__title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 0 12px;
   margin-bottom: 4px;
   font-size: 12px;
@@ -353,6 +356,7 @@ h1, h2, h3 {
 }
 
 .sidebar__title-filter {
+  flex: 1;
   min-width: 0;
   padding: 2px 0;
   background: none;

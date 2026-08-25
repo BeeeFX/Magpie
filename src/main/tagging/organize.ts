@@ -4,6 +4,8 @@ import type {
   AiCollectionRoute,
   AiCollectionSuggestion,
   Language,
+  MapIsland,
+  MapLabel,
   OrganizerMap,
   OrganizerProgress
 } from '@shared/types'
@@ -30,6 +32,7 @@ import {
 } from '../db/queries'
 import { centreVectors, embedItems, embedTexts } from './embeddings'
 import { blend, encodeTopicPrompts, toVector, topicStandoff, MAP_LAYOUTS, type MapLayout } from './vision'
+import { buildMapLabels } from './map-labels'
 import { propagateByImage } from './propagate'
 import { project, TUNING, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
@@ -797,6 +800,27 @@ export function lastCollectionPlan(): AiCollectionPlan | null {
 const layoutProjections = new Map<string, ProjectedPoint[]>()
 
 /**
+ * Les étages de noms, rangés par regard comme les projections.
+ *
+ * Ils étaient refaits à **chaque** demande de carte, y compris quand la projection était déjà en
+ * mémoire : une relecture de toute la bibliothèque et l'extraction des mots de chaque post, en
+ * synchrone, dans le processus principal. Pendant ce temps l'application ne répond à rien — et
+ * comme la carte se redemande à chaque changement de filtre, le gel revenait sans cesse.
+ * Ils ne dépendent que des positions et du plan : calculés avec eux, jetés avec eux.
+ */
+const layoutLabels = new Map<string, MapLabel[]>()
+
+/**
+ * Les régions du relief, rangées par regard — et pour exactement la raison d'à côté.
+ *
+ * Les nommer relit toute la bibliothèque et extrait les mots de chaque post. C'est court sur
+ * dix mille posts, mais la carte se redemande à chaque changement de filtre : refait à chaque
+ * demande, ce serait le même gel que celui que `layoutLabels` vient de faire disparaître. Elles
+ * ne dépendent que des positions : calculées avec elles, jetées avec elles.
+ */
+const layoutIslands = new Map<string, MapIsland[]>()
+
+/**
  * Oublie tout ce qui est gardé en mémoire sur la carte.
  *
  * Sert au geste « refaire la carte » : effacer les positions en base ne suffit pas, le
@@ -804,6 +828,8 @@ const layoutProjections = new Map<string, ProjectedPoint[]>()
  */
 export function forgetMapCache(): void {
   layoutProjections.clear()
+  layoutLabels.clear()
+  layoutIslands.clear()
 }
 
 export async function buildLocalCollectionPlan(
@@ -964,6 +990,8 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
       lastRawText = vectors
       // Les regards déjà calculés portent sur un autre nuage : ils ne valent plus rien.
       layoutProjections.clear()
+      layoutLabels.clear()
+      layoutIslands.clear()
     }
   } catch (error) {
     console.warn('[magpie] Embeddings indisponibles, tri par mots-clés seul :', error)
@@ -1024,7 +1052,7 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
      toute l'analyse une seconde fois — chargement des vignettes, regroupement, tout. */
   const plan = lastPlan ?? (await proposeVideoCollections())
   const base = lastSemanticVectors
-  if (!base || base.size === 0) return { points: [], plan, islands: [] }
+  if (!base || base.size === 0) return { points: [], plan, labels: [], islands: [] }
 
   /* Un autre regard, ce sont les mêmes blocs remixés à d'autres poids. L'équilibré est déjà
      mélangé — c'est celui que l'analyse produit — et les autres se refont ici, ce qui ne coûte
@@ -1036,7 +1064,13 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
 
   const kept = layoutProjections.get(layout)
   if (kept && kept.length === vectors.size) {
-    return { plan, points: withGroups(kept, plan), islands: regionsOf(kept) }
+    const shown = withGroups(kept, plan)
+    return {
+      plan,
+      points: shown,
+      labels: layoutLabels.get(layout) ?? [],
+      islands: layoutIslands.get(layout) ?? []
+    }
   }
 
   try {
@@ -1078,7 +1112,12 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
     )
     saveMapFingerprint(projectionFingerprint(layout), layout)
     layoutProjections.set(layout, projected)
-    return { plan, points: withGroups(projected, plan), islands: regionsOf(projected) }
+    const shown = withGroups(projected, plan)
+    const labels = nestedLabels(shown)
+    layoutLabels.set(layout, labels)
+    const islands = regionsOf(projected)
+    layoutIslands.set(layout, islands)
+    return { plan, points: shown, labels, islands }
   } finally {
     // Toujours, y compris sur échec : sinon l'indicateur reste violet et animé sans fin.
     setProgress({ stage: 'idle', done: 0, total: 0, running: false })
@@ -1086,13 +1125,34 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
 }
 
 /**
+ * Les noms qui se découvrent au zoom, sous ceux des amas.
+ *
+ * Les mots viennent d'où viennent déjà les catégories — légende, tags, transcription — et passent
+ * le même tamis que dans `createChoices` : ni facettes, ni mots vides, ni mots qui *sont* déjà un
+ * thème. Un sous-amas nommé « vidéo » à l'intérieur de « Film et vidéo » n'apprendrait rien.
+ */
+function nestedLabels(points: OrganizerMap['points']): MapLabel[] {
+  const terms = new Map<string, Set<string>>()
+  for (const item of organizationItems()) {
+    const kept = new Set<string>()
+    for (const term of prepareTerms(item).keys()) {
+      if (term.startsWith(FACET)) continue
+      if (term.length < 3 || term.length > 35) continue
+      if (topicKeyword.has(term) || STOP_WORDS.has(term)) continue
+      if (term.split(' ').some((word) => STOP_WORDS.has(word))) continue
+      kept.add(term)
+    }
+    terms.set(item.id, kept)
+  }
+  return buildMapLabels(points, terms)
+}
+
+/**
  * Les régions du relief, nommées par les mots de leurs posts.
  *
- * Le nommage lit les légendes déjà chargées pour l'analyse — aucune requête de plus — et le
- * calcul entier tient dans quelques dizaines de millisecondes sur dix mille posts : un relief de
- * 160 × 160, un tri de ses cases, et deux parcours de la bibliothèque pour les mots. On le refait
- * donc à chaque construction de la carte plutôt que de le ranger, ce qui évite d'avoir à décider
- * quand il devient caduc.
+ * Le relief lui-même est de la géométrie — 160 × 160 cases, un tri, une union-find — et coûte
+ * quelques dizaines de millisecondes. Le nommage, lui, relit toute la bibliothèque : c'est
+ * pourquoi le résultat se range dans `layoutIslands` et ne se refait qu'avec la projection.
  */
 function regionsOf(points: ProjectedPoint[]): OrganizerMap['islands'] {
   const items = new Map(organizationItems().map((item) => [item.id, item]))

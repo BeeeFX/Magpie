@@ -17,7 +17,7 @@ import { formatBytes } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
-import { IconCards, IconClose, IconMasonry } from './Icons'
+import { IconCards, IconClose, IconCollections, IconMasonry } from './Icons'
 
 const THEMES: { key: ThemeChoice; label: TranslationKey }[] = [
   { key: 'system', label: 'settings.system' },
@@ -501,6 +501,16 @@ export function Settings(): React.JSX.Element | null {
                 <IconCards />
                 <span>{t('settings.cards')}</span>
               </button>
+              {/* Le troisième mode existait dans la barre d'outils et pas ici : ce réglage
+                  prétendait pourtant montrer les dispositions, et il en cachait une. */}
+              <button
+                type="button"
+                className={gridMode === 'map' ? 'is-active' : ''}
+                onClick={() => setGridMode('map')}
+              >
+                <IconCollections size={16} />
+                <span>{t('settings.map')}</span>
+              </button>
             </div>
           </section>
 
@@ -668,7 +678,9 @@ export function Settings(): React.JSX.Element | null {
                   disabled={(pending?.clips ?? 0) === 0}
                   onClick={() => void magpie.startPreload({ what: 'clips' })}
                 >
-                  {t('downloads.clipsName')}
+                  {/* La qualité fait partie de la phrase : sans elle, le bouton affichait son
+                      propre gabarit, « Vidéos en {quality} ». */}
+                  {t('downloads.clipsName', { quality: t(`quality.${videoCacheQuality}`) })}
                 </button>
               </div>
             </div>

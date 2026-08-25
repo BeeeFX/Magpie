@@ -85,7 +85,10 @@ export function LibraryMap(): React.JSX.Element {
    * l'utilisateur a écrit, les étiquettes de ce qu'il a nommé lui-même.
    */
   const [titles, setTitles] = useState({
-    regions: true,
+    /* Éteintes par défaut, et c'est un choix de cohabitation. Les amas portent déjà leurs noms
+       et leurs sous-noms au zoom : ajouter d'emblée vingt et une régions ferait une carte
+       couverte de texte. Elles s'allument d'un bouton, à côté des trois autres familles. */
+    regions: false,
     groups: true,
     collections: true,
     own: true

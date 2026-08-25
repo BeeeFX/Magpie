@@ -272,7 +272,9 @@ const previewApi: MagpieApi = {
       }))
     return {
       points,
-      /* Le bac à sable ne calcule pas de relief : il n'a pas les légendes qui le nommeraient. */
+      /* L'aperçu navigateur ne construit ni étages de noms ni relief : il sert à regarder la
+         grille, pas à simuler l'analyse — et le relief se nomme avec des légendes qu'il n'a pas. */
+      labels: [],
       islands: [],
       plan: {
         suggestions,
