@@ -25,7 +25,7 @@
 
 ## The things you saved, finally useful
 
-Magpie turns scattered posts into a fast Pinterest-style wall. Connect Instagram or X, choose **Bookmarks**, **Likes**, or **Both**, then browse everything together or filter it instantly. A post that appears in both feeds stays a single item.
+Magpie turns scattered posts into a fast Pinterest-style wall. Connect Instagram or X, choose **Bookmarks**, **Likes**, or **Both**, and browse it all together. A post saved in both feeds stays a single item.
 
 | Browse naturally | Organise your way | Stay fast at scale |
 | --- | --- | --- |
@@ -33,33 +33,32 @@ Magpie turns scattered posts into a fast Pinterest-style wall. Connect Instagram
 
 ## A wall you want to keep scrolling
 
-The point of a moodboard is that you see things you were not looking for. Magpie's main view is a dense wall of everything you ever saved, and it is built to be scrolled for a long time.
+A moodboard works when you see things you were not looking for.
 
-- **Two grids and a density slider.** The masonry wall lets every post keep its own height; card view gives them all the same one, with the author and an excerpt always visible. Columns run from 140 to 400 px, so the same library can be a contact sheet or a gallery.
-- **Hover brings it to life.** Videos play in place, looped, muted until you want the sound; carousels fade through their views with position dots and return to the first image when you leave. Only the tile under the cursor is ever mounted, so nothing stutters.
-- **Filter and search without waiting.** Bookmarks or likes, Instagram or X, images, videos, links, untagged — plus accent-insensitive search across captions, authors and tags. Add tags, favourites and colour labels as you go, in bulk when it is quicker.
-- **It picks up where you left it.** Your last search, filters, sorting and scroll position come back with the app.
-- **Ten thousand posts scroll like ten.** Each post's dimensions and dominant colour are read at import, so the wall computes its layout without loading a single image.
+- **Two grids, one slider.** Masonry lets every post keep its own height; cards give them all the same. Columns from 140 to 400 px — contact sheet or gallery.
+- **Hover brings it to life.** Videos play in place, muted until you want the sound; carousels fade through their views. Only the tile under the cursor is mounted, so nothing stutters.
+- **Find it instantly.** Platform, media type, untagged, favourites — plus accent-insensitive search across captions, authors and tags.
+- **Ten thousand posts scroll like ten.** Sizes and dominant colours are read at import, so the wall lays itself out without loading a single image.
 
 ## Organise locally — no account, no API key, no cloud
 
-Magpie can sort your library into useful collections by itself, and it does the whole thing on your computer. Two paths, and you pick one:
+Magpie sorts your library into collections by itself, entirely on your machine. Two paths:
 
 ![Magpie's local organiser, offering a quick pass or a thorough one](docs/assets/magpie-organizer.png)
 
-**Quick** reads captions, hashtags, tags, creators and thumbnails, then proposes a list of collections for you to correct. A few minutes.
+**Quick** reads captions, hashtags, tags, creators and thumbnails, then proposes collections for you to correct. A few minutes.
 
-**Thorough** goes further, and unlocks the map. Two local vision models look at every thumbnail — and at three frames from each cached video, because the cover of a clip rarely says what the clip is about. Whisper transcribes what is spoken, in the language it is actually spoken in, guessed from the caption and from the library around it: a French reel heard as English does not come out approximate, it comes out invented. One to two hours, resumable, and it tells you what each step costs before you start.
+**Thorough** goes further, and unlocks the map. Two vision models look at every thumbnail and at three frames from each cached video, because the cover of a clip rarely says what the clip is about. Whisper transcribes what is spoken, in the language it is actually spoken in. One to two hours, resumable, and it tells you what each step costs before you start.
 
-Looking is what makes the difference, because a third of a typical library has no usable caption. Measured on a 9,600-post library, filing rose from 1,299 to 2,445 of those posts once the images had a say.
+Looking is what makes the difference: a third of a typical library has no usable caption. On a 9,600-post library, filing rose from 1,299 to 2,445 of those posts once the images had a say.
 
-Analysing does not commit you to anything: what it proposes are ordinary collections, and you can rename, recolour, merge or delete any of them afterwards — or undo the whole run in one click.
+Nothing is locked in — what it proposes are ordinary collections, and one click undoes the whole run.
 
-## Push it further: the whole library as one picture
+## Push it further: your whole library as one picture
 
-Once the thorough pass has run, Magpie can draw everything you saved as a map — **one dot per post, placed so that distance is similarity**. It is the view that answers *what goes with what*, which is usually the real question in front of nine thousand posts. Dense areas name themselves, zooming in reveals finer regions inside the big ones, and clicking a point opens the post beside the map without losing your place. Colour the dots by cluster, collection, platform or media type, lasso a group with Shift-drag to name it yourself, and one button lays the map out again by visual style instead of subject. Positions are frozen once computed, so later syncs place new posts against the map you already know.
+Once the thorough pass has run, Magpie draws everything you saved as a map — **one dot per post, placed so that distance is similarity**. Dense areas name themselves, zooming in reveals finer regions inside the big ones, and clicking a point opens the post beside the map. Positions are frozen once computed, so a place you remember stays put.
 
-Collections work the same way: **a name, a few words, and a reach**. Write “music production”, add “ableton”, “synth”, “mixing” with their own weights, and Magpie scores every post against them — a phrase alone can file thousands. The reach is a number of posts rather than a confidence score, and that is deliberate: ranking is trustworthy, absolute scores are not, so you decide where to stop while the map paints the gradient underneath.
+Collections work the same way: **a name, a few words, and a reach**. Write “music production”, add “ableton”, “synth”, “mixing” with their own weights, and a phrase alone can file thousands of posts. Ranking is trustworthy, absolute scores are not — so you decide where to stop, and the map paints the gradient while you do.
 
 <p align="center">
   <img src="docs/assets/magpie-map.png" alt="The Magpie semantic map, one dot per post, with named regions" width="48%">
@@ -68,17 +67,15 @@ Collections work the same way: **a name, a few words, and a reach**. Write “mu
 
 ## Hand your library to your own assistant
 
-Magpie can write out a folder that Claude, ChatGPT or any other assistant can read on its own: captions, transcripts, authors, tags and collections, one line per post to skim and one file per post to open when needed, plus a prompt you can edit. No key, no account, nothing leaves your machine unless you hand over the folder yourself.
+Magpie writes out a folder that Claude, ChatGPT or any other assistant can read on its own: captions, transcripts, authors, tags and collections, plus a prompt you can edit. No key, no account, and nothing leaves your machine unless you hand over the folder yourself.
 
 ## Made for large libraries
 
 - Sync Instagram and X in parallel, with visible progress and resumable long imports.
-- Stream full images and videos only when opened; choose video quality in the player.
-- Use the default **Smart cache** to prepare only the 480p thumbnails you browse, and set a disk limit: recently viewed thumbnails stay available while older ones are replaced automatically.
-- Choose offline video storage only if you explicitly want a larger local archive.
-- Watch background work from one panel — tile images, video downloads, transcription — and pause it, or cap its bandwidth, whenever you need the network back.
-- Move the complete library and cache to another drive at any time.
-- Receive automatic Windows updates in the background.
+- **Smart cache** by default: only the 480p thumbnails you browse, under a disk limit you set. Full media streams when you open it, and offline video storage stays an explicit choice.
+- Pause background work or cap its bandwidth from one panel.
+- Keep your last search, filters, sorting and scroll position between sessions.
+- Move the library to another drive at any time; updates install themselves in the background.
 
 <p align="center">
   <img src="docs/assets/magpie-welcome.png" alt="Magpie's welcome tour explaining what the app does" width="48%">
@@ -93,11 +90,9 @@ Magpie can write out a folder that Claude, ChatGPT or any other assistant can re
 
 > Magpie is not code-signed yet, so Windows SmartScreen may show a warning. Check that the publisher page is this repository before continuing.
 
-Magpie checks stable GitHub releases automatically, downloads updates in the background, and asks before restarting to install one.
-
 ## Private by default
 
-Your posts, tags, collections, database and cached thumbnails stay on your computer. In Smart cache mode, full media is streamed from its platform only when you open it and is not stored permanently. Platform sessions live in separate Chromium partitions, and Magpie never sees the password entered on the platform's real login page.
+Your posts, tags, collections, database and cached thumbnails stay on your computer. Platform sessions live in separate Chromium partitions, and Magpie never sees the password entered on the platform's real login page.
 
 Reading your images, transcribing your videos, grouping them and drawing the map all run locally. No captions, thumbnails or account data are sent to an external AI service.
 
