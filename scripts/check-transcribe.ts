@@ -1,4 +1,5 @@
 import { captionLanguage, listeningLanguage, tidyTranscript } from '../src/main/tagging/transcript-text'
+import { audioLevel, looksMute, MuteStreak, MUTE_STREAK } from '../src/main/tagging/transcript-guard'
 
 /**
  * Ce que la transcription doit savoir avant d'écouter.
@@ -114,6 +115,54 @@ console.log('\nCe qu’on garde de Whisper')
   assert(
     tidyTranscript('  Deux   espaces   partout  ') === 'Deux espaces partout',
     'les espaces sont normalisés'
+  )
+}
+
+console.log('\nUne bibliothèque muette, ou un modèle muet')
+{
+  /** Un tampon de bruit d'un niveau donné : seule son amplitude compte ici. */
+  const tone = (level: number, seconds: number): Float32Array => {
+    const audio = new Float32Array(Math.round(seconds * 16_000))
+    for (let index = 0; index < audio.length; index += 1) audio[index] = index % 2 ? level : -level
+    return audio
+  }
+
+  assert(audioLevel(new Float32Array(0)) === 0, 'un tampon vide n’a pas de niveau')
+  assert(audioLevel(tone(0, 5)) === 0, 'une piste à zéro non plus')
+  assert(Math.abs(audioLevel(tone(0.2, 5)) - 0.2) < 1e-6, 'le RMS d’un signal carré est son amplitude')
+
+  const loud = { level: 0.15, seconds: 45 }
+  assert(looksMute(loud, null), 'un clip sonore et long dont rien ne sort est suspect')
+  assert(!looksMute(loud, 'de la vraie prose transcrite ici'), 'sauf s’il a parlé')
+  assert(
+    !looksMute({ level: 0.15, seconds: 6 }, null),
+    'un clip trop court pour parler ne prouve rien'
+  )
+  assert(
+    !looksMute({ level: 0.0001, seconds: 45 }, null),
+    'une vidéo sans piste audio non plus — son verdict est une vérité'
+  )
+
+  /* La série, et ce qu'elle rend quand elle casse : les posts à réhabiliter, dans l'ordre. */
+  const streak = new MuteStreak()
+  let broke = false
+  for (let index = 0; index < MUTE_STREAK - 1; index += 1) {
+    broke = streak.note(`post-${index}`, true) || broke
+  }
+  assert(!broke, `${MUTE_STREAK - 1} clips muets d’affilée ne déclarent pas la panne`)
+  assert(streak.pending.length === MUTE_STREAK - 1, 'mais la série les retient tous')
+  assert(!streak.note('parlant', false), 'un clip qui parle remet le compteur à zéro')
+  assert(streak.pending.length === 0, 'et vide la série : rien à réhabiliter')
+
+  const fatal = new MuteStreak()
+  let declared = false
+  for (let index = 0; index < MUTE_STREAK; index += 1) {
+    declared = fatal.note(`post-${index}`, true)
+  }
+  assert(declared, `${MUTE_STREAK} clips muets d’affilée déclarent la panne`)
+  assert(
+    fatal.pending.length === MUTE_STREAK && fatal.pending[0] === 'post-0',
+    'et rendent la liste complète des verdicts à effacer'
   )
 }
 

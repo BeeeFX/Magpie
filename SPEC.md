@@ -124,7 +124,7 @@ c'est une propriété qu'on peut vérifier mécaniquement, et pas seulement une 
 
 ## 4. Modèle de données
 
-SQLite, schéma en version **25**, une échelle de migrations dont l'invariant est tenu par
+SQLite, schéma en version **26**, une échelle de migrations dont l'invariant est tenu par
 `npm run check:schema` : une installation neuve exécute `SCHEMA_SQL` seul, donc `SCHEMA_SQL`
 doit déjà contenir tout ce que l'échelle produit. Le détail vit dans `src/main/db/schema.ts`,
 qui est commenté table par table ; ce qui suit dit **à quoi sert chaque groupe**.
@@ -375,6 +375,23 @@ exploitable et la légende médiane fait douze mots. La langue est devinée depu
 depuis la bibliothèque autour : un reel français entendu comme de l'anglais n'en sort pas
 approximatif, il en sort inventé. Le transcript sert au regroupement, à la recherche plein texte
 et à l'export.
+
+**Deux gardes, parce qu'une panne ne lève pas toujours.** Écrire « rien à entendre » est un
+verdict définitif — `pendingTranscripts` ne regarde que les posts dont le transcript est `NULL`,
+donc un post ainsi marqué ne revient jamais. La v25 avait posé la première garde : cinq
+reconnaissances qui **lèvent** d'affilée arrêtent la passe. Elle ne suffisait pas. Une
+reconnaissance en panne rend « Music » ou « The End » sans se plaindre, `tidyTranscript` conclut
+honnêtement qu'il n'y a rien à garder, et le verdict tombe — mesuré le 2026-08-26 : 4 555 posts
+condamnés par une passe qui n'avait pas levé une seule fois.
+
+La seconde garde compte donc les clips qui **avaient du son et la durée de parler** et dont rien
+n'est sorti. Un seul ne prouve rien : un reel sur deux est une boucle musicale. Vingt-cinq
+d'affilée, si — mesuré sur la vraie file, la plus longue série naturelle est de **2**, et 49 %
+des clips rendent du texte. Quand la série tombe, la passe s'arrête et **efface les verdicts
+qu'elle vient d'écrire**, pour que ces vidéos retrouvent la file. Le seuil penche vers le faux
+positif, qui coûte une étape à relancer, plutôt que vers le faux négatif, qui coûte la moitié de
+la bibliothèque. La logique vit dans `transcript-guard.ts`, sans base ni modèle autour, et
+`npm run check:transcribe` l'exerce.
 
 ### 8.5 Une collection est une requête, pas une région
 
@@ -657,25 +674,13 @@ Deux outils non prévus par la spec initiale, tous deux justifiés :
    la **région** de la carte à laquelle le post appartient, ce qui coûte une jointure et donne à
    l'assistant un mot là où il n'y avait rien ; et lui donner les **voisins** d'un post, pour qu'il
    puisse élargir depuis une trouvaille au lieu de ne savoir que chercher des mots.
-2. **Le verdict « rien à entendre » se pose encore à tort, et il est définitif.** Sur la
-   bibliothèque de référence, 4 555 posts portent `transcript = ''` et un seul porte du texte. Or
-   `pendingTranscripts` filtre sur `transcript IS NULL` : ces 4 555 posts ne peuvent plus jamais
-   revenir dans la file, l'étape annonce zéro vidéo à faire, et relancer l'organisation ne peut
-   rien y changer — l'écran de fin dit alors « tout a été lu » en toute bonne foi.
+2. **La transcription reste à relancer, et son rendement est de moitié.** Le verdict faux est
+   corrigé (§8.4) et la v26 rend leur file aux 4 555 posts que les passes précédentes avaient
+   fait taire — mais rien ne se relance tout seul, et l'étape coûte assez pour qu'on la décoche.
+   Mesuré sur la vraie file : 49 % des clips rendent du texte, soit de l'ordre de deux mille
+   transcriptions à retrouver. Tant qu'elle n'a pas retourné, la recherche plein texte et
+   l'export restent aveugles à la moitié vidéo de la bibliothèque.
 
-   Mesuré le 2026-08-26 en rejouant le code actuel sur ces mêmes clips : **13 clips sur 20 de plus
-   de vingt secondes en tirent de la parole exploitable** — des tutoriels, des explications, du
-   commentaire. Ce n'est ni le son (crête 0,35 à 0,96, RMS 0,06 à 0,19, ~100 % d'échantillons non
-   nuls), ni l'extraction, ni la quantification q8 (fp32 se comporte pareil), ni le découpage, ni
-   une interférence des encodeurs d'image (8 sur 12 dans les deux sens).
-
-   La garde posée le 2026-08-24 ne couvre que le cas où la reconnaissance **lève**. Une passe qui
-   *retourne* « Music » pour tout le monde sans lever ressemble, vue du code, à une bibliothèque de
-   vidéos muettes — et écrit le verdict permanent. Il manque la même règle sur les résultats vides :
-   N clips d'affilée dont le son a du niveau et dont le modèle ne tire rien est une panne, pas une
-   propriété de la bibliothèque. Le niveau sonore est déjà dans le tampon qu'on tient en main, donc
-   séparer « vidéo muette » de « modèle muet » ne coûte rien. La réparation des lignes déjà écrites
-   suivra le même chemin que la v25 — mais elle ne vaut d'être faite qu'une fois la garde en place.
 3. **Comptes multiples par plateforme.** Le modèle suppose un compte par plateforme. Le supporter
    coûte une colonne ; le rétro-adapter coûtera davantage à mesure que la base grossit.
 4. **Signature du binaire Windows.** SmartScreen avertit à chaque installation, et c'est le premier

@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 25
+export const SCHEMA_VERSION = 26
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -486,6 +486,29 @@ export const MIGRATION_25_SQL = /* sql */ `
 UPDATE posts SET transcript = NULL WHERE TRIM(COALESCE(transcript, '')) = '';
 `
 
+/**
+ * Le même ménage, une troisième fois — et cette fois avec de quoi ne pas le refaire.
+ *
+ * La v18 puis la v25 ont chacune rendu leur file aux vidéos déclarées muettes par une passe
+ * qui échouait. La v25 a corrigé le cas où la reconnaissance **lève**. Mais une panne ne lève
+ * pas toujours : mesuré le 2026-08-26, la passe relancée juste après la v25 a réécrit le même
+ * verdict sur 4 555 posts sans lever une seule fois — le modèle rendait « Music », « The End »,
+ * « you », et `tidyTranscript` concluait honnêtement qu'il n'y avait rien à garder. Rejoué
+ * depuis, le même code tire de la parole de treize clips sur vingt de plus de vingt secondes.
+ *
+ * Réparer une troisième fois sans rien changer d'autre serait un rite, pas un correctif. Cette
+ * migration ne part donc qu'accompagnée de `transcript-guard` : une série de clips qui avaient
+ * du son et la durée de parler sans en tirer un mot arrête désormais la passe et efface les
+ * verdicts de la série. Le nettoyage ci-dessous est ce qui reste à rendre aux vidéos que les
+ * deux passes précédentes ont fait taire.
+ *
+ * Comme en v18 et en v25 : rien ne se relance tout seul, et les vidéos réellement muettes
+ * repasseront une fois par ffmpeg pour retrouver leur verdict en quelques secondes.
+ */
+export const MIGRATION_26_SQL = /* sql */ `
+UPDATE posts SET transcript = NULL WHERE TRIM(COALESCE(transcript, '')) = '';
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -832,5 +855,6 @@ export const MIGRATIONS: Record<number, string> = {
   22: MIGRATION_22_SQL,
   23: MIGRATION_23_SQL,
   24: MIGRATION_24_SQL,
-  25: MIGRATION_25_SQL
+  25: MIGRATION_25_SQL,
+  26: MIGRATION_26_SQL
 }

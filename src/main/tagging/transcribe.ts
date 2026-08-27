@@ -10,6 +10,8 @@ import {
   tidyTranscript,
   type Listening
 } from './transcript-text'
+import { audioLevel, looksMute, MuteStreak } from './transcript-guard'
+import { clearTranscripts } from '../db/queries'
 import { backgroundTasks } from '../tasks'
 
 /**
@@ -285,6 +287,8 @@ export function transcribeAll(): Promise<void> {
       /* Reconnaissances refusées d'affilée. Remise à zéro dès qu'une réussit : ce qu'on
          surveille est une panne franche, pas un taux d'échec. */
       let refused = 0
+      /* Et son pendant silencieux : les clips qui avaient tout pour parler et n'ont rien dit. */
+      const streak = new MuteStreak()
       for (;;) {
         if (controller.signal.aborted) break
         if (backgroundTasks.isPaused() || backgroundTasks.isTaskPaused('transcribe')) {
@@ -336,6 +340,18 @@ export function transcribeAll(): Promise<void> {
           continue
         }
 
+        /* Mesurés avant d'écouter, sur le tampon qu'on tient déjà : ils ne servent pas à
+           transcrire mais à juger le silence qui suivra. Un clip sans son n'apprend rien
+           sur l'état du modèle, un clip sonore et long si. */
+        const level = audioLevel(audio)
+        const seconds = audio.length / SAMPLE_RATE
+
+        /* Déclarée hors du `try`, et c'est tout l'intérêt : lever la panne depuis l'intérieur
+           la ferait attraper par le `catch` juste en dessous, qui la prendrait pour un refus du
+           modèle — il compterait une tentative, effacerait la série, et la boucle recommencerait
+           sur les mêmes clips sans jamais s'arrêter. */
+        let breakdown = false
+
         try {
           const output = await recognise(audio, {
             task: 'transcribe',
@@ -346,8 +362,18 @@ export function transcribeAll(): Promise<void> {
             chunk_length_s: 30,
             stride_length_s: 5
           })
-          saveTranscript(candidate.postId, tidyTranscript(String(output.text ?? '')))
+          const heard = tidyTranscript(String(output.text ?? ''))
+          saveTranscript(candidate.postId, heard)
           refused = 0
+
+          /* Et le second garde-fou, contre la panne qui ne lève pas.
+             Une reconnaissance en panne rend « Music » ou « The End » sans se plaindre, et
+             `tidyTranscript` conclut honnêtement qu'il n'y a rien à garder — un verdict, donc
+             définitif. C'est ce qui s'est produit deux fois plutôt qu'une, en v18 puis en v25.
+             Enchaîner des clips qui avaient du son et la durée de parler sans en tirer un mot
+             n'est pas une propriété de la bibliothèque : on rend leur file aux vidéos de la
+             série, et on arrête là plutôt que de continuer à écrire des verdicts faux. */
+          breakdown = streak.note(candidate.postId, looksMute({ level, seconds }, heard))
         } catch (error) {
           if (controller.signal.aborted) break
           console.warn('[magpie] Reconnaissance impossible', candidate.postId, error)
@@ -365,6 +391,16 @@ export function transcribeAll(): Promise<void> {
                 `${error instanceof Error ? error.message : String(error)}`
             )
           }
+        }
+
+        if (breakdown) {
+          const rescued = [...streak.pending]
+          clearTranscripts(rescued)
+          throw new Error(
+            `${rescued.length} clips sonores d'affilée n'ont rendu aucun mot alors qu'ils ` +
+              `duraient assez pour parler. C'est une panne de reconnaissance, pas une ` +
+              `bibliothèque muette : leur verdict est effacé et l'étape s'arrête.`
+          )
         }
 
         if (!counted.has(candidate.postId)) {

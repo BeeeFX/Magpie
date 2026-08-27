@@ -508,6 +508,22 @@ export function toggleFavorite(id: string): boolean {
   return row?.is_favorite === 1
 }
 
+/**
+ * Rend leur file à des vidéos qu'une passe en panne avait déclarées muettes.
+ *
+ * `NULL` et non `''` : c'est exactement la différence entre « pas encore écouté » et « écouté,
+ * rien à en tirer », et `pendingTranscripts` ne regarde que celle-là. On ne touche pas à
+ * `updated_at` — rien du post n'a changé, seule notre opinion sur lui.
+ */
+export function clearTranscripts(ids: readonly string[]): void {
+  if (ids.length === 0) return
+  const db = getDb()
+  const stmt = db.prepare('UPDATE posts SET transcript = NULL WHERE id = ?')
+  db.transaction(() => {
+    for (const id of ids) stmt.run(id)
+  })()
+}
+
 export function setFavoriteMany(ids: string[], value: boolean): void {
   if (ids.length === 0) return
   const db = getDb()
