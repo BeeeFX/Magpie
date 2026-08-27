@@ -35,11 +35,7 @@ Magpie turns scattered posts into a fast Pinterest-style wall. Connect Instagram
 
 A moodboard works when you see things you were not looking for.
 
-<p align="center">
-  <img src="docs/assets/magpie-wall.png" alt="The masonry wall at its densest, a contact sheet of saved posts" width="32%">
-  <img src="docs/assets/magpie-cards.png" alt="Card view, with the author and an excerpt on every post" width="32%">
-  <img src="docs/assets/magpie-search.png" alt="Searching the library, with a post's details revealed on hover" width="32%">
-</p>
+![Searching the library, with a post's details revealed on hover](docs/assets/magpie-search.png)
 
 - **Two grids, one slider.** Masonry lets every post keep its own height; cards give them all the same. Columns from 140 to 400 px — contact sheet or gallery.
 - **Hover brings it to life.** Videos play in place, muted until you want the sound; carousels fade through their views. Only the tile under the cursor is mounted, so nothing stutters.
