@@ -31,31 +31,15 @@ Magpie turns scattered posts into a fast Pinterest-style wall. Connect Instagram
 | --- | --- | --- |
 | Masonry wall, regular cards, or the map. Hover previews with sound, carousels, and an integrated video player. | Collections, tags, favourites, colour labels, accent-insensitive search and bulk actions. | Virtualised scrolling and a bounded smart cache, built for libraries of tens of thousands of posts. |
 
-## A map of what you saved
+## A wall you want to keep scrolling
 
-Magpie draws your whole library as one picture: **one dot per post, placed so that distance is similarity**. It is a third way to look at what you kept, next to the wall and the cards — the one that shows *what goes with what*, which is usually the real question in front of nine thousand posts.
+The point of a moodboard is that you see things you were not looking for. Magpie's main view is a dense wall of everything you ever saved, and it is built to be scrolled for a long time.
 
-![The Magpie semantic map, one dot per post, with named regions](docs/assets/magpie-map.png)
-
-The map is a place, not a chart, so it behaves like one:
-
-- **Names at every scale.** Dense areas are named from what is actually in them; zooming in reveals finer regions inside the big ones. You can drop your own label anywhere, and lasso a group with Shift-drag to name it yourself.
-- **Click a point to read the post**, in a resizable panel beside the map — you never lose your place on the map to look at something.
-- **The same cloud, read several ways.** Colour the dots by cluster, by collection, by platform, by media type, or by bookmarks versus likes. One button lays the whole map out again by visual style instead of subject, and the same button brings you back.
-- **It stays where you left it.** Positions are frozen once computed: posts arriving on later syncs are placed against the existing map instead of rearranging it. A place you remember stays put.
-
-### Collections are queries, not folders
-
-A collection is **a name, a few words, and a reach**. Write “music production”, and Magpie scores every post against it — the same local model reads words and images in one shared space, so a phrase alone can file thousands of posts. Add “ableton”, “synth”, “mixing”, each with its own weight: a post belongs if it matches *any* of them, so a narrow word brings its posts in instead of dragging the whole theme towards it.
-
-![A collection defined by words and a reach, next to the map](docs/assets/magpie-collections.png)
-
-The reach is a number of posts, not a confidence score, and that is deliberate honesty: measured on a real library, a phrase that describes nothing you ever saved scores about as high as one at the centre of your interests. Ranking is trustworthy, absolute scores are not — so you decide where to stop, and the map shows you the gradient while you do it.
-
-- Selecting a collection paints the whole library as a heatmap, so you see it bleed outward and know what one more notch would catch.
-- One post can belong to several collections, because that is how meaning actually works.
-- Rename, recolour, merge or delete a collection at any time from the map’s side rail; renaming only changes the label, never what is inside.
-- Hide everything outside a collection when you want to read its shape alone.
+- **Two grids and a density slider.** The masonry wall lets every post keep its own height; card view gives them all the same one, with the author and an excerpt always visible. Columns run from 140 to 400 px, so the same library can be a contact sheet or a gallery.
+- **Hover brings it to life.** Videos play in place, looped, muted until you want the sound; carousels fade through their views with position dots and return to the first image when you leave. Only the tile under the cursor is ever mounted, so nothing stutters.
+- **Filter and search without waiting.** Bookmarks or likes, Instagram or X, images, videos, links, untagged — plus accent-insensitive search across captions, authors and tags. Add tags, favourites and colour labels as you go, in bulk when it is quicker.
+- **It picks up where you left it.** Your last search, filters, sorting and scroll position come back with the app.
+- **Ten thousand posts scroll like ten.** Each post's dimensions and dominant colour are read at import, so the wall computes its layout without loading a single image.
 
 ## Organise locally — no account, no API key, no cloud
 
@@ -71,6 +55,17 @@ Looking is what makes the difference, because a third of a typical library has n
 
 Analysing does not commit you to anything: what it proposes are ordinary collections, and you can rename, recolour, merge or delete any of them afterwards — or undo the whole run in one click.
 
+## Push it further: the whole library as one picture
+
+Once the thorough pass has run, Magpie can draw everything you saved as a map — **one dot per post, placed so that distance is similarity**. It is the view that answers *what goes with what*, which is usually the real question in front of nine thousand posts. Dense areas name themselves, zooming in reveals finer regions inside the big ones, and clicking a point opens the post beside the map without losing your place. Colour the dots by cluster, collection, platform or media type, lasso a group with Shift-drag to name it yourself, and one button lays the map out again by visual style instead of subject. Positions are frozen once computed, so later syncs place new posts against the map you already know.
+
+Collections work the same way: **a name, a few words, and a reach**. Write “music production”, add “ableton”, “synth”, “mixing” with their own weights, and Magpie scores every post against them — a phrase alone can file thousands. The reach is a number of posts rather than a confidence score, and that is deliberate: ranking is trustworthy, absolute scores are not, so you decide where to stop while the map paints the gradient underneath.
+
+<p align="center">
+  <img src="docs/assets/magpie-map.png" alt="The Magpie semantic map, one dot per post, with named regions" width="48%">
+  <img src="docs/assets/magpie-collections.png" alt="A collection defined by words and a reach, next to the map" width="48%">
+</p>
+
 ## Hand your library to your own assistant
 
 Magpie can write out a folder that Claude, ChatGPT or any other assistant can read on its own: captions, transcripts, authors, tags and collections, one line per post to skim and one file per post to open when needed, plus a prompt you can edit. No key, no account, nothing leaves your machine unless you hand over the folder yourself.
@@ -78,7 +73,6 @@ Magpie can write out a folder that Claude, ChatGPT or any other assistant can re
 ## Made for large libraries
 
 - Sync Instagram and X in parallel, with visible progress and resumable long imports.
-- Keep your last search, filters, sorting and scroll position between sessions.
 - Stream full images and videos only when opened; choose video quality in the player.
 - Use the default **Smart cache** to prepare only the 480p thumbnails you browse, and set a disk limit: recently viewed thumbnails stay available while older ones are replaced automatically.
 - Choose offline video storage only if you explicitly want a larger local archive.
