@@ -10,11 +10,13 @@ import { Logo } from './Logo'
 import {
   IconChevronLeft,
   IconCheck,
+  IconClock,
   IconCollections,
   IconDownload,
   IconEye,
   IconGrid,
   IconInbox,
+  IconMap,
   IconSearch,
   IconSend,
   IconStar,
@@ -137,13 +139,15 @@ export function Welcome(): React.JSX.Element {
       { key: 'gather', icon: <IconSync size={18} />, title: 'welcome.gatherTitle', text: 'welcome.gatherText' },
       { key: 'see', icon: <IconGrid size={18} />, title: 'welcome.seeTitle', text: 'welcome.seeText' },
       { key: 'organise', icon: <IconTag size={18} />, title: 'welcome.organiseTitle', text: 'welcome.organiseText' },
-      { key: 'map', icon: <IconCollections size={18} />, title: 'welcome.mapTitle', text: 'welcome.mapText' },
+      { key: 'map', icon: <IconMap size={18} />, title: 'welcome.mapTitle', text: 'welcome.mapText' },
       { key: 'find', icon: <IconSearch size={18} />, title: 'welcome.findTitle', text: 'welcome.findText' }
     ],
     [
       { key: 'login', icon: <IconCheck size={18} />, title: 'welcome.loginTitle', text: 'welcome.loginText' },
       { key: 'local', icon: <IconStar size={18} />, title: 'welcome.localTitle', text: 'welcome.localText' },
-      { key: 'careful', icon: <IconCollections size={18} />, title: 'welcome.carefulTitle', text: 'welcome.carefulText' },
+      /* Un dossier pour « une synchronisation prudente » ne voulait rien dire : ce dont parle
+         la ligne est une cadence, donc une horloge. */
+      { key: 'careful', icon: <IconClock size={18} />, title: 'welcome.carefulTitle', text: 'welcome.carefulText' },
       /* Le seul geste vraiment coûteux de l'application, et le seul dont la présentation ne
          disait rien : on appuyait sur « Ranger » sans savoir qu'on déclenchait le
          téléchargement de plusieurs centaines de mégaoctets de modèles et des minutes de

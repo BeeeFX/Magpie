@@ -9,7 +9,7 @@ import { Downloads } from './Downloads'
 import { magpie } from '../bridge'
 import {
   IconCards,
-  IconCollections,
+  IconMap,
   IconCheck,
   IconFilter,
   IconMasonry,
@@ -285,7 +285,7 @@ export function Toolbar(): React.JSX.Element {
             onClick={() => setGridMode('map')}
             title={t('toolbar.map')}
           >
-            <IconCollections size={16} />
+            <IconMap size={16} />
           </button>
         </div>
       </div>

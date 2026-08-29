@@ -132,6 +132,28 @@ export function IconPanel({ size = 16 }: IconProps): React.JSX.Element {
   )
 }
 
+/**
+ * La carte sémantique, dans la barre des dispositions.
+ *
+ * Elle empruntait l'icône des collections — un dossier — qui dit « ranger », pas « regarder
+ * autrement », et qui la rendait indiscernable du bouton d'organisation juste à côté.
+ *
+ * Une carte pliée, donc, et non le nuage de points qu'elle est vraiment. Les deux ont été
+ * dessinés et comparés à seize pixels : dès qu'on relie les points, les traits referment un
+ * polygone et l'icône se lit comme une forme — un carré, un Y, un pentagone — jamais comme un
+ * graphe ; dès qu'on ne les relie plus, il ne reste qu'une poussière illisible. La carte pliée
+ * est la seule silhouette qui se reconnaisse d'un coup d'œil et qui ne ressemble ni à la
+ * mosaïque ni aux fiches, toutes deux faites de rectangles.
+ */
+export function IconMap({ size = 16 }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)}>
+      <path d="M2.9 5.9 7.5 3.7l5 2.2 4.6-2.2v10.4l-4.6 2.2-5-2.2-4.6 2.2z" />
+      <path d="M7.5 3.7v10.4M12.5 5.9v10.4" />
+    </svg>
+  )
+}
+
 export function IconCollections({ size = 16, className }: IconProps): React.JSX.Element {
   return (
     <svg {...base(size, className)}>

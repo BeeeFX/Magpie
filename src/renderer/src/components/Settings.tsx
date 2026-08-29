@@ -18,7 +18,7 @@ import { formatBytes } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
-import { IconCards, IconClose, IconCollections, IconMasonry } from './Icons'
+import { IconCards, IconClose, IconMap, IconMasonry } from './Icons'
 
 const THEMES: { key: ThemeChoice; label: TranslationKey }[] = [
   { key: 'system', label: 'settings.system' },
@@ -482,7 +482,7 @@ export function Settings(): React.JSX.Element | null {
                 className={gridMode === 'map' ? 'is-active' : ''}
                 onClick={() => setGridMode('map')}
               >
-                <IconCollections size={16} />
+                <IconMap size={16} />
                 <span>{t('settings.map')}</span>
               </button>
             </div>

@@ -11,7 +11,7 @@ import { magpie, magpieEvents } from '../bridge'
 import { useClosing } from '../useClosing'
 import { formatDateTime } from '../format'
 import { useStore, useT } from '../store'
-import { IconClock, IconClose, IconCollections } from './Icons'
+import { IconClock, IconClose, IconMap } from './Icons'
 import { OrganizerSteps } from './OrganizerSteps'
 
 interface Props {
@@ -355,8 +355,10 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                     })
                   }}
                 >
+                  {/* Ce que l'approfondi apporte et que le rapide n'a pas, c'est la carte :
+                      son icône doit donc être celle de la carte, pas un dossier. */}
                   <span className="organizer-card__icon" aria-hidden="true">
-                    <IconCollections size={22} />
+                    <IconMap size={22} />
                   </span>
                   <strong>{t('organizer.deepTitle')}</strong>
                   <em>{t('organizer.deepTime')}</em>
