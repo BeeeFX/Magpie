@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useClosing } from '../useClosing'
 
 interface Props {
   label: React.ReactNode
@@ -21,6 +22,9 @@ export function Popover({
 }: Props): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  /* Rendu paresseux **et** sortie animée : le contenu n'existe qu'une fois ouvert, et il reste
+     le temps de partir. Les deux tenaient sur le même `open`, donc le menu sautait. */
+  const { mounted, closing } = useClosing(open, 150)
 
   useEffect(() => {
     if (!open) return
@@ -50,8 +54,10 @@ export function Popover({
         {badge ? <span className="control__badge">{badge}</span> : null}
       </button>
 
-      {open ? (
-        <div className={`popover popover--${align}`}>{children(() => setOpen(false))}</div>
+      {mounted ? (
+        <div className={`popover popover--${align} ${closing ? 'is-closing' : ''}`}>
+          {children(() => setOpen(false))}
+        </div>
       ) : null}
     </div>
   )

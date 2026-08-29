@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useClosing } from '../useClosing'
 import { useModalFocus } from '../useModalFocus'
 import type {
   AiProvider,
@@ -84,16 +85,16 @@ export function Settings(): React.JSX.Element | null {
   const [info, setInfo] = useState<LibraryInfo | null>(null)
   const [clearing, setClearing] = useState(false)
   const [cacheError, setCacheError] = useState<string | null>(null)
-  const [pending, setPending] = useState<{ thumbnails: number; clips: number } | null>(null)
   const [aiKey, setAiKey] = useState('')
   const [aiKeyStored, setAiKeyStored] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [libraryMove, setLibraryMove] = useState<LibraryMoveProgress | null>(null)
   const [choosingLibrary, setChoosingLibrary] = useState(false)
   const [libraryMoveError, setLibraryMoveError] = useState<string | null>(null)
-  const [rendered, setRendered] = useState(open)
-  const [closing, setClosing] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+  /* Le store se ferme tout de suite, mais le panneau reste monté le temps de revenir
+     doucement vers l'arrière-plan. */
+  const { mounted, closing } = useClosing(open, 230)
 
   useEffect(() => {
     if (!open) return
@@ -102,37 +103,9 @@ export function Settings(): React.JSX.Element | null {
     void loadAccounts()
   }, [open, loadAccounts])
 
-  /* Le store se ferme tout de suite, mais le panneau reste monté le temps de revenir
-     doucement vers l'arrière-plan. Une réouverture pendant la sortie annule proprement
-     le démontage. */
-  useEffect(() => {
-    if (open) {
-      setRendered(true)
-      setClosing(false)
-      return
-    }
-    if (!rendered) return
-    setClosing(true)
-    const timer = setTimeout(() => {
-      setRendered(false)
-      setClosing(false)
-    }, 230)
-    return () => clearTimeout(timer)
-  }, [open, rendered])
-
   useEffect(() => {
     if (!open) return
     return magpieEvents.onUpdateState(setUpdateState)
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    void magpie.pendingCounts(null).then(setPending).catch(() => {})
-    // L'avancement se lit dans l'indicateur de la barre d'outils : le dupliquer ici
-    // donnerait deux endroits à tenir d'accord pour la même information.
-    return magpieEvents.onBackgroundState(() => {
-      void magpie.pendingCounts(null).then(setPending).catch(() => {})
-    })
   }, [open])
 
   useEffect(() => {
@@ -160,7 +133,7 @@ export function Settings(): React.JSX.Element | null {
     return () => document.removeEventListener('keydown', onKey)
   }, [open, setOpen])
 
-  if (!rendered) return null
+  if (!mounted) return null
 
   const clearCache = async (): Promise<void> => {
     setClearing(true)
@@ -205,7 +178,7 @@ export function Settings(): React.JSX.Element | null {
 
   return (
     <div
-      className={`modal settings-modal ${closing ? 'is-closing' : ''}`}
+      className={`modal ${closing ? 'is-closing' : ''}`}
       onMouseDown={() => setOpen(false)}
     >
       <div
@@ -647,43 +620,12 @@ export function Settings(): React.JSX.Element | null {
               <p className="setting__error" role="alert">{cacheError}</p>
             ) : null}
             <p className="setting__note">{t('settings.cacheNote')}</p>
-
-            {/* Le cache intelligent ne prépare que ce qu'on a parcouru. Ces actions comblent
-                l'écart sans faire basculer en hors-ligne, qui téléchargerait aussi les clips.
-                Leur avancement s'affiche dans l'indicateur de la barre d'outils. */}
-            <div className="setting setting--stack preload">
-              <div className="setting__label">
-                <strong>{t('settings.preloadTitle')}</strong>
-                <p>
-                  {(pending?.thumbnails ?? 0) > 0
-                    ? t('settings.preloadPending', {
-                        count: pending?.thumbnails ?? 0,
-                        size: formatBytes((pending?.thumbnails ?? 0) * 40 * 1024)
-                      })
-                    : t('settings.preloadDone')}
-                </p>
-              </div>
-              <div className="setting__actions">
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={(pending?.thumbnails ?? 0) === 0}
-                  onClick={() => void magpie.startPreload({ what: 'thumbnails' })}
-                >
-                  {t('downloads.thumbsName')}
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={(pending?.clips ?? 0) === 0}
-                  onClick={() => void magpie.startPreload({ what: 'clips' })}
-                >
-                  {/* La qualité fait partie de la phrase : sans elle, le bouton affichait son
-                      propre gabarit, « Vidéos en {quality} ». */}
-                  {t('downloads.clipsName', { quality: t(`quality.${videoCacheQuality}`) })}
-                </button>
-              </div>
-            </div>
+            {/* Deux boutons vivaient ici, « Images des tuiles » et « Vidéos en 480p », qui
+                relançaient à la main exactement ce que le menu de synchronisation fait
+                désormais tout seul. Ils ne disaient rien de plus que le compteur au-dessus
+                d'eux, et le plus souvent restaient éteints faute d'avoir quoi que ce soit à
+                préparer : deux commandes qui ne servent que dans le cas rare où l'on refuse
+                l'automatisme, à l'endroit où personne ne les cherche. */}
           </section>
 
           <div className="modal__sep" />

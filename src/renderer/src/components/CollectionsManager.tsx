@@ -9,6 +9,8 @@ interface Props {
   onClose(): void
   /** Rejouer la liste : renommer, fusionner et supprimer la changent tous les trois. */
   onChanged(): void
+  /** En train de partir : le parent nous garde montés le temps de l'animation de sortie. */
+  closing?: boolean
 }
 
 /**
@@ -27,7 +29,12 @@ interface Props {
  * vivent sur la carte, là où l'on voit ce qu'ils attrapent. Ici on ne touche qu'à ce qui se lit
  * dans une liste — un nom, une existence.
  */
-export function CollectionsManager({ collections, onClose, onChanged }: Props): React.JSX.Element {
+export function CollectionsManager({
+  collections,
+  onClose,
+  onChanged,
+  closing = false
+}: Props): React.JSX.Element {
   const t = useT()
   const refresh = useStore((state) => state.refresh)
   const [drafts, setDrafts] = useState<Record<number, string>>({})
@@ -86,7 +93,10 @@ export function CollectionsManager({ collections, onClose, onChanged }: Props): 
   }
 
   return (
-    <div className="modal collections-manager" onMouseDown={onClose}>
+    <div
+      className={`modal collections-manager ${closing ? 'is-closing' : ''}`}
+      onMouseDown={onClose}
+    >
       <div
         ref={panelRef}
         className="modal__panel collections-manager__panel"

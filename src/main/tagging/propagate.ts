@@ -1,5 +1,6 @@
 import type { AiCollectionPlan } from '@shared/types'
 import { toVector } from './vision'
+import type { Breathe } from './organize'
 import type { PostImageEmbedding } from '../db/queries'
 
 /**
@@ -23,6 +24,21 @@ const MIN_SIMILARITY = 0.35
 const NEIGHBOURS = 12
 /** Part des voisins étiquetés qui doivent s'accorder pour emporter la décision. */
 const MAJORITY = 0.5
+
+/**
+ * Combien de posts orphelins entre deux respirations.
+ *
+ * Chacun se compare à tous les posts déjà classés, sur 768 dimensions : sur la bibliothèque de
+ * référence — 2 900 orphelins contre 6 700 classés — la boucle entière fait quinze milliards
+ * de multiplications et occupe le processus principal **onze secondes**, mesuré. Windows
+ * déclare une fenêtre « ne répond pas » au bout de cinq. C'est exactement ce que l'on voyait :
+ * l'animation continuait de tourner — elle vit dans le rendu, un autre processus — pendant que
+ * la fenêtre passait pour morte.
+ *
+ * Le calcul ne rétrécit pas pour autant : trente-deux posts font une tranche d'environ cent
+ * millisecondes, assez courte pour que la fenêtre réponde entre deux.
+ */
+const BREATHE_EVERY = 32
 
 function centred(vectors: Float32Array[]): Float32Array[] {
   if (vectors.length === 0) return []
@@ -56,11 +72,13 @@ export interface PropagationResult {
  * Ne retire jamais rien : un post déjà classé par une règle garde sa catégorie. La
  * propagation ne fait qu'ajouter, et seulement là où il n'y avait rien.
  */
-export function propagateByImage(
+export async function propagateByImage(
   plan: AiCollectionPlan,
   images: Map<string, PostImageEmbedding>,
-  candidates: string[]
-): PropagationResult {
+  candidates: string[],
+  breathe: Breathe,
+  onProgress?: (done: number, total: number) => void
+): Promise<PropagationResult> {
   if (plan.suggestions.length === 0 || images.size === 0) return { plan, adopted: 0 }
 
   const labelOf = new Map<string, string>()
@@ -83,9 +101,17 @@ export function propagateByImage(
 
   const additions = new Map<string, string[]>()
   let adopted = 0
-  known.forEach((id, index) => {
-    if (labelOf.has(id)) return
-    const self = block[index]
+  const orphans = known.filter((id) => !labelOf.has(id))
+  onProgress?.(0, orphans.length)
+  let seen = 0
+  const indexOf = new Map(known.map((id, index) => [id, index]))
+  for (const id of orphans) {
+    seen += 1
+    if (seen % BREATHE_EVERY === 0) {
+      onProgress?.(seen, orphans.length)
+      await breathe()
+    }
+    const self = block[indexOf.get(id) as number]
     const best: { label: string; score: number }[] = []
     for (const other of labelled) {
       let score = 0
@@ -100,7 +126,7 @@ export function propagateByImage(
         best.sort((a, b) => b.score - a.score)
       }
     }
-    if (best.length === 0) return
+    if (best.length === 0) continue
     const votes = new Map<string, number>()
     // Pondéré par la ressemblance : un voisin très proche compte plus qu'un voisin limite.
     for (const entry of best) votes.set(entry.label, (votes.get(entry.label) ?? 0) + entry.score)
@@ -114,12 +140,13 @@ export function propagateByImage(
         winner = label
       }
     }
-    if (!winner || top / total < MAJORITY) return
+    if (!winner || top / total < MAJORITY) continue
     const list = additions.get(winner)
     if (list) list.push(id)
     else additions.set(winner, [id])
     adopted += 1
-  })
+  }
+  onProgress?.(orphans.length, orphans.length)
 
   if (adopted === 0) return { plan, adopted: 0 }
   return {

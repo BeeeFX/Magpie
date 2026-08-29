@@ -1002,10 +1002,14 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
   /* Ce que les mots n'ont pas su classer, les voisins d'image le savent souvent : un post
      sans légende montre pourtant la même chose que ceux qui l'entourent. La propagation
      n'ajoute jamais qu'à ce qui manquait. */
-  const filled = propagateByImage(
+  const filled = await propagateByImage(
     plan,
     images,
-    items.map((item) => item.id)
+    items.map((item) => item.id),
+    breathe,
+    /* La propagation est du calcul long : sans son propre avancement, l'écran restait sur
+       « regroupement » terminé pendant une dizaine de secondes de plus. */
+    (done, total) => setProgress({ stage: 'grouping', done, total, running: true })
   )
   if (filled.adopted > 0) {
     console.log(`[magpie] ${filled.adopted} posts classés par leurs voisins d'image`)
@@ -1233,32 +1237,15 @@ export function rememberedOrganizerDestinations(
   return postsByCollection
 }
 
-/** Applique les destinations apprises sans recréer ni renommer les collections. */
 /**
- * La préparation que le mode choisi implique, avant de ranger tout seul.
+ * Applique les destinations apprises sans recréer ni renommer les collections.
  *
- * Rejouer « la méthode choisie » n'est pas rejouer une étiquette : c'est refaire le travail qui
- * la distingue. `applyRememberedOrganizerRules` classe avec ce qui se trouve déjà en base — donc
- * après une analyse approfondie, les posts arrivés à la synchronisation suivante étaient classés
- * sur leur **texte seul**, leurs images n'ayant jamais été lues. La méthode se dégradait
- * silencieusement d'une synchronisation à l'autre, et c'est exactement ce qu'on ne veut pas d'un
- * réglage qui promet de refaire la même chose.
- *
- * Les deux étapes ne portent que sur ce qui manque — leurs files sont bâties sur « pas encore
- * lu », « pas encore écouté » — donc leur coût suit le nombre de posts nouveaux, pas la taille de
- * la bibliothèque. Elles passent par le registre de tâches, donc elles s'annoncent et se mettent
- * en pause comme le reste.
+ * Ne classe qu'avec ce qui se trouve déjà en base : les préparations que le rangement
+ * automatique implique — lire les images, écouter les clips — sont rejouées avant lui par
+ * `runAfterSyncSteps`. Sans elles, les posts arrivés à la synchronisation suivante seraient
+ * classés sur leur **texte seul**, et la méthode se dégraderait en silence d'une
+ * synchronisation à l'autre.
  */
-export async function prepareForMode(mode: 'quick' | 'deep' | null): Promise<void> {
-  if (mode !== 'deep') return
-  const { readAllImages } = await import('./read-images')
-  const { transcribeAll } = await import('./transcribe')
-  /* Les images d'abord : la transcription est de loin la plus lente, et un classement qui
-     arriverait sans elle vaut déjà mieux qu'un classement sans les images. */
-  await readAllImages()
-  await transcribeAll()
-}
-
 export function applyRememberedOrganizerRules(): Promise<AiCollectionApplyResult> {
   if (automaticApply) return automaticApply
   const idle: AiCollectionApplyResult = {

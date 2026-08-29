@@ -18,6 +18,18 @@ export type PostKind = (typeof POST_KINDS)[number]
 export const CONTENT_SOURCES = ['saved', 'liked'] as const
 export type ContentSource = (typeof CONTENT_SOURCES)[number]
 
+/**
+ * Ce que Magpie prépare tout seul après chaque synchronisation, avant de ranger.
+ *
+ * Les mêmes étapes que l'écran de préparation, moins celles qui n'ont pas de sens ici : la
+ * synchronisation, puisque c'est elle qui déclenche la suite, et le regroupement, qui est le
+ * but et non une option. L'ordre est celui de l'exécution — les vignettes donnent leur
+ * matière à la lecture d'images, les clips à la transcription — et il ne doit jamais diverger
+ * de `STEP_ORDER`.
+ */
+export const AFTER_SYNC_STEPS = ['thumbnails', 'clips', 'images', 'transcribe'] as const
+export type AfterSyncStep = (typeof AFTER_SYNC_STEPS)[number]
+
 /** Origine d'un tag — détermine son rendu et ce qu'une purge en masse efface. */
 export type TagSource = 'user' | 'rule' | 'ai'
 
@@ -158,6 +170,16 @@ export interface Settings {
   autoTagEnabled: boolean
   /** Range les nouveaux contenus après chaque synchronisation selon les choix locaux mémorisés. */
   autoOrganizeEnabled: boolean
+  /**
+   * Les préparations rejouées après chaque synchronisation, quand le rangement automatique
+   * est allumé.
+   *
+   * Remplace la lecture de `organizeMode` : celui-ci décidait en bloc — l'approfondi lisait
+   * les images *et* écoutait tous les clips, le rapide ne faisait ni l'un ni l'autre — et ce
+   * choix, fait une fois dans une modale, ne se revoyait plus jamais. Chacune se coche
+   * désormais pour elle-même, à côté du bouton qu'elle suit.
+   */
+  afterSync: AfterSyncStep[]
   /**
    * La dernière façon de ranger qui soit allée au bout.
    *

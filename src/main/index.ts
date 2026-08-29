@@ -36,14 +36,16 @@ import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
 import { repairMissingCacheFiles, repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
-import {
-  applyRememberedOrganizerRules,
-  localOrganizer,
-  prepareForMode
-} from './tagging/organize'
+import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
 import { refreshQueryCollections } from './tagging/collections'
-import type { BackgroundState, PostQuery, PreloadRequest, SyncPhase } from '@shared/types'
-import { PUBLIC_PLATFORMS } from '@shared/types'
+import type {
+  AfterSyncStep,
+  BackgroundState,
+  PostQuery,
+  PreloadRequest,
+  SyncPhase
+} from '@shared/types'
+import { AFTER_SYNC_STEPS, DEFAULT_QUERY, PUBLIC_PLATFORMS } from '@shared/types'
 import { backgroundTasks } from './tasks'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
@@ -586,6 +588,78 @@ function stopPreload(kind: 'thumbnails' | 'clips'): BackgroundState {
   return backgroundTasks.current()
 }
 
+/**
+ * Le périmètre de tout ce qui travaille tout seul : les origines réellement affichées.
+ *
+ * Sans lui, décocher « Likes » cachait les posts de la grille mais laissait Magpie continuer
+ * à leur descendre vignettes et clips, à les lire et à les transcrire — des heures et des
+ * gigaoctets pour du contenu que plus personne ne voit. Les compteurs annonçaient d'ailleurs
+ * ces posts-là, si bien que « 8 200 vidéos à télécharger » ne correspondait à rien de
+ * visible dans une bibliothèque de deux mille.
+ */
+function enabledSourcesQuery(): PostQuery {
+  return { ...DEFAULT_QUERY, sources: [...readSettings().contentSources] }
+}
+
+/**
+ * Attend qu'un préchargement quitte la file.
+ *
+ * La file média n'a pas d'événement de fin — elle tourne tant qu'il reste quelque chose —
+ * donc on regarde le registre plutôt que d'inventer un rappel. Une seconde de granularité
+ * pour un travail qui se compte en minutes.
+ *
+ * Suspendu, on rend la main : cache plein ou pause de l'utilisateur, la tâche reste dans le
+ * registre sans jamais avancer, et l'attendre là serait attendre pour toujours.
+ */
+function awaitPreload(kind: 'thumbnails' | 'clips'): Promise<void> {
+  const id = `preload:${kind}`
+  if (!preloads.has(id)) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (preloads.has(id) && !backgroundTasks.isPaused()) return
+      clearInterval(timer)
+      resolve()
+    }, 1000)
+    timer.unref?.()
+  })
+}
+
+/**
+ * Les préparations demandées, dans l'ordre, avant que le rangement ne parte.
+ *
+ * L'ordre n'est pas cosmétique : la lecture d'images tire trois vues d'un clip quand il est
+ * là et se contente de la couverture sinon, et la transcription n'a rien à écouter tant que
+ * le son n'est pas descendu. Les lancer ensemble ferait le même travail en moins bien.
+ */
+async function runAfterSyncSteps(steps: AfterSyncStep[]): Promise<void> {
+  for (const step of AFTER_SYNC_STEPS) {
+    if (!steps.includes(step)) continue
+    /* Une synchronisation repartie change la matière sous nos pieds : la préparation
+       reprendra derrière elle, avec le nouveau contenu compris. */
+    if (syncEngine.isRunning()) return
+    /* Suspendu veut dire suspendu. La transcription, elle, attend la reprise dans sa propre
+       boucle : lancée ici, elle retiendrait le rangement pour un temps indéfini. */
+    if (backgroundTasks.isPaused()) return
+    /* Une étape qui échoue n'annule pas les suivantes, ni le rangement : celui-ci reste
+       possible avec ce qu'on a. Une transcription en panne empêchait sinon les nouveaux
+       posts de rejoindre leurs collections, ce qui est le contraire du service rendu. */
+    try {
+      if (step === 'thumbnails' || step === 'clips') {
+        startPreload({ what: step, query: enabledSourcesQuery() })
+        await awaitPreload(step)
+      } else if (step === 'images') {
+        const { readAllImages } = await import('./tagging/read-images')
+        await readAllImages()
+      } else {
+        const { transcribeAll } = await import('./tagging/transcribe')
+        await transcribeAll()
+      }
+    } catch (error) {
+      console.error(`[magpie] Préparation « ${step} » impossible`, error)
+    }
+  }
+}
+
 /** Suspend ou reprend tout ce qui télécharge. Le sync poursuit sa page en cours : la
  *  couper en deux laisserait un curseur incohérent, pour quelques secondes gagnées. */
 function setDownloadsPaused(next: boolean): BackgroundState {
@@ -889,10 +963,10 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
           organizerAfterSyncTimer = null
           if (syncEngine.isRunning()) return
           organizerAfterSyncPending = false
-          /* La méthode choisie se rejoue en entier : sa préparation, puis son classement. */
+          /* Les préparations cochées se rejouent, puis le classement. */
           void (async () => {
             try {
-              await prepareForMode(readSettings().organizeMode)
+              await runAfterSyncSteps(readSettings().afterSync)
               /* Puis les collections qui portent une définition la rejouent. Sans ceci, seules
                  les routes mémorisées rangeaient les nouveaux posts — et elles n'existent que
                  pour le chemin rapide. Les collections de l'approfondi restaient donc figées

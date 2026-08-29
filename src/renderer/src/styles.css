@@ -954,28 +954,52 @@ h1, h2, h3 {
   }
 }
 
-/* Sortie réelle des paramètres : le composant reste monté jusqu'à la fin, ce qui
-   évite la disparition sèche du panneau et du flou d'arrière-plan. */
-.settings-modal.is-closing {
+/* Sortie réelle d'une modale : le composant reste monté jusqu'à la fin, ce qui évite la
+   disparition sèche du panneau et du flou d'arrière-plan. Écrit une fois pour toutes les
+   modales — les paramètres étaient les seuls à en avoir une, et l'écart se voyait. */
+.modal.is-closing {
   pointer-events: none;
-  animation: settings-backdrop-out 0.2s var(--ease) both;
+  animation: modal-backdrop-out 0.2s var(--ease) both;
 }
 
-.settings-modal.is-closing .modal__panel {
-  animation: settings-panel-out 0.23s var(--ease) both;
+.modal.is-closing .modal__panel {
+  animation: modal-panel-out 0.23s var(--ease) both;
 }
 
-@keyframes settings-backdrop-out {
+@keyframes modal-backdrop-out {
   to {
     opacity: 0;
     backdrop-filter: blur(0);
   }
 }
 
-@keyframes settings-panel-out {
+@keyframes modal-panel-out {
   to {
     opacity: 0;
     transform: translateY(10px) scale(0.975);
+  }
+}
+
+/* Sortie des popovers : même geste que leur entrée, joué à l'envers et un peu plus vite. */
+.popover.is-closing {
+  pointer-events: none;
+  animation: popover-out 0.14s var(--ease) both;
+}
+
+/* Qui refuse le mouvement ne le refuse pas qu'à l'aller : les sorties se contentent alors de
+   disparaître. Le composant reste monté le temps prévu, ce qui ne se voit pas. */
+@media (prefers-reduced-motion: reduce) {
+  .modal,
+  .modal__panel,
+  .modal.is-closing,
+  .modal.is-closing .modal__panel,
+  .popover,
+  .popover.is-closing,
+  .action-menu,
+  .action-menu.is-closing,
+  .sync-progress,
+  .sync-progress.is-closing {
+    animation: none;
   }
 }
 
@@ -1777,11 +1801,32 @@ h1, h2, h3 {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   animation: popover-in 0.18s var(--ease) both;
+  /* Le menu a grandi de quatre réglages, et les libellés français passent à deux lignes :
+     sur une fenêtre courte, la dernière entrée tombait sous le bord de l'écran sans rien
+     pour l'atteindre. */
+  max-height: calc(100vh - var(--topbar) - 28px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--field-hover) transparent;
 }
 
-.action-menu > button {
+/* Refermeture réelle : le menu s'ouvrait en fondu et disparaissait d'un coup, ce qui se
+   remarque plus que pas d'animation du tout. Le composant reste monté le temps de sortir. */
+.action-menu.is-closing {
+  pointer-events: none;
+  animation: popover-out 0.14s var(--ease) both;
+}
+
+@keyframes popover-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+.action-menu button {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   align-items: start;
   gap: 10px;
   width: 100%;
@@ -1791,44 +1836,110 @@ h1, h2, h3 {
   border-radius: var(--radius-md);
   color: var(--text);
   text-align: left;
-  transition: background-color var(--fast) var(--ease);
+  transition: background-color var(--fast) var(--ease), opacity var(--base) var(--ease);
 }
 
-.action-menu > button > svg {
+.action-menu button > svg {
   margin-top: 1px;
   color: var(--faint);
+  transition: color var(--fast) var(--ease);
 }
 
-.action-menu > button:hover:not(:disabled) {
+.action-menu button:hover:not(:disabled) {
   background: var(--field-hover);
 }
 
-.action-menu > button:hover:not(:disabled) > svg {
+.action-menu button:hover:not(:disabled) > svg {
   color: var(--accent);
 }
 
-.action-menu > button:disabled {
+.action-menu button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.action-menu > button span {
+.action-menu button span {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.action-menu > button strong {
+.action-menu button strong {
   font-size: 12.5px;
   font-weight: 600;
 }
 
-.action-menu > button em {
+.action-menu button em {
   color: var(--faint);
   font-size: 11px;
   font-style: normal;
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
+}
+
+/* La coche d'un réglage, pas l'icône d'une action.
+   Éteinte, une case vide plutôt qu'une coche pâle : une coche à seize pour cent se lit encore
+   comme une coche, et cinq réglages dont on ne sait pas lesquels sont allumés ne valent pas
+   mieux que pas de réglage du tout. La case garde la place de la coche, sinon les libellés
+   sauteraient d'un cran à chaque clic. */
+.action-menu__tick {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.action-menu__tick::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border: 1.5px solid var(--faint);
+  border-radius: 4px;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity var(--fast) var(--ease), transform var(--base) var(--spring);
+}
+
+.action-menu__tick[data-on='no']::before {
+  opacity: 0.7;
+  transform: scale(1);
+}
+
+.action-menu__tick svg {
+  transition: opacity var(--fast) var(--ease), transform var(--base) var(--spring);
+}
+
+.action-menu__tick[data-on='no'] svg {
+  opacity: 0;
+  transform: scale(0.6);
+}
+
+/* Ce que « ranger tout seul » prépare avant de ranger : en retrait, et éteint avec lui. */
+.action-menu__nested {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 2px 17px;
+  padding-left: 9px;
+  border-left: 1.5px solid var(--field-hover);
+}
+
+.action-menu__nested button {
+  padding: 6px 10px;
+}
+
+.action-menu__nested strong {
+  font-weight: 500;
+}
+
+.action-menu__catchup {
+  color: var(--muted);
+}
+
+.action-menu__catchup:not(:disabled) > svg {
+  color: var(--accent);
 }
 
 /* Adossé au panneau de progression : plus une bulle flottante, mais la suite du même bloc. */
@@ -4341,6 +4452,11 @@ html.window-is-moving .app *::after {
     opacity: 0;
     transform: translateY(-5px) scale(0.97);
   }
+}
+
+.sync-progress.is-closing {
+  pointer-events: none;
+  animation: popover-out 0.14s var(--ease) both;
 }
 
 .sync-progress__row {

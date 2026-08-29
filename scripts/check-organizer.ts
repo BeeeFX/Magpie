@@ -8,6 +8,7 @@ import {
   resolveLocalThumbnailPath,
   withoutRemovedPosts
 } from '../src/main/tagging/organize'
+import { propagateByImage } from '../src/main/tagging/propagate'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Échec : ${message}`)
@@ -220,11 +221,78 @@ const heartbeat = setInterval(() => {
 await buildLocalCollectionPlan(large, new Map(), 'fr', () =>
   new Promise<void>((resolve) => setImmediate(resolve))
 )
+longestBlock = Math.max(longestBlock, performance.now() - lastTick)
 clearInterval(heartbeat)
 assert(
   longestBlock < 250,
   `le regroupement rend la main au fil de l'eau (plus long blocage : ${Math.round(longestBlock)} ms)`
 )
+
+console.log('\npropagation par voisinage d’image')
+{
+  /*
+   * Le morceau le plus cher de toute l'analyse, et longtemps le plus silencieux : chaque post
+   * sans catégorie se compare à **tous** les posts classés, sur 768 dimensions. Sur la
+   * bibliothèque de référence — 2 900 orphelins contre 6 700 classés — cela fait quinze
+   * milliards de multiplications, mesurées à onze secondes, pendant lesquelles la fenêtre
+   * passait pour morte : Windows la déclare « ne répond pas » au bout de cinq.
+   *
+   * Le calcul reste entier, il rend seulement la main. Le contrôle porte donc sur le plus long
+   * créneau sans respiration, pas sur la durée totale — et sur un échantillon réduit, qui
+   * suffit : c'est la taille de la tranche qu'on mesure, et elle ne dépend pas du nombre de
+   * posts.
+   */
+  const DIMS = 768
+  const vector = (seed: number): Buffer => {
+    const raw = new Float32Array(DIMS)
+    for (let k = 0; k < DIMS; k += 1) raw[k] = Math.sin(seed * 0.37 + k * 0.11)
+    return Buffer.from(raw.buffer.slice(0))
+  }
+  /* Assez pour qu'une boucle non découpée dépasse franchement le plafond : à cette taille elle
+     bloquait un peu plus d'une seconde, quatre fois le seuil. Plus petit, le contrôle passerait
+     de justesse dans les deux cas et n'attesterait de rien. */
+  const ids = Array.from({ length: 3_000 }, (_, index) => `img-${index}`)
+  const images = new Map(
+    ids.map((id, index) => [
+      id,
+      { postId: id, hash: 'h', structure: vector(index), meaning: vector(index), frames: 1 }
+    ])
+  )
+  /* Trois quarts déjà classés, comme sur une vraie bibliothèque : ce sont eux que chaque
+     orphelin doit parcourir, donc c'est leur nombre qui fait le coût. */
+  const suggestions = [0, 1, 2].map((group) => ({
+    id: `g${group}`,
+    name: `Groupe ${group}`,
+    ruleKeys: [`r${group}`],
+    postIds: ids.filter((_, index) => index % 4 !== 3 && index % 3 === group),
+    description: ''
+  }))
+  let longest = 0
+  let tick = performance.now()
+  const beat = setInterval(() => {
+    longest = Math.max(longest, performance.now() - tick)
+    tick = performance.now()
+  }, 10)
+  const propagated = await propagateByImage(
+    { suggestions, routes: [], analysedVideos: ids.length, unassignedVideos: 0 },
+    images,
+    ids,
+    () => new Promise<void>((resolve) => setImmediate(resolve))
+  )
+  /* Le dernier créneau se mesure ici, et c'est ce qui rend le contrôle honnête : un battement
+     annulé juste après un long blocage ne se déclenche jamais, si bien qu'une boucle qui ne
+     rendait *jamais* la main rapportait « 0 ms ». */
+  longest = Math.max(longest, performance.now() - tick)
+  clearInterval(beat)
+  assert(
+    propagated.plan.suggestions.length === suggestions.length,
+    'la propagation rend le plan qu’on lui a donné, complété'
+  )
+  assert(
+    longest < 250,
+    `la propagation rend la main au fil de l'eau (plus long blocage : ${Math.round(longest)} ms)`
+  )
+}
 
 console.log('\ngroupe tracé à la main')
 {

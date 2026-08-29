@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useClosing } from '../useClosing'
 import { useModalFocus } from '../useModalFocus'
 import type { ExportSummary } from '@shared/types'
 import { magpie } from '../bridge'
@@ -25,6 +26,7 @@ export function ExportPanel(): React.JSX.Element | null {
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { mounted, closing } = useClosing(open, 230)
 
   useEffect(() => {
     if (!open) return
@@ -38,7 +40,7 @@ export function ExportPanel(): React.JSX.Element | null {
     return () => document.removeEventListener('keydown', onKey)
   }, [open, setOpen])
 
-  if (!open) return null
+  if (!mounted) return null
 
   const run = async (): Promise<void> => {
     setBusy(true)
@@ -56,7 +58,7 @@ export function ExportPanel(): React.JSX.Element | null {
   useModalFocus(true, panelRef)
 
   return (
-    <div className="modal" onMouseDown={() => setOpen(false)}>
+    <div className={`modal ${closing ? 'is-closing' : ''}`} onMouseDown={() => setOpen(false)}>
       <div
         ref={panelRef}
         className="modal__panel export-panel"

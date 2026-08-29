@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, nativeTheme } from 'electron'
-import type { Settings } from '@shared/types'
-import { ACCENTS } from '@shared/types'
+import type { AfterSyncStep, Settings } from '@shared/types'
+import { ACCENTS, AFTER_SYNC_STEPS } from '@shared/types'
 
 const DEFAULTS: Settings = {
   theme: 'system',
@@ -23,6 +23,9 @@ const DEFAULTS: Settings = {
   aiEndpoint: '',
   autoTagEnabled: false,
   autoOrganizeEnabled: false,
+  /* Les vignettes seules par défaut : c'est la seule préparation qui ne coûte ni des heures
+     ni des gigaoctets, et sans elle le mur reste gris. Les trois autres se cochent. */
+  afterSync: ['thumbnails'],
   organizeMode: null
 }
 
@@ -105,9 +108,28 @@ function sanitize(raw: unknown): Settings {
     // disable a value left behind by an older Magpie installation as well.
     autoTagEnabled: false,
     autoOrganizeEnabled: value.autoOrganizeEnabled === true,
+    afterSync: afterSyncSteps(value),
     organizeMode:
       value.organizeMode === 'quick' || value.organizeMode === 'deep' ? value.organizeMode : null
   }
+}
+
+/**
+ * Les préparations à rejouer après chaque synchronisation.
+ *
+ * Une installation qui vient d'une version antérieure n'a pas ce réglage : on le déduit du
+ * mode retenu la dernière fois, qui disait déjà la même chose en moins fin. « Approfondi »
+ * lisait les images et écoutait les clips, donc tout ; « rapide » ne faisait ni l'un ni
+ * l'autre. Reprendre ce choix évite qu'une mise à jour éteigne en silence un travail que
+ * l'utilisateur avait demandé — ou l'allume alors qu'il ne l'avait pas demandé.
+ */
+function afterSyncSteps(value: Partial<Settings>): AfterSyncStep[] {
+  if (Array.isArray(value.afterSync)) {
+    return AFTER_SYNC_STEPS.filter((step) => value.afterSync?.includes(step))
+  }
+  if (value.organizeMode === 'deep') return [...AFTER_SYNC_STEPS]
+  if (value.organizeMode === 'quick') return ['thumbnails']
+  return [...DEFAULTS.afterSync]
 }
 
 export function readSettings(): Settings {

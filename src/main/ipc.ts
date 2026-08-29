@@ -222,8 +222,12 @@ export function registerIpc({
     if (kind !== 'thumbnails' && kind !== 'clips') throw new Error('Tâche inconnue')
     return stopPreload(kind)
   })
+  /* Sans périmètre, celui de la bibliothèque telle qu'elle s'affiche — et non la table
+     entière. `postQueryValue` rend les origines actives : décocher « Likes » cachait
+     jusqu'ici les posts de la grille tout en continuant à les compter et à les descendre,
+     si bien que le menu annonçait des milliers de vidéos introuvables à l'écran. */
   ipcMain.handle('tasks:pending', (_event, query?: PostQuery | null) =>
-    pendingCounts(query ? postQueryValue(query) : null)
+    pendingCounts(postQueryValue(query))
   )
   ipcMain.handle('tasks:preload', (_event, request: PreloadRequest) => {
     if (request?.what !== 'thumbnails' && request?.what !== 'clips') {
@@ -231,7 +235,7 @@ export function registerIpc({
     }
     return startPreload({
       what: request.what,
-      query: request.query ? postQueryValue(request.query) : null,
+      query: postQueryValue(request.query),
       scopeLabel:
         typeof request.scopeLabel === 'string' ? request.scopeLabel.slice(0, 80) : null
     })

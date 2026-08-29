@@ -4,6 +4,7 @@ import { createJSONStorage, persist, type StateStorage } from 'zustand/middlewar
 import type {
   AccentName,
   AccountInfo,
+  AfterSyncStep,
   AiProvider,
   AiTagProgress,
   ContentSource,
@@ -22,7 +23,7 @@ import type {
   VideoQuality
 } from '@shared/types'
 import type { Language, LanguageChoice } from '@shared/types'
-import { DEFAULT_QUERY, idleSyncState } from '@shared/types'
+import { AFTER_SYNC_STEPS, DEFAULT_QUERY, idleSyncState } from '@shared/types'
 import { magpie } from './bridge'
 import { setFormatLanguage } from './format'
 import { resolveLanguage, translate, type TranslationKey } from './i18n'
@@ -187,6 +188,7 @@ interface State {
   aiEndpoint: string
   autoTagEnabled: boolean
   autoOrganizeEnabled: boolean
+  afterSync: AfterSyncStep[]
   organizeMode: 'quick' | 'deep' | null
   aiProgress: AiTagProgress | null
   onboardingDone: boolean
@@ -236,6 +238,7 @@ interface State {
   setSyncOnLaunch: (enabled: boolean) => Promise<void>
   setSyncSchedule: (schedule: SyncSchedule) => Promise<void>
   setAutoOrganizeEnabled: (enabled: boolean) => Promise<void>
+  setAfterSync: (steps: AfterSyncStep[]) => Promise<void>
   setOrganizeMode: (mode: 'quick' | 'deep') => Promise<void>
   setAiSettings: (patch: Partial<Pick<State, 'aiProvider' | 'aiModel' | 'aiEndpoint' | 'autoTagEnabled'>>) => Promise<void>
   setAiProgress: (progress: AiTagProgress | null) => void
@@ -325,6 +328,7 @@ export const useStore = create<State>()(
       aiEndpoint: '',
       autoTagEnabled: false,
       autoOrganizeEnabled: false,
+      afterSync: ['thumbnails'],
       organizeMode: null,
       aiProgress: null,
       // Vrai par défaut, corrigé dès la lecture des réglages : mieux vaut afficher
@@ -566,6 +570,7 @@ export const useStore = create<State>()(
           aiEndpoint: settings.aiEndpoint,
           autoTagEnabled: settings.autoTagEnabled,
           autoOrganizeEnabled: settings.autoOrganizeEnabled,
+          afterSync: settings.afterSync,
           organizeMode: settings.organizeMode,
           onboardingDone: settings.onboardingDone,
           settingsLoading: false
@@ -658,6 +663,15 @@ export const useStore = create<State>()(
       setAutoOrganizeEnabled: async (autoOrganizeEnabled) => {
         set({ autoOrganizeEnabled })
         await magpie.setSettings({ autoOrganizeEnabled })
+      },
+
+      /* L'ordre canonique, et non celui des clics : le réglage se relit ailleurs comme une
+         liste d'étapes à suivre, et une liste qui change d'ordre selon l'ordre de cochage
+         se lirait mal partout où on l'affiche. */
+      setAfterSync: async (steps) => {
+        const afterSync = AFTER_SYNC_STEPS.filter((step) => steps.includes(step))
+        set({ afterSync })
+        await magpie.setSettings({ afterSync })
       },
 
       /* Écrit seulement quand un rangement est allé au bout. Le noter au lancement dirait que

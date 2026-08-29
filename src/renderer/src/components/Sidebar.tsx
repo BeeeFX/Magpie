@@ -5,6 +5,7 @@ import { magpie } from '../bridge'
 import { PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
+import { useClosing } from '../useClosing'
 import { CollectionsManager } from './CollectionsManager'
 import { LabelPicker } from './LabelPicker'
 import { Logo } from './Logo'
@@ -56,6 +57,7 @@ export function Sidebar(): React.JSX.Element {
    */
   const [colouring, setColouring] = useState<number | null>(null)
   const [managing, setManaging] = useState(false)
+  const { mounted: managerMounted, closing: managerClosing } = useClosing(managing, 230)
 
   /* Accroché aux statistiques, pas au tableau des posts.
 
@@ -456,11 +458,12 @@ export function Sidebar(): React.JSX.Element {
         </button>
       </div>
 
-      {managing ? (
+      {managerMounted ? (
         <CollectionsManager
           collections={collections}
           onClose={() => setManaging(false)}
           onChanged={() => void magpie.listCollections().then(setCollections)}
+          closing={managerClosing}
         />
       ) : null}
     </aside>

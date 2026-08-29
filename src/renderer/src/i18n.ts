@@ -205,7 +205,8 @@ const fr = {
   'settings.localOrganizerNote':
     'Le premier passage peut prendre du temps. Les analyses suivantes ne traitent que les nouvelles vignettes.',
   'settings.autoOrganize': 'Organiser après chaque synchronisation',
-  'settings.autoOrganizeHint': 'Utilise les choix mémorisés lors de votre dernier plan validé.',
+  'settings.autoOrganizeHint':
+    'Utilise les choix mémorisés lors de votre dernier plan validé. Le détail de ce qui est préparé avant se coche dans le menu du bouton Synchroniser.',
   'steps.lead':
     'Cochez ce que Magpie doit préparer avant de regrouper. Tout est facultatif sauf le regroupement lui-même, et chaque étape se voit avancer.',
   'steps.sync': 'Chercher les nouveautés',
@@ -410,7 +411,10 @@ const fr = {
   'actions.more': 'Autres actions',
   'actions.organize': 'Organiser en collections',
   'actions.autoOrganize': 'Ranger après chaque synchronisation',
-  'actions.autoOrganizeHint': 'Le nouveau contenu rejoint tout seul la collection qui lui revient.',
+  'actions.autoOrganizeHint':
+    'Le nouveau contenu rejoint tout seul la collection qui lui revient, après les préparations cochées ci-dessous.',
+  'actions.catchUp': 'Rattraper maintenant',
+  'actions.catchUpHint': 'Fait tout de suite ce qui est coché, sans attendre la prochaine synchronisation.',
   'actions.organizeHint': 'Regroupe la bibliothèque par thème, en local.',
   'actions.export': 'Exporter pour mon assistant',
   'actions.exportHint': 'Un dossier lisible par Claude, ChatGPT ou autre.',
@@ -443,10 +447,6 @@ const fr = {
   'actions.fetchNewHint': 'Récupère ce que vous avez enregistré ou aimé depuis la dernière fois.',
   'actions.transcribe': 'Transcrire les vidéos',
   'actions.transcribeHint': '{count} vidéos sans transcription',
-  'actions.transcribeAskReady':
-    'Transcrire {count} vidéos ?\n\nTes vidéos sont déjà sur le disque : rien à télécharger. Le calcul tourne en fond, en local, et rien ne quitte ta machine. Tu peux le suspendre à tout moment.',
-  'actions.transcribeAskDownload':
-    'Transcrire {count} vidéos ?\n\nTes vidéos ne sont pas encore sur le disque : elles seront téléchargées pour en extraire l’audio, soit environ {size}. Rien n’est conservé — seul le son transite, puis il est jeté. Ta limite de cache n’est pas touchée.\n\nLe calcul tourne en fond, en local, et se suspend à tout moment.',
   'downloads.title': 'Téléchargements',
   'downloads.thumbsName': 'Images des tuiles',
   'downloads.clipsName': 'Vidéos en {quality}',
@@ -789,7 +789,8 @@ const en: Record<TranslationKey, string> = {
   'settings.localOrganizerNote':
     'The first pass may take a while. Later analyses only process new thumbnails.',
   'settings.autoOrganize': 'Organise after every sync',
-  'settings.autoOrganizeHint': 'Uses the choices remembered from your last approved plan.',
+  'settings.autoOrganizeHint':
+    'Uses the choices remembered from your last approved plan. What gets prepared beforehand is ticked in the Sync button’s menu.',
   'steps.lead':
     'Tick what Magpie should prepare before grouping. Everything is optional except the grouping itself, and each step shows its progress.',
   'steps.sync': 'Check for new items',
@@ -993,7 +994,10 @@ const en: Record<TranslationKey, string> = {
   'actions.more': 'More actions',
   'actions.organize': 'Organise into collections',
   'actions.autoOrganize': 'Organise after every sync',
-  'actions.autoOrganizeHint': 'New content joins the collection it belongs to on its own.',
+  'actions.autoOrganizeHint':
+    'New content joins the collection it belongs to on its own, after the preparations ticked below.',
+  'actions.catchUp': 'Catch up now',
+  'actions.catchUpHint': 'Runs what is ticked right away, without waiting for the next sync.',
   'actions.organizeHint': 'Groups the library by theme, locally.',
   'actions.export': 'Export for my assistant',
   'actions.exportHint': 'A folder Claude, ChatGPT or others can read.',
@@ -1026,10 +1030,6 @@ const en: Record<TranslationKey, string> = {
   'actions.fetchNewHint': 'Fetches what you saved or liked since last time.',
   'actions.transcribe': 'Transcribe videos',
   'actions.transcribeHint': '{count} videos without a transcript',
-  'actions.transcribeAskReady':
-    'Transcribe {count} videos?\n\nYour videos are already on disk: nothing to download. The work runs in the background, locally, and nothing leaves your machine. You can pause it at any time.',
-  'actions.transcribeAskDownload':
-    'Transcribe {count} videos?\n\nYour videos are not on disk yet: they will be downloaded to extract the audio, about {size}. Nothing is kept — only the sound passes through, then it is discarded. Your cache limit is untouched.\n\nThe work runs in the background, locally, and pauses at any time.',
   'downloads.title': 'Downloads',
   'downloads.thumbsName': 'Tile images',
   'downloads.clipsName': 'Videos in {quality}',

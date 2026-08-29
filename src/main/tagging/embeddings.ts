@@ -44,7 +44,6 @@ const PREFIX = 'query: '
 /** Au-delà, on n'ajoute plus de sens : on ajoute du hors-sujet et du temps de calcul. */
 const MAX_CHARS = 512
 const BATCH = 32
-const BREATHE_EVERY = 8
 
 export interface EmbeddingProgress {
   done: number
@@ -181,7 +180,13 @@ export async function embedItems(
     if (fresh.length >= 256) {
       savePostEmbeddings(fresh.splice(0, fresh.length))
     }
-    if ((start / BATCH) % BREATHE_EVERY === BREATHE_EVERY - 1) await breathe()
+    /* Une respiration par lot. Il y en avait une sur huit : `onnxruntime-node` exécute son
+       `run` de façon **synchrone** — il ne fait que le repousser d'un `setImmediate` — donc
+       un lot occupe le processus principal pour de bon. Mesuré à 60 ms les trente-deux
+       textes, soit un demi-tour de boucle bloqué toutes les huit ; c'est court, mais le
+       `setImmediate` qu'on paie en échange se compte en microsecondes. Il n'y avait donc
+       rien à gagner à les espacer, et une fenêtre plus vive à y gagner. */
+    await breathe()
   }
   savePostEmbeddings(fresh)
   return result

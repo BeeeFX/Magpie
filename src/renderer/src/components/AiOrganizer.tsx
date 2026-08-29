@@ -6,7 +6,9 @@ import type {
   OrganizerProgress,
   OrganizerUndoResult
 } from '@shared/types'
+import { AFTER_SYNC_STEPS } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
+import { useClosing } from '../useClosing'
 import { formatDateTime } from '../format'
 import { useStore, useT } from '../store'
 import { IconClock, IconClose, IconCollections } from './Icons'
@@ -56,6 +58,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
      est un corps étranger au milieu d'un écran soigné. */
   const [leaving, setLeaving] = useState(false)
   const setStepChoices = useStore((state) => state.setStepChoices)
+  const setAfterSync = useStore((state) => state.setAfterSync)
   const setOrganizeMode = useStore((state) => state.setOrganizeMode)
   const setGridMode = useStore((state) => state.setGridMode)
   const setStepsRunning = useStore((state) => state.setStepsRunning)
@@ -83,6 +86,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [undoing, setUndoing] = useState(false)
   const [undone, setUndone] = useState<OrganizerUndoResult | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  const { mounted, closing } = useClosing(open, 230)
 
   useEffect(() => {
     if (!open) return
@@ -127,7 +131,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   /* Les noms suivent les renommages en cours : l'étiquette sur la carte doit dire ce que
      l'utilisateur vient de taper, pas ce que l'analyse avait proposé. */
 
-  if (!open) return null
+  if (!mounted) return null
 
   /**
    * L'analyse finie, on constate. On ne relit plus un plan.
@@ -171,6 +175,14 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
            qu'on vient de garder, elles, sont des listes et ne comptent pas comme telles. */
         await magpie.seedCollectionsFromTopics()
       }
+      /* Ce qu'on vient de préparer devient ce qui se refera tout seul.
+         Sans ce report, une préparation approfondie ne tenait qu'une fois : les posts
+         rapportés à la synchronisation suivante étaient rangés sur leur texte seul, sans que
+         rien ne le dise, et la méthode se dégradait en silence. La question a déjà été posée
+         sur l'écran d'à côté — la reposer dans un menu serait la poser deux fois. */
+      await setAfterSync(
+        AFTER_SYNC_STEPS.filter((step) => useStore.getState().stepChoices.includes(step))
+      )
       await loadSettings()
       await setOrganizeMode(depth)
       await refresh(false, true)
@@ -240,7 +252,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
 
 
   return (
-    <div className="modal ai-organizer" onMouseDown={onClose}>
+    <div className={`modal ai-organizer ${closing ? 'is-closing' : ''}`} onMouseDown={onClose}>
       <div
         ref={panelRef}
         className="modal__panel ai-organizer__panel"

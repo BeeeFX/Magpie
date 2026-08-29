@@ -1,14 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
-import { PUBLIC_PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
-import { magpie } from '../bridge'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AfterSyncStep } from '@shared/types'
+import { AFTER_SYNC_STEPS, PUBLIC_PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
+import { magpie, magpieEvents } from '../bridge'
 import { CLIP_BYTES, THUMBNAIL_BYTES } from '../estimates'
 import { formatBytes, PLATFORM_LABEL } from '../format'
+import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
+import { useClosing } from '../useClosing'
 import { IconCheck,
   IconChevronRight,
   IconClock,
+  IconEye,
   IconImage,
   IconMic,
+  IconPlay,
   IconPlus,
   IconSend,
   IconSync,
@@ -16,12 +21,47 @@ import { IconCheck,
 } from './Icons'
 import { PlatformIcon } from './PlatformIcon'
 
+/** Ce qu'il reste à préparer, par étape. Zéro veut dire « à jour », jamais « rien à faire ». */
+interface Backlog {
+  thumbnails: number
+  clips: number
+  images: number
+  transcripts: number
+}
+
+/**
+ * Ce que chaque préparation automatique montre d'elle-même.
+ *
+ * Icône et libellé sont ceux de l'écran de préparation : les deux endroits parlent de la même
+ * étape, ils doivent la nommer pareil.
+ */
+const AFTER_SYNC_ROWS: {
+  id: AfterSyncStep
+  icon: (props: { size?: number }) => React.JSX.Element
+  label: TranslationKey
+  /** Ce que l'étape a besoin qu'on ait descendu avant elle. */
+  needs?: AfterSyncStep
+}[] = [
+  { id: 'thumbnails', icon: IconImage, label: 'actions.prepareThumbs' },
+  { id: 'clips', icon: IconVideo, label: 'actions.prepareClips' },
+  { id: 'images', icon: IconEye, label: 'steps.images' },
+  /* La transcription n'a rien à écouter tant que le son n'est pas là : la cocher coche donc
+     aussi les clips, plutôt que de laisser allumée une étape qui ne ferait rien. */
+  { id: 'transcribe', icon: IconMic, label: 'actions.transcribe', needs: 'clips' }
+]
+
 /**
  * Tout ce qui agit sur la bibliothèque, au même endroit.
  *
- * Chaque entrée dit ce qu'elle rapporte plutôt que sa catégorie technique, et annonce ce
- * qu'il reste à faire : un bouton qui propose de préparer mille images déjà préparées ne
- * veut rien dire.
+ * Ces préparations étaient des boutons : on les lançait à la main, une par une, et le clic
+ * n'apprenait rien — la synchronisation suivante ramenait du contenu qui restait gris, muet
+ * et non lu jusqu'au prochain passage manuel. Ce sont désormais des intentions : ce qui est
+ * coché se refait tout seul derrière chaque synchronisation, et « Rattraper maintenant »
+ * reste là pour qui ne veut pas attendre la suivante.
+ *
+ * Elles s'attachent au rangement automatique et s'éteignent avec lui : préparer sans ranger
+ * n'a pas d'usage, c'est le classement qui donne leur raison d'être aux images lues et aux
+ * clips écoutés.
  */
 function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
   const t = useT()
@@ -30,15 +70,35 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const autoOrganizeEnabled = useStore((s) => s.autoOrganizeEnabled)
   const setAutoOrganizeEnabled = useStore((s) => s.setAutoOrganizeEnabled)
+  const afterSync = useStore((s) => s.afterSync)
+  const setAfterSync = useStore((s) => s.setAfterSync)
   const setExportOpen = useStore((s) => s.setExportOpen)
   const cacheQuality = useStore((s) => s.videoCacheQuality)
-  const [counts, setCounts] = useState<{ thumbnails: number; clips: number } | null>(null)
-  const [transcripts, setTranscripts] = useState<{ pending: number; running: boolean } | null>(null)
+  const [backlog, setBacklog] = useState<Backlog | null>(null)
+
+  /* Relu à chaque changement du registre de tâches : un rattrapage qui tourne doit voir ses
+     compteurs descendre sous les yeux, sinon rien ne dit qu'il travaille. */
+  const readBacklog = useCallback((): void => {
+    void Promise.all([
+      magpie.pendingCounts(null),
+      magpie.transcriptState(),
+      magpie.imageReadingState()
+    ])
+      .then(([pending, transcripts, images]) =>
+        setBacklog({
+          thumbnails: pending.thumbnails,
+          clips: pending.clips,
+          images: images.pending,
+          transcripts: transcripts.pending
+        })
+      )
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
-    void magpie.pendingCounts(null).then(setCounts).catch(() => {})
-    void magpie.transcriptState().then(setTranscripts).catch(() => {})
-  }, [])
+    readBacklog()
+    return magpieEvents.onBackgroundState(readBacklog)
+  }, [readBacklog])
 
   const missing = accounts.filter((a) => !a.connected)
   const connected = accounts.filter((a) => a.connected)
@@ -46,6 +106,54 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
     action()
     onDone()
   }
+
+  const remaining = (id: AfterSyncStep): number => {
+    if (!backlog) return 0
+    if (id === 'thumbnails') return backlog.thumbnails
+    if (id === 'clips') return backlog.clips
+    if (id === 'images') return backlog.images
+    return backlog.transcripts
+  }
+
+  /** Ce qu'il reste à faire, dit dans l'unité qui compte pour l'étape. */
+  const hint = (id: AfterSyncStep): string => {
+    const count = remaining(id)
+    if (count === 0) return t('downloads.allDone')
+    if (id === 'thumbnails') {
+      return t('downloads.amount', { count, size: formatBytes(count * THUMBNAIL_BYTES) })
+    }
+    if (id === 'clips') {
+      return t('downloads.amount', { count, size: formatBytes(count * CLIP_BYTES[cacheQuality]) })
+    }
+    if (id === 'images') return t('steps.imagesCost', { count })
+    return t('actions.transcribeHint', { count })
+  }
+
+  const toggleStep = (id: AfterSyncStep): void => {
+    const row = AFTER_SYNC_ROWS.find((entry) => entry.id === id)
+    const next = new Set(afterSync)
+    if (next.has(id)) next.delete(id)
+    else {
+      next.add(id)
+      if (row?.needs) next.add(row.needs)
+    }
+    void setAfterSync([...next])
+  }
+
+  /* Le rattrapage lance ce qui est coché puis rend la main : chaque étape s'annonce dans
+     l'indicateur de la barre d'outils, qui sait déjà dire où elle en est et l'y suspendre. */
+  const catchUp = (): void => {
+    for (const step of AFTER_SYNC_STEPS) {
+      if (!afterSync.includes(step) || remaining(step) === 0) continue
+      if (step === 'thumbnails' || step === 'clips') void magpie.startPreload({ what: step })
+      else if (step === 'images') void magpie.startImageReading()
+      else void magpie.startTranscription()
+    }
+  }
+
+  const late = AFTER_SYNC_STEPS.filter(
+    (step) => afterSync.includes(step) && remaining(step) > 0
+  ).length
 
   return (
     <>
@@ -60,7 +168,7 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
         aria-checked={autoOrganizeEnabled}
         onClick={() => void setAutoOrganizeEnabled(!autoOrganizeEnabled)}
       >
-        <span style={{ opacity: autoOrganizeEnabled ? 1 : 0.18, display: 'inline-flex' }}>
+        <span className="action-menu__tick" data-on={autoOrganizeEnabled ? 'yes' : 'no'}>
           <IconCheck size={15} />
         </span>
         <span>
@@ -69,76 +177,50 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
         </span>
       </button>
 
-      <div className="action-menu__sep" />
-
-      <button
-        type="button"
-        role="menuitem"
-        disabled={(counts?.thumbnails ?? 0) === 0}
-        onClick={run(() => void magpie.startPreload({ what: 'thumbnails' }))}
-      >
-        <IconImage size={15} />
-        <span>
-          <strong>{t('actions.prepareThumbs')}</strong>
-          <em>
-            {(counts?.thumbnails ?? 0) === 0
-              ? t('downloads.allDone')
-              : t('downloads.amount', {
-                  count: counts?.thumbnails ?? 0,
-                  size: formatBytes((counts?.thumbnails ?? 0) * THUMBNAIL_BYTES)
-                })}
-          </em>
-        </span>
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        disabled={(counts?.clips ?? 0) === 0}
-        onClick={run(() => void magpie.startPreload({ what: 'clips' }))}
-      >
-        <IconVideo size={15} />
-        <span>
-          <strong>{t('actions.prepareClips', { quality: t(`quality.${cacheQuality}`) })}</strong>
-          <em>
-            {(counts?.clips ?? 0) === 0
-              ? t('downloads.allDone')
-              : t('downloads.amount', {
-                  count: counts?.clips ?? 0,
-                  size: formatBytes((counts?.clips ?? 0) * CLIP_BYTES[cacheQuality])
-                })}
-          </em>
-        </span>
-      </button>
-
-      {/* Dire l'état réel des clips, pas une catégorie. Une vignette est une image fixe et ne
-          contient aucun son : c'est la présence des vidéos qui décide s'il y a 14 Go à
-          descendre ou rien du tout. La confusion s'est produite en conditions réelles. */}
-      <button
-        type="button"
-        role="menuitem"
-        disabled={(transcripts?.pending ?? 0) === 0}
-        onClick={run(() => {
-          const clipsMissing = counts?.clips ?? 0
-          const message =
-            clipsMissing > 0
-              ? t('actions.transcribeAskDownload', {
-                  count: transcripts?.pending ?? 0,
-                  size: formatBytes(clipsMissing * CLIP_BYTES[cacheQuality])
-                })
-              : t('actions.transcribeAskReady', { count: transcripts?.pending ?? 0 })
-          if (window.confirm(message)) void magpie.startTranscription()
+      {/* Le détail de ce que « ranger tout seul » fait avant de ranger. Éteint avec lui plutôt
+          que masqué : un menu dont la hauteur change sous le curseur déplace ce qu'on visait. */}
+      <div className="action-menu__nested">
+        {AFTER_SYNC_ROWS.map((row) => {
+          const Icon = row.icon
+          const on = afterSync.includes(row.id)
+          return (
+            <button
+              key={row.id}
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={on}
+              disabled={!autoOrganizeEnabled}
+              onClick={() => toggleStep(row.id)}
+            >
+              <span className="action-menu__tick" data-on={on ? 'yes' : 'no'}>
+                <IconCheck size={13} />
+              </span>
+              <span>
+                <strong>
+                  {t(row.label, { quality: t(`quality.${cacheQuality}` as TranslationKey) })}
+                </strong>
+                <em>{hint(row.id)}</em>
+              </span>
+              <Icon size={14} />
+            </button>
+          )
         })}
-      >
-        <IconMic size={15} />
-        <span>
-          <strong>{t('actions.transcribe')}</strong>
-          <em>
-            {(transcripts?.pending ?? 0) === 0
-              ? t('downloads.allDone')
-              : t('actions.transcribeHint', { count: transcripts?.pending ?? 0 })}
-          </em>
-        </span>
-      </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="action-menu__catchup"
+          disabled={!autoOrganizeEnabled || late === 0}
+          onClick={run(catchUp)}
+        >
+          <IconPlay size={13} />
+          <span>
+            <strong>{t('actions.catchUp')}</strong>
+            <em>{late === 0 ? t('downloads.allDone') : t('actions.catchUpHint')}</em>
+          </span>
+        </button>
+      </div>
+
+      <div className="action-menu__sep" />
 
       <button type="button" role="menuitem" onClick={run(() => setExportOpen(true))}>
         <IconSend size={15} />
@@ -197,19 +279,25 @@ export function SyncButton(): React.JSX.Element {
   const cancelSync = useStore((s) => s.cancelSync)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const [expanded, setExpanded] = useState(false)
+  /* Le menu reste monté le temps de refermer : sans ça il disparaissait d'un coup, alors
+     qu'il s'était ouvert en fondu. Une ouverture soignée et une fermeture sèche se
+     remarquent plus qu'aucune animation du tout. */
+  const { mounted, closing } = useClosing(expanded, 150)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!sync.running) setExpanded(false)
   }, [sync.running])
 
+  const close = (): void => setExpanded(false)
+
   useEffect(() => {
     if (!expanded) return
     const closeOutside = (event: PointerEvent): void => {
-      if (!wrapRef.current?.contains(event.target as Node)) setExpanded(false)
+      if (!wrapRef.current?.contains(event.target as Node)) close()
     }
     const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setExpanded(false)
+      if (event.key === 'Escape') close()
     }
     document.addEventListener('pointerdown', closeOutside)
     document.addEventListener('keydown', closeOnEscape)
@@ -258,7 +346,7 @@ export function SyncButton(): React.JSX.Element {
             aria-expanded={expanded}
             aria-label={t(expanded ? 'sync.hideDetails' : 'sync.showDetails')}
             title={t(expanded ? 'sync.hideDetails' : 'sync.showDetails')}
-            onClick={() => setExpanded((value) => !value)}
+            onClick={() => setExpanded((open) => !open)}
           >
             <IconChevronRight
               size={14}
@@ -267,7 +355,10 @@ export function SyncButton(): React.JSX.Element {
           </button>
         </div>
 
-        {expanded ? <div className="sync-progress" aria-live="polite">
+        {mounted ? <div
+          className={`sync-progress ${closing ? 'is-closing' : ''}`}
+          aria-live="polite"
+        >
           {active.map((platform) => {
             const progress = sync.byPlatform[platform]
             const percent = Math.min(
@@ -318,7 +409,7 @@ export function SyncButton(): React.JSX.Element {
               l'ouverture de l'application, et elle bloquait donc l'accès à l'organisation
               au moment précis où l'on vient de lancer Magpie. */}
           <div className="action-menu action-menu--inline" role="menu">
-            <ActionsMenu onDone={() => setExpanded(false)} />
+            <ActionsMenu onDone={close} />
           </div>
         </div> : null}
       </div>
@@ -353,7 +444,7 @@ export function SyncButton(): React.JSX.Element {
           aria-haspopup="menu"
           aria-label={t('actions.more')}
           title={t('actions.more')}
-          onClick={() => setExpanded((value) => !value)}
+          onClick={() => setExpanded((open) => !open)}
         >
           <IconChevronRight
             size={14}
@@ -362,9 +453,9 @@ export function SyncButton(): React.JSX.Element {
         </button>
       </div>
 
-      {expanded ? (
-        <div className="action-menu" role="menu">
-          <ActionsMenu onDone={() => setExpanded(false)} />
+      {mounted ? (
+        <div className={`action-menu ${closing ? 'is-closing' : ''}`} role="menu">
+          <ActionsMenu onDone={close} />
         </div>
       ) : null}
     </div>
