@@ -37,6 +37,7 @@ import { syncEngine } from './sync/engine'
 import { repairMissingCacheFiles, repairOversizedVideos } from './sync/repair'
 import { aiTagger } from './tagging/ai'
 import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
+import { stopInference } from './tagging/inference'
 import { refreshQueryCollections } from './tagging/collections'
 import type {
   AfterSyncStep,
@@ -1029,6 +1030,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true
+  /* Le processus des modèles ne s'arrête pas tout seul : c'est un enfant d'Electron, pas une
+     tâche de la boucle. Sans ceci, il survivait à la fenêtre fermée avec ses modèles chargés. */
+  stopInference()
   if (scheduleTimer) clearInterval(scheduleTimer)
   if (organizerAfterSyncTimer) clearTimeout(organizerAfterSyncTimer)
   if (windowInteractionTimer) clearTimeout(windowInteractionTimer)

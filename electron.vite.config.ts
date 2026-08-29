@@ -16,9 +16,15 @@ export default defineConfig({
         // La projection de la carte tourne dans un fil séparé : la construction du graphe de
         // voisins d'UMAP est atomique et figeait la fenêtre près de trois secondes. C'est le
         // seul calcul du projet qu'on ne peut pas découper, d'où sa propre entrée.
+        //
+        // Les modèles, eux, vivent dans un `utilityProcess` : `onnxruntime-node` calcule de
+        // façon synchrone, donc tant qu'il tournait ici, chaque encodage retenait la fenêtre.
+        // Son point d'entrée reste dans l'archive asar — contrairement au fil de projection —
+        // pour qu'il puisse y résoudre `@huggingface/transformers` et sa parenté.
         input: {
           index: resolve('src/main/index.ts'),
-          'projection.worker': resolve('src/main/tagging/projection.worker.ts')
+          'projection.worker': resolve('src/main/tagging/projection.worker.ts'),
+          'inference.worker': resolve('src/main/tagging/inference.worker.ts')
         },
         output: { entryFileNames: '[name].js' }
       }

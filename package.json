@@ -44,6 +44,7 @@
     "check:boundaries": "tsx --tsconfig tsconfig.node.json scripts/check-boundaries.ts",
     "check:map-density": "tsx scripts/check-map-density.ts",
     "check:transcribe": "tsx --tsconfig tsconfig.node.json scripts/check-transcribe.ts",
+    "check:inference": "electron scripts/check-inference.cjs",
     "bench:map-quality": "tsx --tsconfig tsconfig.node.json scripts/bench-map-quality.mts",
     "map:compare": "tsx --tsconfig tsconfig.node.json scripts/map-compare.mts",
     "bench:map-regions": "tsx --tsconfig tsconfig.node.json scripts/bench-map-regions.mts",

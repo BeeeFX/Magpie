@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process'
-import { app } from 'electron'
 import { join } from 'node:path'
 import ffmpegPath from 'ffmpeg-static'
 import { getDb, mediaDir } from '../db'
@@ -10,6 +9,7 @@ import {
   tidyTranscript,
   type Listening
 } from './transcript-text'
+import { transcribeAudio } from './inference'
 import { audioLevel, looksMute, MuteStreak } from './transcript-guard'
 import { clearTranscripts } from '../db/queries'
 import { backgroundTasks } from '../tasks'
@@ -26,8 +26,9 @@ import { backgroundTasks } from '../tasks'
  * audio ne quitte la machine. Le seul trafic est la descente des vidéos elles-mêmes.
  */
 
-/** `tiny` transcrit mal le français ; `small` triple le coût pour un gain modeste. */
-const MODEL = 'Xenova/whisper-base'
+/* Le modèle vit dans `inference.worker.ts`, avec les autres. Son dossier de cache suivait ici
+   `userData` alors que le texte et les images suivaient la bibliothèque : déplacer celle-ci sur
+   un autre disque laissait Whisper derrière, et deux dossiers `models` à deux endroits. */
 /** Whisper travaille en 16 kHz mono, un flottant par échantillon. */
 const SAMPLE_RATE = 16_000
 /** Au-delà, un reel n'est plus un reel : on évite qu'une vidéo d'une heure bloque la file. */
@@ -43,32 +44,6 @@ const MAX_SECONDS = 600
 const MAX_ATTEMPTS = 3
 /** Reconnaissances refusées d'affilée avant de conclure à la panne et d'arrêter la passe. */
 const GIVE_UP = 5
-
-type Recogniser = (
-  audio: Float32Array,
-  options: { language: string; task: 'transcribe'; chunk_length_s: number; stride_length_s: number }
-) => Promise<{ text?: string }>
-
-let recogniser: Recogniser | null = null
-let loading: Promise<Recogniser> | null = null
-
-async function load(): Promise<Recogniser> {
-  if (recogniser) return recogniser
-  if (loading) return loading
-  loading = (async () => {
-    const { env, pipeline } = await import('@huggingface/transformers')
-    env.cacheDir = join(app.getPath('userData'), 'models')
-    env.allowLocalModels = false
-    const pipe = await pipeline('automatic-speech-recognition', MODEL, { dtype: 'q8' })
-    recogniser = pipe as unknown as Recogniser
-    return recogniser
-  })()
-  try {
-    return await loading
-  } finally {
-    loading = null
-  }
-}
 
 /**
  * Extrait la piste audio, en 16 kHz mono, sans jamais écrire la vidéo sur le disque.
@@ -283,7 +258,6 @@ export function transcribeAll(): Promise<void> {
        passe, et la demander par clip relirait des milliers de légendes pour rien. */
     const fallbackLanguage = libraryLanguage()
     try {
-      const recognise = await load()
       /* Reconnaissances refusées d'affilée. Remise à zéro dès qu'une réussit : ce qu'on
          surveille est une panne franche, pas un taux d'échec. */
       let refused = 0
@@ -353,16 +327,11 @@ export function transcribeAll(): Promise<void> {
         let breakdown = false
 
         try {
-          const output = await recognise(audio, {
-            task: 'transcribe',
-            // Sans langue explicite, Whisper écoute tout en anglais et invente le reste.
-            language: listeningLanguage(candidate.caption, fallbackLanguage),
-            // Whisper ne lit que trente secondes d'un coup ; le recouvrement évite de couper
-            // un mot à la frontière de deux tranches.
-            chunk_length_s: 30,
-            stride_length_s: 5
-          })
-          const heard = tidyTranscript(String(output.text ?? ''))
+          const spoken = await transcribeAudio(
+            audio,
+            listeningLanguage(candidate.caption, fallbackLanguage)
+          )
+          const heard = tidyTranscript(spoken)
           saveTranscript(candidate.postId, heard)
           refused = 0
 

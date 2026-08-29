@@ -1,12 +1,11 @@
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
-import { dataDir } from '../db'
 import {
   postEmbeddings,
   savePostEmbeddings,
   type OrganizationItem,
   type PostEmbedding
 } from '../db/queries'
+import { embedBatch } from './inference'
 import type { Breathe } from './organize'
 
 /**
@@ -39,8 +38,6 @@ import type { Breathe } from './organize'
  * Le recentrage n'est donc pas un raffinement, il est indispensable.
  */
 const MODEL = 'Xenova/multilingual-e5-small'
-/** Préfixe attendu par la famille e5, des deux côtés pour une comparaison symétrique. */
-const PREFIX = 'query: '
 /** Au-delà, on n'ajoute plus de sens : on ajoute du hors-sujet et du temps de calcul. */
 const MAX_CHARS = 512
 const BATCH = 32
@@ -49,14 +46,6 @@ export interface EmbeddingProgress {
   done: number
   total: number
 }
-
-type Extractor = (
-  texts: string[],
-  options: { pooling: 'mean'; normalize: boolean }
-) => Promise<{ data: Float32Array; dims: number[] }>
-
-let extractor: Extractor | null = null
-let loading: Promise<Extractor> | null = null
 
 /**
  * Le texte qui part au modèle, et la clé qui dit s'il a changé.
@@ -85,39 +74,6 @@ export function embeddingHash(text: string): string {
   return createHash('sha1').update(`${MODEL} ${text}`).digest('hex').slice(0, 16)
 }
 
-/**
- * Charge le modèle, une fois. Le premier appel le télécharge — d'où l'attente annoncée à
- * l'utilisateur avant de lancer une analyse.
- */
-async function load(): Promise<Extractor> {
-  if (extractor) return extractor
-  if (loading) return loading
-  loading = (async () => {
-    const { env, pipeline } = await import('@huggingface/transformers')
-    /* Tout vit dans le dossier de données de Magpie : rien n'est écrit à côté du binaire, et
-       désinstaller l'application emporte le modèle avec elle.
-       `dataDir()` et non `app.getPath('userData')` : les deux se confondent tant que la
-       bibliothèque est à sa place par défaut, et divergent dès qu'on la déplace. Les encodeurs
-       d'images, eux, ont toujours suivi la bibliothèque — on se retrouvait donc avec deux
-       dossiers `models` à deux endroits, dont un que personne ne nettoie. */
-    env.cacheDir = join(dataDir(), 'models')
-    env.allowLocalModels = false
-    const pipe = await pipeline('feature-extraction', MODEL, { dtype: 'q8' })
-    extractor = pipe as unknown as Extractor
-    return extractor
-  })()
-  try {
-    return await loading
-  } finally {
-    loading = null
-  }
-}
-
-/** Le modèle est-il déjà sur le disque ? Sert à annoncer un téléchargement, pas à le faire. */
-export function isModelLoaded(): boolean {
-  return extractor !== null
-}
-
 function toBuffer(vector: Float32Array): Buffer {
   return Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength)
 }
@@ -133,8 +89,9 @@ export function fromBuffer(buffer: Buffer): Float32Array {
 /**
  * Encode ce qui a changé, rend le reste depuis le cache.
  *
- * Comme le reste de l'analyse, cela tourne sur le processus principal : on rend donc la main
- * entre deux lots, sans quoi la fenêtre se fige pendant toute la passe.
+ * Le calcul lui-même a quitté le processus principal — voir `inference.ts` — mais le tour de
+ * boucle qui l'entoure, lui, y reste : la lecture du cache, l'écriture des vecteurs, le
+ * découpage en lots. On rend donc toujours la main entre deux lots.
  */
 export async function embedItems(
   items: OrganizationItem[],
@@ -156,20 +113,15 @@ export async function embedItems(
 
   if (pending.length === 0) return result
 
-  const encode = await load()
   const fresh: PostEmbedding[] = []
   let done = 0
   onProgress?.({ done: 0, total: pending.length })
 
   for (let start = 0; start < pending.length; start += BATCH) {
     const slice = pending.slice(start, start + BATCH)
-    const output = await encode(
-      slice.map((entry) => `${PREFIX}${entry.text}`),
-      { pooling: 'mean', normalize: true }
-    )
-    const width = output.dims[output.dims.length - 1]
+    const vectors = await embedBatch(slice.map((entry) => entry.text))
     for (const [index, entry] of slice.entries()) {
-      const vector = output.data.slice(index * width, (index + 1) * width)
+      const vector = vectors[index]
       result.set(entry.item.id, vector)
       fresh.push({ postId: entry.item.id, hash: entry.hash, vector: toBuffer(vector) })
     }
@@ -180,12 +132,8 @@ export async function embedItems(
     if (fresh.length >= 256) {
       savePostEmbeddings(fresh.splice(0, fresh.length))
     }
-    /* Une respiration par lot. Il y en avait une sur huit : `onnxruntime-node` exécute son
-       `run` de façon **synchrone** — il ne fait que le repousser d'un `setImmediate` — donc
-       un lot occupe le processus principal pour de bon. Mesuré à 60 ms les trente-deux
-       textes, soit un demi-tour de boucle bloqué toutes les huit ; c'est court, mais le
-       `setImmediate` qu'on paie en échange se compte en microsecondes. Il n'y avait donc
-       rien à gagner à les espacer, et une fenêtre plus vive à y gagner. */
+    /* Une respiration par lot, contre une sur huit auparavant : l'encodage attend désormais
+       un autre processus, mais l'écriture en base et le découpage, eux, sont bien ici. */
     await breathe()
   }
   savePostEmbeddings(fresh)
@@ -193,15 +141,8 @@ export async function embedItems(
 }
 
 /** Encode des textes libres, sans passer par le cache — sert aux descripteurs de thème. */
-export async function embedTexts(texts: string[]): Promise<Float32Array[]> {
-  if (texts.length === 0) return []
-  const encode = await load()
-  const output = await encode(
-    texts.map((text) => `${PREFIX}${text}`),
-    { pooling: 'mean', normalize: true }
-  )
-  const width = output.dims[output.dims.length - 1]
-  return texts.map((_, index) => output.data.slice(index * width, (index + 1) * width))
+export function embedTexts(texts: string[]): Promise<Float32Array[]> {
+  return embedBatch(texts)
 }
 
 /**

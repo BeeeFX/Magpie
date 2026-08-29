@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { mediaDir } from '../db'
+import { encodeImage, encodePrompts } from './inference'
 import type { PostFrames } from './frames'
 import {
   organizationItems,
@@ -68,49 +69,6 @@ export function framesNeeded(clips: { postId: string; videoPath: string }[]): Se
 export const STRUCTURE_DIMS = 384
 export const MEANING_DIMS = 768
 
-type Tensor = { data: Float32Array; dims: number[] }
-type Vision = (input: unknown) => Promise<Record<string, Tensor>>
-interface Encoders {
-  process(image: unknown): Promise<{ structure: unknown; meaning: unknown }>
-  structure: Vision
-  meaning: Vision
-}
-
-let loaded: Encoders | null = null
-let loading: Promise<Encoders> | null = null
-
-/** Charge les deux modèles, une fois. Le premier appel les télécharge. */
-async function load(): Promise<Encoders> {
-  if (loaded) return loaded
-  if (loading) return loading
-  loading = (async () => {
-    const { AutoModel, AutoProcessor, SiglipVisionModel, env } = await import(
-      '@huggingface/transformers'
-    )
-    // Tout vit dans le dossier de données de Magpie, comme le modèle de texte.
-    env.cacheDir = join(mediaDir(), '..', 'models')
-    env.allowLocalModels = false
-    const [structureProcessor, structureModel, meaningModel] = await Promise.all([
-      AutoProcessor.from_pretrained(STRUCTURE_MODEL),
-      AutoModel.from_pretrained(STRUCTURE_MODEL, { dtype: 'q8' }),
-      SiglipVisionModel.from_pretrained(MEANING_MODEL, { dtype: 'q8' })
-    ])
-    const meaningProcessor = await AutoProcessor.from_pretrained(MEANING_MODEL)
-    const encoders: Encoders = {
-      process: async (image) => ({
-        structure: await structureProcessor(image as never),
-        meaning: await meaningProcessor(image as never)
-      }),
-      structure: (input) => structureModel(input as never) as never,
-      meaning: (input) => meaningModel(input as never) as never
-    }
-    loaded = encoders
-    loading = null
-    return encoders
-  })()
-  return loading
-}
-
 function unit(raw: Float32Array): Float32Array {
   let norm = 0
   for (let i = 0; i < raw.length; i += 1) norm += raw[i] * raw[i]
@@ -131,51 +89,10 @@ export function toVector(blob: Buffer): Float32Array {
 /**
  * Encode une ou plusieurs images d'un même post, et rend la moyenne.
  *
- * Pour une vidéo, trois images valent bien mieux qu'une couverture : le début ne dit
- * souvent rien de la suite. Moyenner des vecteurs unitaires puis renormaliser donne le
- * centre de ce que le post montre.
+ * Le travail a lieu dans le processus des modèles : seuls les chemins y vont, deux vecteurs en
+ * reviennent. Voir `inference.ts` pour la raison.
  */
-async function encode(paths: string[]): Promise<{ structure: Float32Array; meaning: Float32Array }> {
-  const { RawImage } = await import('@huggingface/transformers')
-  const models = await load()
-  const structure = new Float32Array(STRUCTURE_DIMS)
-  const meaning = new Float32Array(MEANING_DIMS)
-  let counted = 0
-  /* Pourquoi la première image a résisté. Les autres peuvent suffire, donc on continue — mais
-     si aucune ne passe, c'est la seule chose qu'on saura, et il faut donc l'avoir gardée.
-     Ce `catch` était vide : toute la bibliothèque échouait sur « aucune image lisible », un
-     message qui ne dit ni quel fichier ni quelle cause, et qui a envoyé chercher la panne
-     partout sauf là où elle était. */
-  let unreadable: string | null = null
-  for (const path of paths) {
-    let image
-    try {
-      image = await RawImage.read(path)
-    } catch (error) {
-      // Vignette évincée entre le relevé et la lecture : les autres suffisent.
-      unreadable ??= `${path} → ${error instanceof Error ? error.message : String(error)}`
-      continue
-    }
-    const inputs = await models.process(image)
-    const structureOut = await models.structure(inputs.structure)
-    const meaningOut = await models.meaning(inputs.meaning)
-    /* DINOv2 : le jeton CLS porte le résumé de l'image, les suivants décrivent des zones.
-       SigLIP expose directement sa sortie réduite. */
-    const hidden = structureOut.last_hidden_state
-    const clsWidth = hidden.dims[hidden.dims.length - 1]
-    const cls = unit(hidden.data.slice(0, clsWidth))
-    const pooled = unit(meaningOut.pooler_output.data)
-    for (let i = 0; i < STRUCTURE_DIMS; i += 1) structure[i] += cls[i]
-    for (let i = 0; i < MEANING_DIMS; i += 1) meaning[i] += pooled[i]
-    counted += 1
-  }
-  /* Distinguer les deux « zéro image » : aucun chemin à lire n'est pas la même panne qu'un
-     chemin qu'on n'a pas su ouvrir, et les confondre coûtait une passe entière à chaque fois. */
-  if (counted === 0) {
-    throw new Error(`aucune image lisible (${unreadable ?? `aucun chemin fourni pour ${paths.length} image(s)`})`)
-  }
-  return { structure: unit(structure), meaning: unit(meaning) }
-}
+const encode = encodeImage
 
 export interface VisionProgress {
   done: number
@@ -378,50 +295,6 @@ export function asMapLayout(value: unknown): MapLayout {
  * Un coût à connaître : la tour texte est un téléchargement de 111 Mo, en plus des deux
  * encodeurs d'images. Il n'a lieu qu'une fois, et seulement si des images ont été lues.
  */
-interface TextTower {
-  encode: (prompts: string[]) => Promise<Float32Array[]>
-}
-
-let textTower: TextTower | null = null
-let textTowerLoading: Promise<TextTower> | null = null
-
-async function loadTextTower(): Promise<TextTower> {
-  if (textTower) return textTower
-  if (!textTowerLoading) {
-    textTowerLoading = (async () => {
-      const { AutoTokenizer, SiglipTextModel, env } = await import('@huggingface/transformers')
-      env.cacheDir = join(mediaDir(), '..', 'models')
-      env.allowLocalModels = false
-      const tokenizer = await AutoTokenizer.from_pretrained(MEANING_MODEL)
-      const model = await SiglipTextModel.from_pretrained(MEANING_MODEL, { dtype: 'q8' })
-      const tower: TextTower = {
-        encode: async (prompts: string[]): Promise<Float32Array[]> => {
-          /* SigLIP est entraîné avec un remplissage fixe à 64 jetons. Laisser le
-             remplissage par défaut décale les positions et rend les vecteurs inutilisables :
-             mesuré, la justesse tombe au niveau du hasard. */
-          const inputs = tokenizer(prompts, {
-            padding: 'max_length',
-            max_length: 64,
-            truncation: true
-          })
-          const output = (await model(inputs as never)) as unknown as {
-            pooler_output: { dims: number[]; data: Float32Array }
-          }
-          const [count, width] = output.pooler_output.dims
-          const flat = output.pooler_output.data
-          return Array.from({ length: count }, (_, index) =>
-            unit(Float32Array.from(flat.slice(index * width, (index + 1) * width)))
-          )
-        }
-      }
-      textTower = tower
-      textTowerLoading = null
-      return tower
-    })()
-  }
-  return await textTowerLoading
-}
-
 /**
  * Les thèmes, vus par SigLIP, dans le repère des images.
  *
@@ -429,9 +302,8 @@ async function loadTextTower(): Promise<TextTower> {
  * suivi de dix mots-clés — ne rendent que 24,1 %, là où la phrase nue « a photo of … » en
  * rend 43,7. SigLIP a appris sur des légendes de photos, pas sur des listes de mots.
  */
-export async function encodeTopicPrompts(prompts: string[]): Promise<Float32Array[]> {
-  const tower = await loadTextTower()
-  return tower.encode(prompts)
+export function encodeTopicPrompts(prompts: string[]): Promise<Float32Array[]> {
+  return encodePrompts(prompts)
 }
 
 /**
