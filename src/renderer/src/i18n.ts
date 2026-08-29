@@ -473,6 +473,7 @@ const fr = {
     'Espace de cache saturé ({used} sur {limit}). Les téléchargements sont suspendus : videz le cache ou augmentez la limite dans les réglages.',
   'downloads.thumbsCapped':
     'Les images des tuiles ne tiennent plus dans la place qui leur est réservée ({used} sur {limit}). Chaque nouvelle image en efface une ancienne : l’étape ne peut pas se terminer. Augmentez la limite du cache dans les réglages.',
+  'downloads.queued': 'En attente · {count} à faire',
   'downloads.kind.sync': 'Synchronisation',
   'downloads.kind.thumbnails': 'Images des tuiles',
   'downloads.kind.images': 'Lecture des images',
@@ -549,6 +550,7 @@ const fr = {
   'shortcuts.search': 'Rechercher',
   'shortcuts.panel': 'Afficher ou masquer le panneau',
   'shortcuts.settings': 'Ouvrir les réglages',
+  'shortcuts.menuMove': 'Parcourir un menu ouvert',
   'shortcuts.help': 'Cette liste',
   'shortcuts.close': 'Fermer ce qui est ouvert',
   'shortcuts.steps': 'Post précédent ou suivant',
@@ -1084,6 +1086,7 @@ const en: Record<TranslationKey, string> = {
     'Cache is full ({used} of {limit}). Downloads are paused: clear the cache or raise the limit in settings.',
   'downloads.thumbsCapped':
     'Tile images no longer fit in the space reserved for them ({used} of {limit}). Every new image evicts an older one, so the step cannot finish. Raise the cache limit in settings.',
+  'downloads.queued': 'Queued · {count} to go',
   'downloads.kind.sync': 'Syncing',
   'downloads.kind.thumbnails': 'Tile images',
   'downloads.kind.images': 'Reading images',
@@ -1160,6 +1163,7 @@ const en: Record<TranslationKey, string> = {
   'shortcuts.search': 'Search',
   'shortcuts.panel': 'Show or hide the panel',
   'shortcuts.settings': 'Open settings',
+  'shortcuts.menuMove': 'Move through an open menu',
   'shortcuts.help': 'This list',
   'shortcuts.close': 'Close whatever is open',
   'shortcuts.steps': 'Previous or next post',

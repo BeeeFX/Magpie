@@ -34,6 +34,7 @@ const GROUPS: { title: TranslationKey; rows: Row[] }[] = [
       { keys: ['mod', 'K'], label: 'shortcuts.search' },
       { keys: ['mod', 'B'], label: 'shortcuts.panel' },
       { keys: ['mod', ','], label: 'shortcuts.settings' },
+      { keys: ['↑', '↓'], label: 'shortcuts.menuMove' },
       { keys: ['?'], label: 'shortcuts.help' },
       { keys: ['shortcuts.esc'], translateKeys: true, label: 'shortcuts.close' }
     ]

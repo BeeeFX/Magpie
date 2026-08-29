@@ -632,7 +632,25 @@ function awaitPreload(kind: 'thumbnails' | 'clips'): Promise<void> {
  * là et se contente de la couverture sinon, et la transcription n'a rien à écouter tant que
  * le son n'est pas descendu. Les lancer ensemble ferait le même travail en moins bien.
  */
-async function runAfterSyncSteps(steps: AfterSyncStep[]): Promise<void> {
+/**
+ * Une seule chaîne à la fois.
+ *
+ * La synchronisation la déclenche, et « Rattraper maintenant » aussi : lancées ensemble, les
+ * deux se disputeraient les mêmes files — deux préchargements sur les mêmes lignes, deux
+ * lectures d'images sur les mêmes vignettes. La seconde demande rejoint donc la première au
+ * lieu d'en ouvrir une autre.
+ */
+let afterSyncRun: Promise<void> | null = null
+
+function runAfterSyncSteps(steps: AfterSyncStep[]): Promise<void> {
+  if (afterSyncRun) return afterSyncRun
+  afterSyncRun = runStepsInOrder(steps).finally(() => {
+    afterSyncRun = null
+  })
+  return afterSyncRun
+}
+
+async function runStepsInOrder(steps: AfterSyncStep[]): Promise<void> {
   for (const step of AFTER_SYNC_STEPS) {
     if (!steps.includes(step)) continue
     /* Une synchronisation repartie change la matière sous nos pieds : la préparation
@@ -873,6 +891,7 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
     requestThumbnails: requestThumbnailDrain,
     startPreload,
     stopPreload,
+    catchUp: () => void runAfterSyncSteps(readSettings().afterSync),
     setDownloadsPaused,
     backgroundState: () => backgroundTasks.current(),
     pendingCounts: (query) => ({

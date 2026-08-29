@@ -368,6 +368,7 @@ const previewApi: MagpieApi = {
   getBackgroundState: async () => PREVIEW_TASKS,
   startPreload: async () => PREVIEW_TASKS,
   stopPreload: async () => PREVIEW_TASKS,
+  catchUp: async () => PREVIEW_TASKS,
   setDownloadsPaused: async (paused) => ({ ...PREVIEW_TASKS, paused }),
   pendingCounts: async () => ({ thumbnails: 1240, clips: 318 }),
 

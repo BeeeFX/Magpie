@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useClosing } from '../useClosing'
+import { useMenuKeys } from '../useMenuKeys'
 
 interface Props {
   label: React.ReactNode
@@ -28,6 +29,8 @@ export function Popover({
   /* Rendu paresseux **et** sortie animée : le contenu n'existe qu'une fois ouvert, et il reste
      le temps de partir. Les deux tenaient sur le même `open`, donc le menu sautait. */
   const { mounted, closing } = useClosing(open, 150)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useMenuKeys(menuRef, open)
 
   useEffect(() => {
     if (!open) return
@@ -60,7 +63,7 @@ export function Popover({
       </button>
 
       {mounted ? (
-        <div className={`popover popover--${align} ${closing ? 'is-closing' : ''}`}>
+        <div ref={menuRef} className={`popover popover--${align} ${closing ? 'is-closing' : ''}`}>
           {children(() => setOpen(false))}
         </div>
       ) : null}

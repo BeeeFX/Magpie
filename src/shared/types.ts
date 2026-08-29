@@ -456,6 +456,7 @@ export interface MagpieApi {
   getBackgroundState(): Promise<BackgroundState>
   startPreload(request: PreloadRequest): Promise<BackgroundState>
   stopPreload(kind: 'thumbnails' | 'clips'): Promise<BackgroundState>
+  catchUp(): Promise<BackgroundState>
   setDownloadsPaused(paused: boolean): Promise<BackgroundState>
   pendingCounts(query: PostQuery | null): Promise<{ thumbnails: number; clips: number }>
 

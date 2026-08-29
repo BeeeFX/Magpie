@@ -166,6 +166,7 @@ const api: MagpieApi = {
     ipcRenderer.invoke('tasks:preload', request),
   stopPreload: (kind: 'thumbnails' | 'clips'): Promise<BackgroundState> =>
     ipcRenderer.invoke('tasks:stop', kind),
+  catchUp: (): Promise<BackgroundState> => ipcRenderer.invoke('tasks:catchUp'),
   setDownloadsPaused: (paused: boolean): Promise<BackgroundState> =>
     ipcRenderer.invoke('tasks:pause', paused),
   pendingCounts: (query: PostQuery | null): Promise<{ thumbnails: number; clips: number }> =>

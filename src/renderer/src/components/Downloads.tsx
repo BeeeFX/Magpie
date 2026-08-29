@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import type { BackgroundState, BackgroundTask, ThroughputSample } from '@shared/types'
+import type { AfterSyncStep, BackgroundState, BackgroundTask, ThroughputSample } from '@shared/types'
+import { AFTER_SYNC_STEPS } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { formatBytes, formatDuration } from '../format'
-import { useT } from '../store'
+import { useStore, useT } from '../store'
 import { IconClose, IconDownload, IconPause, IconPlay } from './Icons'
 import { Popover } from './Popover'
 
@@ -130,6 +131,7 @@ export function Downloads(): React.JSX.Element {
                   }
                 />
               ))}
+              <QueuedSteps running={tasks} />
             </ul>
           ) : (
             <p className="downloads__idle">{t('downloads.idle')}</p>
@@ -177,6 +179,80 @@ export function Downloads(): React.JSX.Element {
         </div>
       )}
     </Popover>
+  )
+}
+
+/**
+ * Ce qui attend derrière l'étape en cours.
+ *
+ * Le registre ne connaît que le travail qui tourne : une étape s'y déclare en démarrant et en
+ * sort en finissant. Or les préparations d'après-synchronisation s'enchaînent — les vignettes,
+ * puis les clips, puis la lecture des images, puis la transcription — et ce sont les dernières
+ * qui coûtent des heures. On lisait donc « Images des tuiles · 412 / 1240 » sans rien qui dise
+ * que trois étapes suivaient, dont deux très longues.
+ *
+ * On ne les inscrit pas au registre pour autant : elles y compteraient comme du travail en
+ * cours, fausseraient l'avancement global et feraient s'agiter l'icône de la barre système. Ce
+ * sont des lignes d'attente, et rien d'autre.
+ */
+function QueuedSteps({ running }: { running: BackgroundTask[] }): React.JSX.Element | null {
+  const t = useT()
+  const afterSync = useStore((s) => s.afterSync)
+  const autoOrganize = useStore((s) => s.autoOrganizeEnabled)
+  const [backlog, setBacklog] = useState<Record<AfterSyncStep, number> | null>(null)
+
+  useEffect(() => {
+    const read = (): void => {
+      void Promise.all([
+        magpie.pendingCounts(null),
+        magpie.imageReadingState(),
+        magpie.transcriptState()
+      ])
+        .then(([pending, images, transcripts]) =>
+          setBacklog({
+            thumbnails: pending.thumbnails,
+            clips: pending.clips,
+            images: images.pending,
+            transcribe: transcripts.pending
+          })
+        )
+        .catch(() => {})
+    }
+    read()
+    return magpieEvents.onBackgroundState(read)
+  }, [])
+
+  /* La chaîne ne part que si le rangement automatique est allumé : sans lui, une étape qui
+     tourne est un geste isolé et rien ne la suit. Annoncer une file serait mentir. */
+  if (!autoOrganize || !backlog) return null
+  /* Le pivot est la **dernière** étape en cours, pas la première : deux peuvent tourner de
+     front — la file média sert les vignettes et les clips ensemble — et prendre la première
+     réinscrivait la seconde en attente, sur la ligne d'en dessous, en train de tourner. */
+  const running_ = AFTER_SYNC_STEPS.filter((step) => running.some((task) => task.kind === step))
+  if (running_.length === 0) return null
+  const pivot = AFTER_SYNC_STEPS.indexOf(running_[running_.length - 1])
+
+  const queued = AFTER_SYNC_STEPS.slice(pivot + 1).filter(
+    (step) =>
+      afterSync.includes(step) && backlog[step] > 0 && !running.some((task) => task.kind === step)
+  )
+  if (queued.length === 0) return null
+
+  return (
+    <>
+      {queued.map((step) => (
+        <li className="downloads__task downloads__task--queued" key={step}>
+          <div className="downloads__task-head">
+            <span className="downloads__task-name">
+              {t(`downloads.kind.${step}` as Parameters<typeof t>[0])}
+            </span>
+          </div>
+          <span className="downloads__task-detail">
+            {t('downloads.queued', { count: backlog[step] })}
+          </span>
+        </li>
+      ))}
+    </>
   )
 }
 

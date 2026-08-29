@@ -194,6 +194,8 @@ export interface IpcHooks {
   requestThumbnails: (postIds: string[]) => void
   startPreload: (request: PreloadRequest) => BackgroundState
   stopPreload: (kind: 'thumbnails' | 'clips') => BackgroundState
+  /** Rejoue les préparations cochées, dans l'ordre, sans attendre la prochaine synchronisation. */
+  catchUp: () => void
   setDownloadsPaused: (paused: boolean) => BackgroundState
   backgroundState: () => BackgroundState
   pendingCounts: (query: PostQuery | null) => { thumbnails: number; clips: number }
@@ -209,6 +211,7 @@ export function registerIpc({
   requestThumbnails,
   startPreload,
   stopPreload,
+  catchUp,
   setDownloadsPaused,
   backgroundState,
   pendingCounts,
@@ -229,6 +232,14 @@ export function registerIpc({
   ipcMain.handle('tasks:pending', (_event, query?: PostQuery | null) =>
     pendingCounts(postQueryValue(query))
   )
+  /* Le rattrapage passe par le processus principal, et c'est tout l'intérêt : il y rejoue
+     exactement la chaîne d'après-synchronisation, dans le même ordre et avec le même verrou.
+     Lancé depuis le rendu, il partait en parallèle — la lecture d'images commençait avant que
+     les clips dont elle tire ses images ne soient descendus, et faisait donc moins bien. */
+  ipcMain.handle('tasks:catchUp', () => {
+    catchUp()
+    return backgroundState()
+  })
   ipcMain.handle('tasks:preload', (_event, request: PreloadRequest) => {
     if (request?.what !== 'thumbnails' && request?.what !== 'clips') {
       throw new Error('Préchargement inconnu')

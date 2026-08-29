@@ -1825,6 +1825,16 @@ h1, h2, h3 {
 }
 
 .downloads__task-detail,
+/* Une ligne d'attente n'est pas une tâche : ni barre, ni boutons, et un ton en retrait —
+   elle annonce, elle ne rend pas compte. */
+.downloads__task--queued {
+  opacity: 0.62;
+}
+
+.downloads__task--queued .downloads__task-name {
+  font-weight: 500;
+}
+
 .downloads__task-message {
   color: var(--faint);
   font-size: 11px;

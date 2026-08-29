@@ -7,6 +7,7 @@ import { formatBytes, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
 import { useClosing } from '../useClosing'
+import { useMenuKeys } from '../useMenuKeys'
 import { IconCheck,
   IconChevronRight,
   IconClock,
@@ -140,15 +141,12 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
     void setAfterSync([...next])
   }
 
-  /* Le rattrapage lance ce qui est coché puis rend la main : chaque étape s'annonce dans
-     l'indicateur de la barre d'outils, qui sait déjà dire où elle en est et l'y suspendre. */
+  /* Le rattrapage part au processus principal, qui y rejoue la chaîne d'après-synchronisation :
+     même ordre, même verrou. Lancé d'ici, il démarrait les quatre étapes de front — la lecture
+     d'images commençait donc avant que les clips dont elle tire ses images ne soient là, et
+     faisait moins bien que la même chaîne déclenchée par une synchronisation. */
   const catchUp = (): void => {
-    for (const step of AFTER_SYNC_STEPS) {
-      if (!afterSync.includes(step) || remaining(step) === 0) continue
-      if (step === 'thumbnails' || step === 'clips') void magpie.startPreload({ what: step })
-      else if (step === 'images') void magpie.startImageReading()
-      else void magpie.startTranscription()
-    }
+    void magpie.catchUp()
   }
 
   const late = AFTER_SYNC_STEPS.filter(
@@ -284,6 +282,8 @@ export function SyncButton(): React.JSX.Element {
      remarquent plus qu'aucune animation du tout. */
   const { mounted, closing } = useClosing(expanded, 150)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useMenuKeys(menuRef, expanded)
 
   useEffect(() => {
     if (!sync.running) setExpanded(false)
@@ -408,7 +408,7 @@ export function SyncButton(): React.JSX.Element {
           {/* Les actions restent joignables pendant une synchronisation : elle démarre à
               l'ouverture de l'application, et elle bloquait donc l'accès à l'organisation
               au moment précis où l'on vient de lancer Magpie. */}
-          <div className="action-menu action-menu--inline" role="menu">
+          <div ref={menuRef} className="action-menu action-menu--inline" role="menu">
             <ActionsMenu onDone={close} />
           </div>
         </div> : null}
@@ -454,7 +454,7 @@ export function SyncButton(): React.JSX.Element {
       </div>
 
       {mounted ? (
-        <div className={`action-menu ${closing ? 'is-closing' : ''}`} role="menu">
+        <div ref={menuRef} className={`action-menu ${closing ? 'is-closing' : ''}`} role="menu">
           <ActionsMenu onDone={close} />
         </div>
       ) : null}
