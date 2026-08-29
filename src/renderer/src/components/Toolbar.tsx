@@ -144,8 +144,9 @@ export function Toolbar(): React.JSX.Element {
       <div className="topbar__actions">
         <button
           type="button"
-          className={`control ${selectionMode ? 'is-active' : ''}`}
+          className={`control control--compact ${selectionMode ? 'is-active' : ''}`}
           onClick={() => setSelectionMode(!selectionMode)}
+          title={t('bulk.select')}
         >
           <IconCheck />
           <span>{t('bulk.select')}</span>
@@ -165,6 +166,7 @@ export function Toolbar(): React.JSX.Element {
           }
           badge={activeFilters}
           title={t('toolbar.filterByType')}
+          compact
         >
           {() => (
             <>
@@ -205,6 +207,7 @@ export function Toolbar(): React.JSX.Element {
             </>
           }
           title={t('toolbar.sort')}
+          compact
         >
           {(close) => (
             <>
@@ -286,9 +289,6 @@ export function Toolbar(): React.JSX.Element {
           </button>
         </div>
       </div>
-
-      {/* Réservé aux boutons système dessinés par l'OS par-dessus notre barre. */}
-      <div className="topbar__window-space" />
 
       {selectionMode ? (
         <div className="bulk-bar" role="toolbar" aria-label={t('bulk.actions')}>

@@ -6,6 +6,8 @@ interface Props {
   title?: string
   badge?: number
   align?: 'left' | 'right'
+  /** Le libellé tombe quand la barre se serre ; l'icône et le `title` restent. */
+  compact?: boolean
   children: (close: () => void) => React.ReactNode
 }
 
@@ -18,6 +20,7 @@ export function Popover({
   title,
   badge,
   align = 'right',
+  compact = false,
   children
 }: Props): React.JSX.Element {
   const [open, setOpen] = useState(false)
@@ -46,7 +49,9 @@ export function Popover({
     <div className="popover-anchor" ref={ref}>
       <button
         type="button"
-        className={`control ${open || (badge ?? 0) > 0 ? 'is-active' : ''}`}
+        className={`control ${compact ? 'control--compact' : ''} ${
+          open || (badge ?? 0) > 0 ? 'is-active' : ''
+        }`}
         onClick={() => setOpen((v) => !v)}
         title={title}
       >

@@ -579,9 +579,15 @@ const fr = {
   'welcome.carefulTitle': 'Une synchronisation prudente',
   'welcome.carefulText':
     'Le rattrapage se fait plateforme par plateforme, à cadence lente. Rien n’est jamais demandé sans que vous l’ayez déclenché.',
+  'welcome.analysisTitle': 'Le rangement tourne chez vous',
+  'welcome.analysisText':
+    'Regrouper par thème, lire les images et transcrire les vidéos se font sur votre machine. Magpie télécharge ses modèles la première fois, puis travaille en fond : c’est long sur une grande bibliothèque, et cela se suspend à tout moment.',
   'welcome.nextTitle': 'Et pour la suite',
   'welcome.nextText':
     'Copie de liens en un clic, et envoi direct vers Nitrate pour les vidéos, si vous l’activez dans les réglages.',
+  'welcome.afterSyncTitle': 'Il reste un geste',
+  'welcome.afterSyncText':
+    'Le bouton « {button} » de la barre du haut regroupe votre bibliothèque par thème et dessine la carte. Vous pouvez aussi le faire plus tard.',
   'welcome.connectTitle': 'Connectez un premier compte',
   'welcome.connectText':
     'Choisissez par où commencer. Vous pourrez ajouter les autres à tout moment depuis les réglages.',
@@ -1161,9 +1167,15 @@ const en: Record<TranslationKey, string> = {
   'welcome.carefulTitle': 'A careful sync',
   'welcome.carefulText':
     'Catching up happens one platform at a time, at a slow pace. Nothing is ever requested unless you asked for it.',
+  'welcome.analysisTitle': 'Organising runs on your machine',
+  'welcome.analysisText':
+    'Grouping by theme, reading images and transcribing videos all happen locally. Magpie downloads its models the first time, then works in the background: it takes a while on a large library, and it pauses whenever you want.',
   'welcome.nextTitle': 'And after that',
   'welcome.nextText':
     'One-click link copying, and direct sending to Nitrate for videos if you enable it in settings.',
+  'welcome.afterSyncTitle': 'One step left',
+  'welcome.afterSyncText':
+    'The “{button}” button in the top bar groups your library by theme and draws the map. You can also do it later.',
   'welcome.connectTitle': 'Connect your first account',
   'welcome.connectText':
     'Pick where to start. You can add the others at any time from settings.',

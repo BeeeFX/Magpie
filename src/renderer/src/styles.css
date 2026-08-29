@@ -523,25 +523,59 @@ h1, h2, h3 {
   border-bottom: 1px solid var(--hairline);
   z-index: 3;
   -webkit-app-region: drag;
+  /* La barre se mesure elle-même, et non la fenêtre : replier le panneau latéral lui rend
+     deux cent quarante-huit pixels, et la place réservée aux boutons système lui en prend
+     autant sur Windows. Une requête de fenêtre se serait trompée dans les deux sens. */
+  container-type: inline-size;
+  container-name: topbar;
 }
 
-.topbar button,
-.topbar input,
-.topbar label,
-.topbar .popover-anchor,
-.topbar .segmented {
-  -webkit-app-region: no-drag;
+/* Les paliers, et d'où viennent leurs chiffres.
+   Mesurés sur le français, la langue la plus longue des deux : libellés entiers, la barre
+   réclame 1 246 px de contenu ; sans les trois libellés secondaires, 972 ; sans la densité,
+   848 ; et 668 une fois les deux actions principales réduites à leur icône. Chaque palier se
+   déclenche donc juste avant que le précédent ne déborde. Sans eux, la barre passait
+   simplement hors du cadre : à la largeur minimale de l'application, en français, le tri, la
+   densité et la disposition étaient injoignables — pas de défilement, pas de repli, rien.
+   Un portable 1366 y arrivait aussi, panneau ouvert. Chaque commande repliée garde son
+   `title` et son `aria-label`. */
+@container topbar (max-width: 1240px) {
+  .control--compact > span {
+    display: none;
+  }
+
+  .control--compact {
+    padding-inline: 9px;
+  }
 }
 
-/* Place réservée aux boutons système, que l'OS dessine par-dessus notre barre. */
-.topbar__window-space {
-  flex: none;
-  width: 0;
+@container topbar (max-width: 970px) {
+  .topbar__actions .density {
+    display: none;
+  }
 }
 
-[data-platform='win32'] .topbar__window-space,
-[data-platform='linux'] .topbar__window-space {
-  width: 140px;
+/* Le dernier palier. Le champ de recherche cède sa place sans jamais disparaître — on doit
+   pouvoir relire ce qu'on a tapé — et les deux actions principales gardent leur icône : mieux
+   vaut une synchronisation sans son mot qu'une disposition qu'on ne peut plus changer. */
+@container topbar (max-width: 860px) {
+  .topbar .search__kbd {
+    display: none;
+  }
+
+  .topbar .search {
+    min-width: 108px;
+  }
+
+  .topbar .sync-control__main > span,
+  .topbar .organize-control > span {
+    display: none;
+  }
+
+  .topbar .sync-control__main,
+  .topbar .organize-control {
+    padding-inline: 9px;
+  }
 }
 
 .topbar__actions {
@@ -549,6 +583,9 @@ h1, h2, h3 {
   align-items: center;
   gap: 4px;
   margin-left: auto;
+  /* Sans ceci, le bloc refusait de se réduire et poussait tout le reste hors du cadre. */
+  min-width: 0;
+  flex: none;
 }
 
 .divider {
@@ -582,7 +619,8 @@ h1, h2, h3 {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 132px;
   max-width: 460px;
 }
 
@@ -4764,31 +4802,39 @@ html.window-is-moving .app *::after {
   gap: 10px;
 }
 
-.welcome__source-choice {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(250px, 1.35fr);
-  align-items: center;
-  gap: 3px 18px;
+/* Ce qui reste à faire une fois la première synchronisation passée. Accentué, parce que c'est
+   une invitation et non un état de plus. */
+.welcome__next {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 14px;
   padding: 13px 15px;
-  border: 1px solid var(--hairline);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 15px;
-  background: color-mix(in srgb, var(--field) 88%, var(--accent) 12%);
+  background: color-mix(in srgb, var(--field) 86%, var(--accent) 14%);
+  text-align: left;
 }
 
-.welcome__source-choice > strong {
+.welcome__next strong {
+  display: block;
+  margin-bottom: 3px;
   color: var(--text);
   font-size: 12.5px;
 }
 
-.welcome__source-choice > span {
-  grid-column: 1;
-  color: var(--faint);
-  font-size: 10.5px;
+.welcome__next p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
-.welcome__source-choice > .segmented {
-  grid-column: 2;
-  grid-row: 1 / span 2;
+/* Le second titre de l'étape se détache du bloc au-dessus : deux questions, deux respirations. */
+.welcome__storage-head--second {
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hairline);
 }
 
 .welcome__storage-option {
@@ -4873,13 +4919,16 @@ html.window-is-moving .app *::after {
   font-size: 12px;
 }
 
-.welcome__storage-row--path > div {
+/* Le libellé au-dessus de son état, pas collé contre lui : ces deux textes vivaient dans un
+   bloc sans mise en forme, si bien que la ligne se lisait « Préparer toutes les
+   vignettesPréparation : 412 / 1240 ». La règle n'existait que pour la variante `--path`. */
+.welcome__storage-row > div {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.welcome__storage-row--path strong {
+.welcome__storage-row strong {
   color: var(--text);
   font-size: 12px;
 }
@@ -4912,16 +4961,6 @@ html.window-is-moving .app *::after {
 @media (max-width: 620px) {
   .welcome__storage-options {
     grid-template-columns: 1fr;
-  }
-
-  .welcome__source-choice {
-    grid-template-columns: 1fr;
-  }
-
-  .welcome__source-choice > .segmented {
-    grid-column: 1;
-    grid-row: auto;
-    margin-top: 7px;
   }
 }
 

@@ -11,6 +11,8 @@ import {
   IconChevronLeft,
   IconCheck,
   IconCollections,
+  IconDownload,
+  IconEye,
   IconGrid,
   IconInbox,
   IconSearch,
@@ -142,6 +144,11 @@ export function Welcome(): React.JSX.Element {
       { key: 'login', icon: <IconCheck size={18} />, title: 'welcome.loginTitle', text: 'welcome.loginText' },
       { key: 'local', icon: <IconStar size={18} />, title: 'welcome.localTitle', text: 'welcome.localText' },
       { key: 'careful', icon: <IconCollections size={18} />, title: 'welcome.carefulTitle', text: 'welcome.carefulText' },
+      /* Le seul geste vraiment coûteux de l'application, et le seul dont la présentation ne
+         disait rien : on appuyait sur « Ranger » sans savoir qu'on déclenchait le
+         téléchargement de plusieurs centaines de mégaoctets de modèles et des minutes de
+         calcul. Une bonne surprise ne s'annonce pas, une longue attente si. */
+      { key: 'analysis', icon: <IconEye size={18} />, title: 'welcome.analysisTitle', text: 'welcome.analysisText' },
       { key: 'next', icon: <IconSend size={18} />, title: 'welcome.nextTitle', text: 'welcome.nextText' }
     ]
   ]
@@ -209,39 +216,47 @@ export function Welcome(): React.JSX.Element {
 
           {index === 2 ? (
             <>
+              {/* Ce qu'on rassemble d'abord, ce qu'on en garde ensuite. L'ordre inverse
+                  laissait la question la plus lourde de conséquences — elle décide de ce qui
+                  sera synchronisé — coincée sous un titre qui parlait de téléchargement, dans
+                  la plus petite boîte de l'écran. */}
               <div className="welcome__storage-head">
                 <span className="feature__icon"><IconInbox size={20} /></span>
                 <div>
-                  <h2>{t('welcome.storageTitle')}</h2>
-                  <p className="welcome__lead welcome__lead--tight">{t('welcome.storageText')}</p>
+                  <h2>{t('welcome.sourcesTitle')}</h2>
+                  <p className="welcome__lead welcome__lead--tight">{t('welcome.sourcesText')}</p>
                 </div>
               </div>
 
-              <div className="welcome__source-choice">
-                <strong>{t('welcome.sourcesTitle')}</strong>
-                <span>{t('welcome.sourcesText')}</span>
-                <div className="segmented segmented--wide">
-                  <button
-                    type="button"
-                    className={contentSources.length === 1 && contentSources[0] === 'saved' ? 'is-active' : ''}
-                    onClick={() => void setContentSources(['saved'])}
-                  >
-                    {t('source.savedOnly')}
-                  </button>
-                  <button
-                    type="button"
-                    className={contentSources.length === 1 && contentSources[0] === 'liked' ? 'is-active' : ''}
-                    onClick={() => void setContentSources(['liked'])}
-                  >
-                    {t('source.likedOnly')}
-                  </button>
-                  <button
-                    type="button"
-                    className={contentSources.length === 2 ? 'is-active' : ''}
-                    onClick={() => void setContentSources(['saved', 'liked'])}
-                  >
-                    {t('source.both')}
-                  </button>
+              <div className="segmented segmented--wide">
+                <button
+                  type="button"
+                  className={contentSources.length === 1 && contentSources[0] === 'saved' ? 'is-active' : ''}
+                  onClick={() => void setContentSources(['saved'])}
+                >
+                  {t('source.savedOnly')}
+                </button>
+                <button
+                  type="button"
+                  className={contentSources.length === 1 && contentSources[0] === 'liked' ? 'is-active' : ''}
+                  onClick={() => void setContentSources(['liked'])}
+                >
+                  {t('source.likedOnly')}
+                </button>
+                <button
+                  type="button"
+                  className={contentSources.length === 2 ? 'is-active' : ''}
+                  onClick={() => void setContentSources(['saved', 'liked'])}
+                >
+                  {t('source.both')}
+                </button>
+              </div>
+
+              <div className="welcome__storage-head welcome__storage-head--second">
+                <span className="feature__icon"><IconDownload size={20} /></span>
+                <div>
+                  <h2>{t('welcome.storageTitle')}</h2>
+                  <p className="welcome__lead welcome__lead--tight">{t('welcome.storageText')}</p>
                 </div>
               </div>
 
@@ -416,6 +431,21 @@ export function Welcome(): React.JSX.Element {
                       {t('settings.preloadStart')}
                     </button>
                   ) : null}
+                </div>
+              ) : null}
+
+              {/* La présentation s'arrêtait sur une bibliothèque rapatriée et rien d'autre : on
+                  atterrissait sur un mur, sans collection, sans carte, et sans que rien ne dise
+                  que le geste qui les fabrique existe. On le nomme, avec le libellé exact du
+                  bouton — un bouton qu'on décrit sans le nommer est un bouton qu'on ne trouve
+                  pas. */}
+              {firstSyncDone ? (
+                <div className="welcome__next" aria-live="polite">
+                  <span className="feature__icon"><IconCollections size={18} /></span>
+                  <div>
+                    <strong>{t('welcome.afterSyncTitle')}</strong>
+                    <p>{t('welcome.afterSyncText', { button: t('actions.organize') })}</p>
+                  </div>
                 </div>
               ) : null}
             </>
