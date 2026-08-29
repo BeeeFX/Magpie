@@ -57,6 +57,7 @@ export function Sidebar(): React.JSX.Element {
    */
   const [colouring, setColouring] = useState<number | null>(null)
   const [managing, setManaging] = useState(false)
+  const setOrganizerOpen = useStore((s) => s.setOrganizerOpen)
   const { mounted: managerMounted, closing: managerClosing } = useClosing(managing, 230)
 
   /* Accroché aux statistiques, pas au tableau des posts.
@@ -348,7 +349,22 @@ export function Sidebar(): React.JSX.Element {
             </form>
           ) : null}
           {collections.length === 0 ? (
-            <p className="sidebar__empty">{t('sidebar.noneYet')}</p>
+            /* « Aucune pour l'instant » est vrai, et parfaitement inutile : sur une
+               bibliothèque déjà rapatriée, il reste affiché indéfiniment sans jamais dire ce
+               qui les ferait apparaître. C'est le seul endroit de l'écran qui parle de
+               collections en permanence — donc le bon endroit pour le geste qui en crée. */
+            (stats?.total ?? 0) > 0 ? (
+              <button
+                type="button"
+                className="sidebar__invite"
+                onClick={() => setOrganizerOpen(true)}
+              >
+                <IconCollections size={14} />
+                <span>{t('sidebar.organiseInvite')}</span>
+              </button>
+            ) : (
+              <p className="sidebar__empty">{t('sidebar.noneYet')}</p>
+            )
           ) : (
             /* Sa propre zone de défilement : vingt-sept collections poussaient les tags hors
                du panneau, et rien ne disait qu'il en restait. */

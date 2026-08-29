@@ -13,6 +13,7 @@ import {
 } from '../format'
 import { useStore, useT } from '../store'
 import { LabelPicker } from './LabelPicker'
+import { MediaError } from './MediaError'
 import { VideoPlayer } from './VideoPlayer'
 import {
   IconCheck,
@@ -157,7 +158,11 @@ export function Detail(): React.JSX.Element | null {
     void magpie
       .getMediaPlaybackUrl(post.id, selectedMedia.idx, 'image', 'auto')
       .then((url) => {
-        if (!cancelled && url) setDetailImageSrc(url)
+        if (cancelled) return
+        if (url) setDetailImageSrc(url)
+        /* Une adresse vide n'est pas une adresse : sans vignette pour la remplacer, il n'y a
+           rien à attendre, et attendre est précisément ce que faisait l'écran. */
+        else if (!selectedMedia.thumbUrl) setDetailImageError(true)
       })
       .catch(() => {
         if (!cancelled && !selectedMedia.thumbUrl) setDetailImageError(true)
@@ -372,10 +377,29 @@ export function Detail(): React.JSX.Element | null {
               src={detailImageSrc}
               alt={post.text ?? ''}
               className="detail__media"
-              onError={() => setDetailImageSrc(media?.thumbUrl ?? null)}
+              /* Un repli, puis un verdict. La vignette peut sauver l'affichage quand c'est la
+                 source pleine résolution qui manque ; quand elle manque aussi — ou qu'il n'y en
+                 a pas — il faut le dire. On se rabattait ici sur la même valeur, si bien qu'aucun
+                 état ne changeait : l'écran restait sur « Chargement du média… » pour toujours,
+                 là où une vidéo dans le même cas annonce son échec et propose de le comprendre. */
+              onError={() => {
+                const fallback = media?.thumbUrl ?? null
+                if (fallback && fallback !== detailImageSrc) {
+                  setDetailImageSrc(fallback)
+                  return
+                }
+                setDetailImageSrc(null)
+                setDetailImageError(true)
+              }}
             />
           ) : detailImageError ? (
-            <div className="player__error">{t('player.streamError')}</div>
+            <MediaError
+              message={t('player.streamError')}
+              postId={post.id}
+              mediaIndex={media?.idx ?? 0}
+              kind="image"
+              quality="auto"
+            />
           ) : (
             <div className="detail__media-loading" aria-live="polite">
               <span className="spinner" />

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useT } from '../store'
 import { IconCheck, IconContract, IconExpand, IconPlay, IconSettings, IconVolume } from './Icons'
-import type { MediaDiagnostic, VideoQuality } from '@shared/types'
+import type { VideoQuality } from '@shared/types'
 import { resolvePreferredQuality } from '@shared/quality'
 import { magpie } from '../bridge'
+import { MediaError } from './MediaError'
 
 interface Props {
   src: string
@@ -63,8 +64,6 @@ export function VideoPlayer({
   const [sourceError, setSourceError] = useState(false)
   const [mediaLoading, setMediaLoading] = useState(true)
   const [stalled, setStalled] = useState(false)
-  const [diagnostic, setDiagnostic] = useState<MediaDiagnostic | null>(null)
-  const [diagnosing, setDiagnosing] = useState(false)
   const qualitySignature = qualities.join('|')
 
   useEffect(() => {
@@ -80,7 +79,6 @@ export function VideoPlayer({
     setSourceError(false)
     setMediaLoading(true)
     setStalled(false)
-    setDiagnostic(null)
     setQualityBusy(true)
     void magpie
       .getMediaPlaybackUrl(postId, mediaIndex, 'video', preferred)
@@ -108,15 +106,6 @@ export function VideoPlayer({
     const timer = setTimeout(() => setStalled(true), 12000)
     return () => clearTimeout(timer)
   }, [mediaLoading, sourceError, activeSrc])
-
-  const diagnose = async (): Promise<void> => {
-    setDiagnosing(true)
-    try {
-      setDiagnostic(await magpie.diagnoseMedia(postId, mediaIndex, 'video', quality))
-    } finally {
-      setDiagnosing(false)
-    }
-  }
 
   useEffect(() => {
     if (!qualityMenuOpen) return
@@ -255,29 +244,15 @@ export function VideoPlayer({
       ) : null}
 
       {sourceError || stalled ? (
-        <div className="player__error" role="alert">
-          <span>{t(stalled && !sourceError ? 'player.stalled' : 'player.streamError')}</span>
-          {diagnostic ? (
-            /* Le relevé technique est affiché même quand un message explique déjà l'échec :
-               c'est justement dans ces cas-là qu'il est le plus utile. */
-            <code className="player__diagnostic">
-              {diagnostic.status !== null
-                ? `${diagnostic.host ?? '?'} · HTTP ${diagnostic.status} ${diagnostic.statusText ?? ''} · ` +
-                  `${diagnostic.contentType ?? 'type ?'} · ${diagnostic.firstChunkBytes ?? 0} o reçus · ` +
-                  `ranges ${diagnostic.acceptRanges ?? 'non annoncés'}` +
-                  (diagnostic.contentRange ? ` · ${diagnostic.contentRange}` : '') +
-                  (diagnostic.contentLength ? ` · longueur ${diagnostic.contentLength}` : '') +
-                  (diagnostic.contentEncoding ? ` · encodage ${diagnostic.contentEncoding}` : '') +
-                  ` · ${diagnostic.elapsedMs} ms`
-                : `${diagnostic.host ?? '?'} · ${diagnostic.elapsedMs} ms`}
-              {diagnostic.error ? `\n${diagnostic.error}` : ''}
-            </code>
-          ) : (
-            <button type="button" className="btn" disabled={diagnosing} onClick={() => void diagnose()}>
-              {t(diagnosing ? 'player.diagnosing' : 'player.diagnose')}
-            </button>
-          )}
-        </div>
+        <MediaError
+          /* Un relevé porte sur un média précis : changer de média doit le jeter. */
+          key={`${postId}:${mediaIndex}`}
+          message={t(stalled && !sourceError ? 'player.stalled' : 'player.streamError')}
+          postId={postId}
+          mediaIndex={mediaIndex}
+          kind="video"
+          quality={quality}
+        />
       ) : null}
 
       <div className="player__bar">

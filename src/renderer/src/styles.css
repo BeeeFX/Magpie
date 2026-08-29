@@ -390,6 +390,38 @@ h1, h2, h3 {
   font-size: 11.5px;
 }
 
+/* Une invitation, pas un constat : la seule ligne de l'écran qui parle de collections en
+   permanence est aussi le bon endroit pour proposer d'en fabriquer. */
+.sidebar__invite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  text-align: left;
+  font-size: 11.5px;
+  line-height: 1.35;
+  transition:
+    background-color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.sidebar__invite:hover {
+  background: var(--field);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text);
+}
+
+.sidebar__invite > svg {
+  flex: none;
+  color: var(--accent);
+}
+
 /* Bornée comme la liste des collections : le panneau ne défile qu'en dernier recours, et
    chaque liste reste consultable sans chasser sa voisine hors de l'écran. */
 .tag-list {
@@ -1052,6 +1084,25 @@ h1, h2, h3 {
 
 .modal__head h2 {
   font-size: 15px;
+}
+
+/* Titre et sous-titre se lisaient d'un seul tenant — « Exporter ma bibliothèqueUn dossier
+   lisible… » — faute d'une règle qui les empile : le conteneur était un bloc et ses deux
+   enfants des éléments en ligne. Chaque modale qui adopte cette forme en héritait. */
+.modal__head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.modal__head > div > strong {
+  font-size: 14px;
+}
+
+.modal__head > div > span {
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .modal__body {
@@ -1999,6 +2050,66 @@ h1, h2, h3 {
   height: 1px;
   margin: 4px 6px;
   background: var(--hairline);
+}
+
+/* --- Raccourcis clavier ------------------------------------------------------ */
+
+.shortcuts {
+  max-width: 520px;
+}
+
+.shortcuts__body {
+  display: grid;
+  gap: 20px;
+  padding-bottom: 22px;
+}
+
+.shortcuts__group {
+  display: grid;
+  gap: 2px;
+}
+
+.shortcuts__group h3 {
+  margin: 0 0 6px;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.shortcuts__row {
+  display: grid;
+  grid-template-columns: 128px 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.shortcuts__row:nth-child(even) {
+  background: color-mix(in srgb, var(--field) 55%, transparent);
+}
+
+.shortcuts__keys {
+  display: flex;
+  gap: 4px;
+}
+
+.shortcuts__keys kbd {
+  padding: 3px 7px;
+  min-width: 24px;
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
 }
 
 /* --- Export pour assistant -------------------------------------------------- */
@@ -5586,6 +5697,11 @@ html.window-is-moving .app *::after {
 
 .control.is-warning {
   color: var(--star);
+}
+
+/* L'état « aucun résultat » n'a pas de titre à porter : il reste serré autour de sa phrase. */
+.empty-state--tight {
+  gap: 12px;
 }
 
 .empty-state {

@@ -27,6 +27,13 @@ export function ExportPanel(): React.JSX.Element | null {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { mounted, closing } = useClosing(open, 230)
+  /* Au-dessus du retour anticipé, et c'est tout ce qui compte : ces deux appels vivaient en
+     dessous, si bien que le composant exécutait huit crochets fermé et dix ouvert. React refuse
+     — « Rendered more hooks than during the previous render » — et l'écran entier tombait sur
+     sa page de secours au premier clic sur « Exporter pour mon assistant ». La règle des
+     crochets ne tolère aucun chemin conditionnel, pas même un qui semble stable. */
+  const panelRef = useRef<HTMLDivElement>(null)
+  useModalFocus(open, panelRef)
 
   useEffect(() => {
     if (!open) return
@@ -53,9 +60,6 @@ export function ExportPanel(): React.JSX.Element | null {
       setBusy(false)
     }
   }
-
-  const panelRef = useRef<HTMLDivElement>(null)
-  useModalFocus(true, panelRef)
 
   return (
     <div className={`modal ${closing ? 'is-closing' : ''}`} onMouseDown={() => setOpen(false)}>

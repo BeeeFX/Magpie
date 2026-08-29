@@ -16,6 +16,7 @@ const PREFETCH_MARGIN_MAX = 40000
 export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
+  const resetQuery = useStore((s) => s.resetQuery)
   const layoutRevision = useStore((s) => s.layoutRevision)
   const loading = useStore((s) => s.loading)
   const loadingMore = useStore((s) => s.loadingMore)
@@ -304,7 +305,14 @@ export function Grid(): React.JSX.Element {
       {posts.length === 0 && !loading ? (
         <div className="grid__empty">
           {accounts.some((a) => a.connected) ? (
-            <p>{t('grid.noMatch')}</p>
+            /* Une phrase sans issue : on ne se souvient pas toujours de ce qu'on a coché,
+               et il fallait retrouver chaque filtre pour le décocher un par un. */
+            <div className="empty-state empty-state--tight">
+              <p>{t('grid.noMatch')}</p>
+              <button type="button" className="btn" onClick={resetQuery}>
+                {t('grid.clearFilters')}
+              </button>
+            </div>
           ) : (
             <div className="empty-state">
               <h2>{t('grid.emptyTitle')}</h2>

@@ -10,6 +10,7 @@ import { Toolbar } from './components/Toolbar'
 import { Welcome } from './components/Welcome'
 import { AiOrganizer } from './components/AiOrganizer'
 import { ExportPanel } from './components/ExportPanel'
+import { Shortcuts } from './components/Shortcuts'
 import { useStore } from './store'
 
 export function App(): React.JSX.Element {
@@ -36,6 +37,7 @@ export function App(): React.JSX.Element {
   const mediaRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const aiOrganizerOpen = useStore((s) => s.organizerOpen)
   const setAiOrganizerOpen = useStore((s) => s.setOrganizerOpen)
+  const setShortcutsOpen = useStore((s) => s.setShortcutsOpen)
   /* L'organiseur s'ouvre depuis la barre du haut, qui pousse l'état dans le store elle-même.
      Ce raccourci ne servait qu'au bouton des réglages, retiré. */
   const closeAiOrganizer = useCallback(() => setAiOrganizerOpen(false), [])
@@ -134,6 +136,12 @@ export function App(): React.JSX.Element {
   }, [isDark, accent])
 
   useEffect(() => {
+    /** Un point d'interrogation tapé dans un champ reste un point d'interrogation. */
+    const isTyping = (target: EventTarget | null): boolean => {
+      const element = target as HTMLElement | null
+      const tag = element?.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || element?.isContentEditable === true
+    }
     const onKey = (e: KeyboardEvent): void => {
       const meta = e.ctrlKey || e.metaKey
       if (meta && e.key.toLowerCase() === 'b') {
@@ -144,10 +152,17 @@ export function App(): React.JSX.Element {
         e.preventDefault()
         setSettingsOpen(true)
       }
+      /* Le point d'interrogation, sans modificateur : c'est la convention, et il n'entre en
+         conflit avec rien tant qu'on ne tape pas. On regarde le caractère produit et non la
+         touche physique, sinon le raccourci ne marcherait que sur un clavier QWERTY. */
+      if (!meta && e.key === '?' && !isTyping(e.target)) {
+        e.preventDefault()
+        setShortcutsOpen(true)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggleSidebar, setSettingsOpen])
+  }, [toggleSidebar, setSettingsOpen, setShortcutsOpen])
 
   /* Tant que la présentation n'est pas terminée, elle occupe toute la fenêtre : le
      premier geste attendu est de connecter un compte, pas d'explorer une app vide. */
@@ -167,6 +182,7 @@ export function App(): React.JSX.Element {
       <Settings />
       <AiOrganizer open={aiOrganizerOpen} onClose={closeAiOrganizer} />
       <ExportPanel />
+      <Shortcuts />
     </div>
   )
 }

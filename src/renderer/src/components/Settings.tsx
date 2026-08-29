@@ -79,6 +79,7 @@ export function Settings(): React.JSX.Element | null {
   const aiProgress = useStore((s) => s.aiProgress)
   const setAiSettings = useStore((s) => s.setAiSettings)
   const replayOnboarding = useStore((s) => s.replayOnboarding)
+  const setShortcutsOpen = useStore((s) => s.setShortcutsOpen)
   const loadAccounts = useStore((s) => s.loadAccounts)
   const refresh = useStore((s) => s.refresh)
 
@@ -700,6 +701,19 @@ export function Settings(): React.JSX.Element | null {
             <div className="setting__actions">
               <button type="button" className="btn" onClick={() => void replayOnboarding()}>
                 {t('settings.replayTour')}
+              </button>
+              {/* Deux portes vers la liste : « ? » pour qui connaît la convention, celle-ci
+                  pour les autres. Fermer les réglages d'abord — deux modales empilées ne se
+                  ferment plus dans le bon ordre. */}
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setOpen(false)
+                  setShortcutsOpen(true)
+                }}
+              >
+                {t('shortcuts.open')}
               </button>
             </div>
           </section>

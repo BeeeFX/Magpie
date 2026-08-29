@@ -143,6 +143,7 @@ interface State {
   settingsOpen: boolean
   /** L'organisateur s'ouvre depuis le menu d'actions, donc hors de portée d'un état local. */
   organizerOpen: boolean
+  shortcutsOpen: boolean
   /** L'export vit hors du tri : on peut vouloir converser sans avoir jamais rangé. */
   exportOpen: boolean
   /* La préparation continue en arrière-plan quand on ferme la fenêtre : son état vit donc
@@ -220,6 +221,7 @@ interface State {
   toggleFavorite: (id: string) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   setOrganizerOpen: (open: boolean) => void
+  setShortcutsOpen: (open: boolean) => void
   setExportOpen: (open: boolean) => void
   setStepChoices: (ids: StepId[]) => void
   setStepStates: (patch: Partial<Record<StepId, StepState>>) => void
@@ -283,6 +285,7 @@ export const useStore = create<State>()(
       sidebarOpen: true,
       settingsOpen: false,
       organizerOpen: false,
+      shortcutsOpen: false,
       exportOpen: false,
       /* Les deux étapes légères d'entrée, les deux lourdes à la demande : télécharger
          quatorze gigaoctets et transcrire trois heures ne se déclenchent pas par défaut
@@ -538,6 +541,7 @@ export const useStore = create<State>()(
 
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setOrganizerOpen: (organizerOpen) => set({ organizerOpen }),
+      setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
       setExportOpen: (exportOpen) => set({ exportOpen }),
       setStepChoices: (stepChoices) => set({ stepChoices }),
       setStepStates: (patch) => set((s) => ({ stepStates: { ...s.stepStates, ...patch } })),
