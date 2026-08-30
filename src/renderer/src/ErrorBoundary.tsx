@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { resolveLanguage, translate, type TranslationKey } from './i18n'
 
 /**
  * Le dernier filet du rendu.
@@ -21,6 +22,23 @@ interface State {
   error: Error | null
 }
 
+/**
+ * La langue, lue là où elle est écrite plutôt que là où elle est décidée.
+ *
+ * Ce composant ne peut ni appeler `useT()` — c'est une classe — ni importer le store : il est
+ * le filet posé sous ce qui vient justement de tomber, et le store fait partie de ce qui peut
+ * tomber. Le store inscrit la langue résolue sur `<html lang>` à chaque changement ; c'est un
+ * état déjà réduit à une chaîne, hors de React, et qui survit à l'effondrement de l'arbre. Et
+ * si l'effondrement précède le chargement des réglages, l'attribut est vide : `resolveLanguage`
+ * retombe alors sur la langue du système, ce qui est exactement la bonne réponse.
+ *
+ * Sans cela, un utilisateur en anglais voyait le seul écran capable de lui dire que rien n'est
+ * perdu s'afficher en français.
+ */
+function speak(key: TranslationKey): string {
+  return translate(resolveLanguage(document.documentElement.lang), key)
+}
+
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null }
 
@@ -37,15 +55,12 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children
     return (
       <div className="crash" role="alert">
-        <h1>Magpie s’est interrompu</h1>
-        <p>
-          Votre bibliothèque est intacte : posts, tags, favoris et collections sont en base, rien
-          n’a été perdu. Recharger la fenêtre suffit le plus souvent.
-        </p>
+        <h1>{speak('crash.title')}</h1>
+        <p>{speak('crash.body')}</p>
         <pre>{error.message}</pre>
         <div className="crash__actions">
           <button type="button" onClick={() => window.location.reload()}>
-            Recharger
+            {speak('crash.reload')}
           </button>
           <button
             type="button"
@@ -54,7 +69,7 @@ export class ErrorBoundary extends Component<Props, State> {
               void navigator.clipboard.writeText(`${error.message}\n\n${error.stack ?? ''}`)
             }}
           >
-            Copier le détail
+            {speak('notice.copyDetail')}
           </button>
         </div>
       </div>

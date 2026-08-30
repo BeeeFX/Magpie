@@ -29,7 +29,7 @@ const fr = {
   'sidebar.noneYet': 'Aucune pour l’instant',
   'sidebar.organiseInvite': 'Ranger la bibliothèque en collections',
   'sidebar.noTagsYet': 'Aucun pour l’instant',
-  'sidebar.showAllTags': 'Voir les {count} tags',
+  'sidebar.showAllTags': 'Voir {count} tag|Voir les {count} tags',
   'sidebar.collapse': 'Réduire',
   'sidebar.settings': 'Réglages',
   'sidebar.newCollection': 'Nouvelle collection',
@@ -75,7 +75,7 @@ const fr = {
   'sync.hideDetails': 'Masquer la progression',
   'bulk.select': 'Sélectionner',
   'bulk.actions': 'Actions groupées',
-  'bulk.count': '{count} sélectionnés',
+  'bulk.count': '{count} sélectionné|{count} sélectionnés',
   'bulk.all': 'Tout',
   'bulk.none': 'Aucun',
   'bulk.favorite': 'Favoris',
@@ -83,7 +83,8 @@ const fr = {
   'bulk.tagPrompt': 'Tag à ajouter à la sélection',
   'bulk.collection': 'Collection',
   'bulk.collectionPrompt': 'Nom de la collection',
-  'bulk.duplicates': '{count} éléments sont déjà dans cette collection. Voulez-vous les réajouter ?',
+  'bulk.duplicates':
+    '{count} élément est déjà dans cette collection. Voulez-vous le réajouter ?|{count} éléments sont déjà dans cette collection. Voulez-vous les réajouter ?',
   'bulk.copy': 'Copier les liens',
 
   'grid.noMatch': 'Aucun signet ne correspond à ces filtres.',
@@ -233,7 +234,7 @@ const fr = {
   'steps.transcribe': 'Transcrire les vidéos',
   'steps.transcribeHint':
     'Écoute l’audio en local. C’est souvent le seul texte d’un reel, et ça change tout au regroupement.',
-  'steps.transcribeCost': '{count} vidéos · environ {time}',
+  'steps.transcribeCost': '{count} vidéo · environ {time}|{count} vidéos · environ {time}',
   'steps.group': 'Regrouper par thème',
   'steps.groupHint': 'L’étape qui produit les collections. Toujours effectuée.',
   'steps.groupCost': 'moins d’une minute',
@@ -267,7 +268,7 @@ const fr = {
   'organizer.panelLoading': 'Chargement…',
   'organizer.panelMissing': 'Ce post n’est plus dans la bibliothèque.',
   'organizer.panelNoMedia': 'Pas de média en cache',
-  'organizer.panelMediaCount': '{count} médias',
+  'organizer.panelMediaCount': '{count} média|{count} médias',
   'organizer.panelOpen': 'Ouvrir la page d’origine',
   'organizer.edgeRegenerate': 'Regénérer la carte',
   'toolbar.map': 'Carte sémantique',
@@ -351,11 +352,12 @@ const fr = {
   'map.lockedText': 'Elle place vos posts par ressemblance, ce qui suppose d’avoir regardé les images et écouté les clips. Le rangement rapide n’en donne pas la matière.',
   'map.lockedAction': 'Lancer l’analyse approfondie',
   'organizer.keepTitle': 'Que garder de votre rangement actuel ?',
-  'organizer.keepText': 'L’analyse approfondie va proposer un jeu de collections complet. Vos {count} collections actuelles couvriraient les mêmes thèmes sous d’autres noms : cochez celles que vous voulez garder malgré tout.',
+  'organizer.keepText':
+    'L’analyse approfondie va proposer un jeu de collections complet. Votre collection actuelle couvrirait les mêmes thèmes sous un autre nom : cochez-la si vous voulez la garder malgré tout.|L’analyse approfondie va proposer un jeu de collections complet. Vos {count} collections actuelles couvriraient les mêmes thèmes sous d’autres noms : cochez celles que vous voulez garder malgré tout.',
   'organizer.keepNote': 'Ce que vous gardez devient une liste figée : rien ne la recalcule, et elle n’apparaît pas sur la carte — elle n’a pas de définition à y montrer. Elle reste utilisable partout ailleurs.',
   'organizer.keepNone': 'Tout remplacer',
   'organizer.keepOne': 'Garder 1 collection',
-  'organizer.keepMany': 'Garder {count} collections',
+  'organizer.keepMany': 'Garder {count} collection|Garder {count} collections',
   'organizer.readyTitle': 'Votre bibliothèque est prête',
   'organizer.readyText': 'Tout a été lu : les images, les clips, les légendes. La carte sémantique est débloquée, et c’est là que vos collections se décrivent et se règlent.',
   'organizer.quickDoneText': 'Vos collections sont rangées. Pour la carte sémantique et les collections par mots-clés, il faudra l’analyse approfondie.',
@@ -413,7 +415,7 @@ const fr = {
   'settings.clearCache': 'Vider le cache',
   'settings.clearing': 'Purge…',
   'settings.cachePartial':
-    '{count} fichier(s) étaient encore ouverts et n’ont pas pu être supprimés. Refermez la vue détaillée puis réessayez.',
+    '{count} fichier était encore ouvert et n’a pas pu être supprimé. Refermez la vue détaillée puis réessayez.|{count} fichiers étaient encore ouverts et n’ont pas pu être supprimés. Refermez la vue détaillée puis réessayez.',
   'settings.cacheError': 'Le cache n’a pas pu être vidé.',
   'actions.more': 'Autres actions',
   'actions.organize': 'Organiser en collections',
@@ -453,13 +455,13 @@ const fr = {
   'actions.fetchNew': 'Chercher les nouveautés',
   'actions.fetchNewHint': 'Récupère ce que vous avez enregistré ou aimé depuis la dernière fois.',
   'actions.transcribe': 'Transcrire les vidéos',
-  'actions.transcribeHint': '{count} vidéos sans transcription',
+  'actions.transcribeHint': '{count} vidéo sans transcription|{count} vidéos sans transcription',
   'downloads.title': 'Téléchargements',
   'downloads.thumbsName': 'Images des tuiles',
   'downloads.clipsName': 'Vidéos en {quality}',
   'downloads.amount': '{count} · {size}',
   'downloads.allDone': 'à jour',
-  'downloads.perMinute': '{count} éléments/min',
+  'downloads.perMinute': '{count} élément/min|{count} éléments/min',
   'downloads.loadProfile': 'Charge machine',
   'downloads.load.light': 'Léger',
   'downloads.load.balanced': 'Équilibré',
@@ -487,7 +489,7 @@ const fr = {
   'downloads.kind.transcribe': 'Transcription',
   'settings.preloadTitle': 'Préparer toutes les vignettes',
   'settings.preloadPending':
-    '{count} vignettes du mur restent à préparer, soit environ {size}. Elles se préparent sinon au fil de votre défilement.',
+    '{count} vignette du mur reste à préparer, soit environ {size}. Elle se prépare sinon au fil de votre défilement.|{count} vignettes du mur restent à préparer, soit environ {size}. Elles se préparent sinon au fil de votre défilement.',
   'settings.preloadRunning': 'Préparation : {done} / {total}',
   'settings.preloadEta': 'environ {eta} restantes',
   'welcome.syncIdle': 'La première synchronisation va démarrer…',
@@ -543,6 +545,10 @@ const fr = {
   'accent.azure': 'Azur',
   'accent.lime': 'Citron',
 
+  'crash.title': 'Magpie s’est interrompu',
+  'crash.body':
+    'Votre bibliothèque est intacte : posts, tags, favoris et collections sont en base, rien n’a été perdu. Recharger la fenêtre suffit le plus souvent.',
+  'crash.reload': 'Recharger',
   'notice.settingFailed': 'Ce réglage n’a pas pu être enregistré.',
   'notice.favoriteFailed': 'Les favoris n’ont pas pu être modifiés.',
   'notice.tagFailed': 'Le tag n’a pas pu être ajouté.',
@@ -557,19 +563,19 @@ const fr = {
   'grid.loadErrorText': 'Vos posts sont en base, rien n’est perdu. Réessayer suffit le plus souvent.',
   'grid.retry': 'Réessayer',
   'notice.selectionFailed': 'La sélection complète n’a pas pu être réunie.',
-  'bulk.favorited': '{count} ajoutés aux favoris',
-  'bulk.unfavorited': '{count} retirés des favoris',
-  'bulk.tagged': '{count} posts tagués « {name} »',
-  'bulk.untagged': 'Tag « {name} » retiré de {count} posts',
+  'bulk.favorited': '{count} ajouté aux favoris|{count} ajoutés aux favoris',
+  'bulk.unfavorited': '{count} retiré des favoris|{count} retirés des favoris',
+  'bulk.tagged': '{count} post tagué « {name} »|{count} posts tagués « {name} »',
+  'bulk.untagged': 'Tag « {name} » retiré de {count} post|Tag « {name} » retiré de {count} posts',
   'bulk.unfavorite': 'Retirer des favoris',
   'bulk.untag': 'Retirer un tag',
   'bulk.untagPrompt': 'Tag à retirer de la sélection',
   'bulk.selecting': 'Sélection…',
   'toolbar.clearFilters': 'Tout décocher',
   'bulk.apply': 'Appliquer à la sélection',
-  'bulk.addedTo': '{count} ajoutés à « {name} »',
+  'bulk.addedTo': '{count} ajouté à « {name} »|{count} ajoutés à « {name} »',
   'bulk.readd': 'Les réajouter',
-  'bulk.copied': '{count} liens copiés',
+  'bulk.copied': '{count} lien copié|{count} liens copiés',
   'accounts.fullSyncYes': 'Revérifier tout l’historique',
   'settings.clearCacheYes': 'Purger le cache',
   'actions.recheckYes': 'Revérifier tout l’historique',
@@ -695,7 +701,7 @@ const en: Record<TranslationKey, string> = {
   'sidebar.noneYet': 'None yet',
   'sidebar.organiseInvite': 'Organise the library into collections',
   'sidebar.noTagsYet': 'None yet',
-  'sidebar.showAllTags': 'Show all {count} tags',
+  'sidebar.showAllTags': 'Show {count} tag|Show all {count} tags',
   'sidebar.collapse': 'Show fewer',
   'sidebar.settings': 'Settings',
   'sidebar.newCollection': 'New collection',
@@ -741,7 +747,7 @@ const en: Record<TranslationKey, string> = {
   'sync.hideDetails': 'Hide progress',
   'bulk.select': 'Select',
   'bulk.actions': 'Bulk actions',
-  'bulk.count': '{count} selected',
+  'bulk.count': '{count} selected|{count} selected',
   'bulk.all': 'All',
   'bulk.none': 'None',
   'bulk.favorite': 'Favourite',
@@ -749,7 +755,8 @@ const en: Record<TranslationKey, string> = {
   'bulk.tagPrompt': 'Tag to add to the selection',
   'bulk.collection': 'Collection',
   'bulk.collectionPrompt': 'Collection name',
-  'bulk.duplicates': '{count} items are already in this collection. Re-add them?',
+  'bulk.duplicates':
+    '{count} item is already in this collection. Re-add it?|{count} items are already in this collection. Re-add them?',
   'bulk.copy': 'Copy links',
 
   'grid.noMatch': 'No bookmarks match these filters.',
@@ -898,7 +905,7 @@ const en: Record<TranslationKey, string> = {
   'steps.transcribe': 'Transcribe videos',
   'steps.transcribeHint':
     'Listens to the audio locally. It is often a reel’s only text, and it changes everything for grouping.',
-  'steps.transcribeCost': '{count} videos · about {time}',
+  'steps.transcribeCost': '{count} video · about {time}|{count} videos · about {time}',
   'steps.group': 'Group by theme',
   'steps.groupHint': 'The step that produces the collections. Always run.',
   'steps.groupCost': 'under a minute',
@@ -932,7 +939,7 @@ const en: Record<TranslationKey, string> = {
   'organizer.panelLoading': 'Loading…',
   'organizer.panelMissing': 'This post is no longer in the library.',
   'organizer.panelNoMedia': 'No cached media',
-  'organizer.panelMediaCount': '{count} media',
+  'organizer.panelMediaCount': '{count} media|{count} media',
   'organizer.panelOpen': 'Open the original page',
   'organizer.edgeRegenerate': 'Regenerate the map',
   'toolbar.map': 'Semantic map',
@@ -1016,11 +1023,12 @@ const en: Record<TranslationKey, string> = {
   'map.lockedText': 'It places your posts by similarity, which means having looked at the images and listened to the clips. The quick pass does not produce that.',
   'map.lockedAction': 'Run the thorough analysis',
   'organizer.keepTitle': 'What should Magpie keep from your current setup?',
-  'organizer.keepText': 'The thorough analysis will propose a complete set of collections. Your {count} current ones would cover the same themes under other names: tick any you want to keep anyway.',
+  'organizer.keepText':
+    'The thorough analysis will propose a complete set of collections. Your current one would cover the same themes under another name: tick it if you want to keep it anyway.|The thorough analysis will propose a complete set of collections. Your {count} current ones would cover the same themes under other names: tick any you want to keep anyway.',
   'organizer.keepNote': 'What you keep becomes a frozen list: nothing recomputes it, and it does not appear on the map — it has no definition to show there. It stays usable everywhere else.',
   'organizer.keepNone': 'Replace everything',
   'organizer.keepOne': 'Keep 1 collection',
-  'organizer.keepMany': 'Keep {count} collections',
+  'organizer.keepMany': 'Keep {count} collection|Keep {count} collections',
   'organizer.readyTitle': 'Your library is ready',
   'organizer.readyText': 'Everything has been read: the images, the clips, the captions. The semantic map is unlocked, and that is where your collections are described and tuned.',
   'organizer.quickDoneText': 'Your collections are in order. For the semantic map and keyword collections, you will need the thorough analysis.',
@@ -1077,7 +1085,7 @@ const en: Record<TranslationKey, string> = {
   'settings.clearCache': 'Clear cache',
   'settings.clearing': 'Clearing…',
   'settings.cachePartial':
-    '{count} file(s) were still open and could not be deleted. Close the detail view and try again.',
+    '{count} file was still open and could not be deleted. Close the detail view and try again.|{count} files were still open and could not be deleted. Close the detail view and try again.',
   'settings.cacheError': 'The cache could not be cleared.',
   'actions.more': 'More actions',
   'actions.organize': 'Organise into collections',
@@ -1117,13 +1125,13 @@ const en: Record<TranslationKey, string> = {
   'actions.fetchNew': 'Check for new items',
   'actions.fetchNewHint': 'Fetches what you saved or liked since last time.',
   'actions.transcribe': 'Transcribe videos',
-  'actions.transcribeHint': '{count} videos without a transcript',
+  'actions.transcribeHint': '{count} video without a transcript|{count} videos without a transcript',
   'downloads.title': 'Downloads',
   'downloads.thumbsName': 'Tile images',
   'downloads.clipsName': 'Videos in {quality}',
   'downloads.amount': '{count} · {size}',
   'downloads.allDone': 'up to date',
-  'downloads.perMinute': '{count} items/min',
+  'downloads.perMinute': '{count} item/min|{count} items/min',
   'downloads.loadProfile': 'Machine load',
   'downloads.load.light': 'Light',
   'downloads.load.balanced': 'Balanced',
@@ -1151,7 +1159,7 @@ const en: Record<TranslationKey, string> = {
   'downloads.kind.transcribe': 'Transcribing',
   'settings.preloadTitle': 'Prepare every thumbnail',
   'settings.preloadPending':
-    '{count} wall thumbnails left to prepare, roughly {size}. Otherwise they are prepared as you scroll.',
+    '{count} wall thumbnail left to prepare, roughly {size}. Otherwise it is prepared as you scroll.|{count} wall thumbnails left to prepare, roughly {size}. Otherwise they are prepared as you scroll.',
   'settings.preloadRunning': 'Preparing: {done} / {total}',
   'settings.preloadEta': 'about {eta} left',
   'welcome.syncIdle': 'The first sync is about to start…',
@@ -1207,6 +1215,10 @@ const en: Record<TranslationKey, string> = {
   'accent.azure': 'Azure',
   'accent.lime': 'Lime',
 
+  'crash.title': 'Magpie stopped',
+  'crash.body':
+    'Your library is intact: posts, tags, favourites and collections are in the database, nothing was lost. Reloading the window is usually enough.',
+  'crash.reload': 'Reload',
   'notice.settingFailed': 'That setting could not be saved.',
   'notice.favoriteFailed': 'Favourites could not be changed.',
   'notice.tagFailed': 'The tag could not be added.',
@@ -1221,19 +1233,19 @@ const en: Record<TranslationKey, string> = {
   'grid.loadErrorText': 'Your posts are in the database, nothing is lost. Trying again usually works.',
   'grid.retry': 'Try again',
   'notice.selectionFailed': 'The full selection could not be gathered.',
-  'bulk.favorited': '{count} added to favourites',
-  'bulk.unfavorited': '{count} removed from favourites',
-  'bulk.tagged': '{count} posts tagged “{name}”',
-  'bulk.untagged': 'Tag “{name}” removed from {count} posts',
+  'bulk.favorited': '{count} added to favourites|{count} added to favourites',
+  'bulk.unfavorited': '{count} removed from favourites|{count} removed from favourites',
+  'bulk.tagged': '{count} post tagged “{name}”|{count} posts tagged “{name}”',
+  'bulk.untagged': 'Tag “{name}” removed from {count} post|Tag “{name}” removed from {count} posts',
   'bulk.unfavorite': 'Remove from favourites',
   'bulk.untag': 'Remove a tag',
   'bulk.untagPrompt': 'Tag to remove from the selection',
   'bulk.selecting': 'Selecting…',
   'toolbar.clearFilters': 'Clear all',
   'bulk.apply': 'Apply to the selection',
-  'bulk.addedTo': '{count} added to “{name}”',
+  'bulk.addedTo': '{count} added to “{name}”|{count} added to “{name}”',
   'bulk.readd': 'Add them back',
-  'bulk.copied': '{count} links copied',
+  'bulk.copied': '{count} link copied|{count} links copied',
   'accounts.fullSyncYes': 'Re-check the whole history',
   'settings.clearCacheYes': 'Clear the cache',
   'actions.recheckYes': 'Re-check the whole history',
@@ -1356,6 +1368,30 @@ export function resolveLanguage(choice: string): Language {
   return navigator.language.toLowerCase().startsWith('fr') ? 'fr' : 'en'
 }
 
+/**
+ * La forme qui va avec le nombre.
+ *
+ * Une seule phrase servait pour toutes les quantités, et une bibliothèque en contient
+ * beaucoup de un : « 1 sélectionnés », « 1 vidéos sans transcription », « Tag « x » retiré de
+ * 1 posts ». Un endroit s'en sortait par « {count} fichier(s) » — la parenthèse dit exactement
+ * qu'on a renoncé.
+ *
+ * **Le choix dépend de la langue, pas seulement du nombre.** Le français range zéro avec le
+ * singulier — « 0 vidéo », « 1 vidéo », « 2 vidéos » — quand l'anglais dit « 0 videos ». Une
+ * règle unique se serait donc trompée dans une des deux langues à chaque affichage d'un
+ * ensemble vide, c'est-à-dire au moment où l'on lit le plus attentivement.
+ *
+ * Les valeurs sans `|` ne sont pas des oublis : « {count} à lire », « {count} · {size} » ne
+ * font accorder aucun mot. `check:i18n` exige seulement que les deux langues soient d'accord
+ * sur l'existence des formes.
+ */
+function pick(template: string, language: Language, count: number): string {
+  const forms = template.split('|')
+  if (forms.length < 2) return template
+  const singular = language === 'fr' ? Math.abs(count) < 2 : Math.abs(count) === 1
+  return singular ? forms[0] : forms[1]
+}
+
 export function translate(
   language: Language,
   key: TranslationKey,
@@ -1363,7 +1399,9 @@ export function translate(
 ): string {
   const template = DICTIONARIES[language][key]
   if (!vars) return template
-  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+  // La forme se choisit avant l'interpolation : le nombre décide de la phrase, puis y entre.
+  const chosen = typeof vars.count === 'number' ? pick(template, language, vars.count) : template
+  return chosen.replace(/\{(\w+)\}/g, (match, name: string) =>
     name in vars ? String(vars[name]) : match
   )
 }

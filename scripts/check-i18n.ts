@@ -174,6 +174,71 @@ if (bare.length === 0) {
   for (const hole of bare) console.error(`  ✗ ${hole}`)
 }
 
+/**
+ * Les formes du pluriel, présentes des deux côtés ou d'aucun.
+ *
+ * Une seule phrase servait pour toutes les quantités, et une bibliothèque en contient beaucoup
+ * de un : « 1 sélectionnés », « 1 vidéos sans transcription ». Un endroit s'en sortait par
+ * « {count} fichier(s) » — la parenthèse dit exactement qu'on a renoncé.
+ *
+ * Deux dangers, et deux règles :
+ *
+ * - **une forme oubliée dans une langue.** Le séparateur n'est pas un caractère spécial : une
+ *   valeur avec `|` que rien ne découpe s'affiche telle quelle, barre comprise. Ajouter le
+ *   pluriel en français en oubliant l'anglais mettrait donc « 3 files was still open|3 files
+ *   were still open » à l'écran ;
+ * - **trois formes au lieu de deux.** `pick` ignore la troisième en silence.
+ *
+ * Il n'y a délibérément pas de règle exigeant `|` partout où un `{count}` apparaît : « {count}
+ * à lire » et « {count} · {size} » ne font accorder aucun mot, et une telle règle forcerait à
+ * dupliquer des phrases identiques pour rien.
+ */
+console.log('\nFormes du pluriel\n')
+
+{
+  /* Chaque clé apparaît deux fois dans le fichier, une par dictionnaire : sans le `Set`, tout
+     manquement se signalait en double. */
+  const keys = new Set(
+    [...dictionary.matchAll(/^ {2}'([a-zA-Z][\w.]*)':/gm)].map((match) => match[1])
+  )
+  const withForms = new Map<string, Set<Language>>()
+  const malformed: string[] = []
+  for (const key of keys) {
+    for (const language of LANGUAGES) {
+      const text = translate(language, key as TranslationKey) as string | undefined
+      if (!text || !text.includes('|')) continue
+      if (!withForms.has(key)) withForms.set(key, new Set())
+      withForms.get(key)!.add(language)
+      const forms = text.split('|')
+      if (forms.length !== 2) {
+        malformed.push(`${key} (${language}) — ${forms.length} formes, il en faut deux`)
+      }
+    }
+  }
+
+  const lonely = [...withForms.entries()]
+    .filter(([, langs]) => langs.size !== LANGUAGES.length)
+    .map(([key, langs]) => `${key} — formes en ${[...langs].join(', ')} seulement`)
+
+  /* Et la dérobade d'origine ne doit pas revenir : « fichier(s) » est une phrase qui refuse de
+     choisir, dans une interface où le nombre est toujours connu au moment du rendu. */
+  const dodging: string[] = []
+  for (const key of keys) {
+    for (const language of LANGUAGES) {
+      const text = translate(language, key as TranslationKey) as string | undefined
+      if (text && /\w\(s\)/.test(text)) dodging.push(`${key} (${language}) — ${text.slice(0, 40)}…`)
+    }
+  }
+
+  const problems = [...malformed, ...lonely, ...dodging]
+  if (problems.length === 0) {
+    console.log(`  ✓ ${withForms.size} phrases à deux formes, complètes dans les deux langues`)
+  } else {
+    failures += problems.length
+    for (const problem of problems) console.error(`  ✗ ${problem}`)
+  }
+}
+
 if (failures > 0) {
   console.error(`\n${failures} problème(s).`)
   process.exit(1)
