@@ -25,6 +25,10 @@
     // Le moteur de mise en page vit côté renderer mais ne dépend d'aucune API DOM :
     // `scripts/check-layout.ts` l'exécute sous Node, il doit donc être visible ici aussi.
     "src/renderer/src/layout.ts",
+    // Même cas : ce que « filtrer » veut dire, et le découpage d'une sélection, sont des
+    // fonctions pures que `scripts/check-query.ts` rejoue sous Node.
+    "src/renderer/src/query.ts",
+    "src/renderer/src/selection.ts",
     // Même cas : la couverture du tampon de la carte est de la géométrie pure, et
     // `scripts/bench-map-zoom.mts` la rejoue sous Node pour compter les retracés.
     "src/renderer/src/map-coverage.ts",

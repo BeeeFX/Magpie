@@ -85,6 +85,9 @@ const api: MagpieApi = {
   getPostsByIds: (ids: string[]): Promise<Post[]> => ipcRenderer.invoke('posts:byIds', ids),
   getStats: (): Promise<LibraryStats> => ipcRenderer.invoke('stats:get'),
   toggleFavorite: (id: string): Promise<boolean> => ipcRenderer.invoke('posts:toggleFavorite', id),
+  removeTagMany: (ids: string[], name: string): Promise<void> =>
+    ipcRenderer.invoke('tags:removeMany', ids, name),
+  postUrls: (ids: string[]): Promise<string[]> => ipcRenderer.invoke('posts:urls', ids),
   setFavoriteMany: (ids: string[], value: boolean): Promise<void> =>
     ipcRenderer.invoke('posts:setFavoriteMany', ids, value),
   addTagMany: (ids: string[], name: string): Promise<void> =>

@@ -17,7 +17,7 @@ const PREFETCH_MARGIN_MAX = 40000
 export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
-  const resetQuery = useStore((s) => s.resetQuery)
+  const clearFilters = useStore((s) => s.clearFilters)
   const layoutRevision = useStore((s) => s.layoutRevision)
   const loading = useStore((s) => s.loading)
   const loadingMore = useStore((s) => s.loadingMore)
@@ -311,7 +311,7 @@ export function Grid(): React.JSX.Element {
                et il fallait retrouver chaque filtre pour le décocher un par un. */
             <div className="empty-state empty-state--tight">
               <p>{t('grid.noMatch')}</p>
-              <button type="button" className="btn" onClick={resetQuery}>
+              <button type="button" className="btn" onClick={clearFilters}>
                 {t('grid.clearFilters')}
               </button>
             </div>

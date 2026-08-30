@@ -215,6 +215,30 @@ export function listPosts(query: PostQuery): Post[] {
 }
 
 /** Actualisation ciblée utilisée quand des vignettes viennent d'être préparées. */
+/**
+ * Les adresses de posts choisis, et rien d'autre.
+ *
+ * « Copier les liens » filtrait le tableau chargé, donc ne copiait que les posts encore à
+ * l'écran : la barre annonçait quarante sélectionnés et le presse-papier en recevait trois.
+ * Passer par `getPostsByIds` n'était pas une option — il plafonne à cent par appel et ramène
+ * médias, tags et provenances pour n'en garder que l'URL. Une colonne, sans jointure, comme
+ * `listPostIds`.
+ */
+export function postUrls(rawIds: string[]): string[] {
+  const ids = [...new Set(rawIds)]
+  if (ids.length === 0) return []
+  const placeholders = ids.map(() => '?').join(',')
+  const rows = getDb()
+    .prepare(`SELECT id, url FROM posts WHERE id IN (${placeholders})`)
+    .all(...ids) as { id: string; url: string }[]
+  /* L'ordre du presse-papier suit celui de la demande, qui est celui que l'utilisateur voit. */
+  const byId = new Map(rows.map((row) => [row.id, row.url]))
+  return ids.flatMap((id) => {
+    const url = byId.get(id)
+    return url ? [url] : []
+  })
+}
+
 export function getPostsByIds(rawIds: string[]): Post[] {
   const ids = [...new Set(rawIds)].slice(0, 100)
   if (ids.length === 0) return []
@@ -536,6 +560,27 @@ export function addTagMany(ids: string[], name: string): void {
     for (const id of ids) stmt.run(id, tag.id)
   })()
 }
+
+/**
+ * Retirer un tag d'un lot de posts.
+ *
+ * Le pendant d'`addTagMany`, qui n'existait pas : un tag posé par erreur sur trois cents posts
+ * ne se retirait qu'un post à la fois, depuis la vue détaillée, trois cents fois.
+ */
+export function removeTagMany(ids: string[], name: string): void {
+  if (ids.length === 0 || !name.trim()) return
+  const db = getDb()
+  const clean = name.trim()
+  db.transaction(() => {
+    const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(clean) as
+      | { id: number }
+      | undefined
+    if (!tag) return
+    const drop = db.prepare('DELETE FROM post_tags WHERE post_id = ? AND tag_id = ?')
+    for (const id of ids) drop.run(id, tag.id)
+  })()
+}
+
 
 export interface AiCandidate {
   id: string

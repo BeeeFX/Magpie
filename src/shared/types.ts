@@ -19,6 +19,16 @@ export const CONTENT_SOURCES = ['saved', 'liked'] as const
 export type ContentSource = (typeof CONTENT_SOURCES)[number]
 
 /**
+ * Combien d'identifiants une action groupée peut porter d'un coup.
+ *
+ * Le processus principal refuse au-delà : soixante mille `UPDATE` dans une seule transaction,
+ * c'est plusieurs secondes de fenêtre gelée. La constante est lue des deux côtés — le garde-fou
+ * et la taille des tranches ne peuvent donc pas diverger, ce qui transformerait « Tout » en
+ * erreur sur une grande bibliothèque.
+ */
+export const BULK_MAX = 5000
+
+/**
  * Ce que Magpie prépare tout seul après chaque synchronisation, avant de ranger.
  *
  * Les mêmes étapes que l'écran de préparation, moins celles qui n'ont pas de sens ici : la
@@ -396,6 +406,8 @@ export interface MagpieApi {
   getStats(): Promise<LibraryStats>
   toggleFavorite(id: string): Promise<boolean>
   setFavoriteMany(ids: string[], value: boolean): Promise<void>
+  removeTagMany(ids: string[], name: string): Promise<void>
+  postUrls(ids: string[]): Promise<string[]>
   addTagMany(ids: string[], name: string): Promise<void>
   hasAiKey(provider: AiProvider): Promise<boolean>
   setAiKey(provider: AiProvider, key: string): Promise<void>

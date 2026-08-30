@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CollectionInfo, PostKind, SortKey } from '@shared/types'
 import type { TranslationKey } from '../i18n'
 import { notifyError, notifyInfo, notifySuccess, reportFailure } from '../notices'
+import { activeFilterCount } from '../query'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Popover } from './Popover'
 import { OrganizeButton } from './OrganizeButton'
@@ -19,6 +20,13 @@ import {
   IconSort,
   IconVolume
 } from './Icons'
+
+/** Ce que chaque formulaire de la barre demande. */
+const BULK_PROMPT = {
+  tag: 'bulk.tagPrompt',
+  untag: 'bulk.untagPrompt',
+  collection: 'bulk.collectionPrompt'
+} as const satisfies Record<'tag' | 'untag' | 'collection', TranslationKey>
 
 const SORTS: { key: SortKey; label: TranslationKey }[] = [
   { key: 'saved', label: 'sort.saved' },
@@ -40,6 +48,7 @@ export function Toolbar(): React.JSX.Element {
   const t = useT()
   const query = useStore((s) => s.query)
   const setQuery = useStore((s) => s.setQuery)
+  const clearFilters = useStore((s) => s.clearFilters)
   const setSort = useStore((s) => s.setSort)
   const mode = useStore((s) => s.gridMode)
   const setGridMode = useStore((s) => s.setGridMode)
@@ -52,14 +61,16 @@ export function Toolbar(): React.JSX.Element {
   const selectionMode = useStore((s) => s.selectionMode)
   const selectedIds = useStore((s) => s.selectedIds)
   const setSelectionMode = useStore((s) => s.setSelectionMode)
-  const selectAllVisible = useStore((s) => s.selectAllVisible)
+  const selectAllResults = useStore((s) => s.selectAllResults)
+  const selecting = useStore((s) => s.selecting)
+  const untagSelection = useStore((s) => s.untagSelection)
   const clearSelection = useStore((s) => s.clearSelection)
   const favoriteSelection = useStore((s) => s.favoriteSelection)
   const tagSelection = useStore((s) => s.tagSelection)
 
   const [search, setSearch] = useState(query.search)
   /** Quel formulaire de la barre de sélection est ouvert, s'il y en a un. */
-  const [bulkForm, setBulkForm] = useState<'tag' | 'collection' | null>(null)
+  const [bulkForm, setBulkForm] = useState<'tag' | 'untag' | 'collection' | null>(null)
   const [bulkDraft, setBulkDraft] = useState('')
   const [bulkCollections, setBulkCollections] = useState<CollectionInfo[]>([])
 
@@ -96,7 +107,7 @@ export function Toolbar(): React.JSX.Element {
     setQuery({ kinds: active ? query.kinds.filter((k) => k !== kind) : [...query.kinds, kind] })
   }
 
-  const activeFilters = query.kinds.length + (query.untaggedOnly ? 1 : 0)
+  const activeFilters = activeFilterCount(query)
   const sortKey = SORTS.find((s) => s.key === query.sort)?.label
 
   /**
@@ -224,6 +235,18 @@ export function Toolbar(): React.JSX.Element {
                 </button>
               ))}
               <div className="popover__sep" />
+              {/* Le menu comptait les filtres actifs sans jamais offrir de les lever : il
+                  fallait rouvrir et décocher chaque type un par un. */}
+              <button
+                type="button"
+                className="menu-item"
+                disabled={activeFilters === 0}
+                onClick={clearFilters}
+              >
+                <span className="menu-item__mark" />
+                {t('toolbar.clearFilters')}
+              </button>
+              <div className="popover__sep" />
               <button
                 type="button"
                 className="menu-item"
@@ -337,20 +360,36 @@ export function Toolbar(): React.JSX.Element {
       {selectionMode ? (
         <div className="bulk-bar" role="toolbar" aria-label={t('bulk.actions')}>
           <strong>{t('bulk.count', { count: selectedIds.length })}</strong>
-          <button type="button" className="btn" onClick={selectAllVisible}>
-            {t('bulk.all')}
+          <button
+            type="button"
+            className="btn"
+            disabled={selecting}
+            onClick={() => void selectAllResults()}
+          >
+            {t(selecting ? 'bulk.selecting' : 'bulk.all')}
           </button>
           <button type="button" className="btn" onClick={clearSelection}>
             {t('bulk.none')}
           </button>
           <span className="divider" />
+          {/* Deux boutons explicites plutôt qu'une bascule : on ne sait pas si les neuf mille
+              sélectionnés sont déjà en favori — la moitié n'est même pas chargée — donc deviner
+              serait mentir. Et « Favoris » était un aller sans retour, câblé en dur sur vrai. */}
           <button
             type="button"
             className="btn"
             disabled={selectedIds.length === 0}
-            onClick={() => void favoriteSelection()}
+            onClick={() => void favoriteSelection(true)}
           >
             {t('bulk.favorite')}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={selectedIds.length === 0}
+            onClick={() => void favoriteSelection(false)}
+          >
+            {t('bulk.unfavorite')}
           </button>
           <button
             type="button"
@@ -359,6 +398,14 @@ export function Toolbar(): React.JSX.Element {
             onClick={() => setBulkForm(bulkForm === 'tag' ? null : 'tag')}
           >
             {t('bulk.tag')}
+          </button>
+          <button
+            type="button"
+            className={`btn ${bulkForm === 'untag' ? 'is-active' : ''}`}
+            disabled={selectedIds.length === 0}
+            onClick={() => setBulkForm(bulkForm === 'untag' ? null : 'untag')}
+          >
+            {t('bulk.untag')}
           </button>
           <button
             type="button"
@@ -388,18 +435,21 @@ export function Toolbar(): React.JSX.Element {
                 const name = bulkDraft.trim()
                 if (!name) return
                 setBulkDraft('')
-                if (bulkForm === 'tag') {
-                  setBulkForm(null)
-                  void tagSelection(name)
-                } else void addSelectionToCollection(name)
+                if (bulkForm === 'collection') {
+                  void addSelectionToCollection(name)
+                  return
+                }
+                setBulkForm(null)
+                if (bulkForm === 'tag') void tagSelection(name)
+                else void untagSelection(name)
               }}
             >
               <input
                 autoFocus
                 value={bulkDraft}
                 maxLength={80}
-                placeholder={t(bulkForm === 'tag' ? 'bulk.tagPrompt' : 'bulk.collectionPrompt')}
-                aria-label={t(bulkForm === 'tag' ? 'bulk.tagPrompt' : 'bulk.collectionPrompt')}
+                placeholder={t(BULK_PROMPT[bulkForm])}
+                aria-label={t(BULK_PROMPT[bulkForm])}
                 list={bulkForm === 'collection' ? 'bulk-collections' : undefined}
                 onChange={(event) => setBulkDraft(event.target.value)}
                 onKeyDown={(event) => {

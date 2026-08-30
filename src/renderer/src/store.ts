@@ -26,7 +26,9 @@ import type {
 import type { Language, LanguageChoice } from '@shared/types'
 import { AFTER_SYNC_STEPS, DEFAULT_QUERY, idleSyncState } from '@shared/types'
 import { magpie } from './bridge'
-import { notifyError, reportFailure } from './notices'
+import { notifyError, notifySuccess, reportFailure } from './notices'
+import { clearedQuery } from './query'
+import { chunk } from './selection'
 import { setFormatLanguage } from './format'
 import { resolveLanguage, translate, type TranslationKey } from './i18n'
 
@@ -223,6 +225,7 @@ interface State {
   loadMore: () => Promise<void>
   setQuery: (patch: Partial<PostQuery>) => void
   resetQuery: () => void
+  clearFilters: () => void
   setSort: (sort: SortKey) => void
   setGridMode: (mode: GridMode) => void
   setDensity: (density: number) => void
@@ -233,10 +236,13 @@ interface State {
   setHoverAudio: (hoverAudio: boolean) => void
   setSelectionMode: (enabled: boolean) => void
   toggleSelected: (id: string) => void
-  selectAllVisible: () => void
+  selectAllResults: () => Promise<void>
+  /** Vrai le temps de réunir les identifiants du résultat complet. */
+  selecting: boolean
   clearSelection: () => void
-  favoriteSelection: () => Promise<void>
+  favoriteSelection: (value: boolean) => Promise<void>
   tagSelection: (name: string) => Promise<void>
+  untagSelection: (name: string) => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   setOrganizerOpen: (open: boolean) => void
@@ -325,6 +331,7 @@ export const useStore = create<State>()(
       detailIndex: null,
       selectionMode: false,
       selectedIds: [],
+      selecting: false,
       detailOrigin: null,
       scrollTop: 0,
 
@@ -474,7 +481,10 @@ export const useStore = create<State>()(
       },
 
       setQuery: (patch) => {
-        set({ query: { ...get().query, ...patch }, scrollTop: 0, detailIndex: null })
+        /* Une sélection appartient au jeu de résultats qui l'a produite : changer de filtre la
+           vide, sans quoi la barre annonçait « 40 sélectionnés » alors qu'aucun des quarante
+           n'était à l'écran — et les actions groupées s'appliquaient bien à ces quarante-là. */
+        set({ query: { ...get().query, ...patch }, scrollTop: 0, detailIndex: null, selectedIds: [] })
         flushDeferredUiStorage()
         void get().refresh(true)
       },
@@ -493,7 +503,27 @@ export const useStore = create<State>()(
             collectionIds: []
           },
           scrollTop: 0,
-          detailIndex: null
+          detailIndex: null,
+          selectedIds: []
+        })
+        flushDeferredUiStorage()
+        void get().refresh(true)
+      },
+
+      /**
+       * Les filtres, et eux seuls.
+       *
+       * Distinct de `resetQuery`, qui est le bouton « Tous » de la barre latérale et doit
+       * garder la recherche et le tri en changeant de catégorie. Le bouton de l'état vide
+       * appelait celui-là : il laissait donc en place exactement ce que la barre d'outils
+       * compte comme filtres, et paraissait cassé.
+       */
+      clearFilters: () => {
+        set({
+          query: clearedQuery(get().query),
+          scrollTop: 0,
+          detailIndex: null,
+          selectedIds: []
         })
         flushDeferredUiStorage()
         void get().refresh(true)
@@ -524,18 +554,36 @@ export const useStore = create<State>()(
         else selected.add(id)
         set({ selectedIds: [...selected] })
       },
-      selectAllVisible: () => set({ selectedIds: get().posts.map((post) => post.id) }),
+      /**
+       * « Tout », c'est tout le résultat — pas la tranche chargée.
+       *
+       * Elle ne prenait que `posts`, soit trois cents posts sur une recherche qui en retourne
+       * neuf mille, et annonçait ensuite « 300 sélectionnés » sans que rien ne dise que ce
+       * n'était pas tout. `listPostIds` existe précisément pour ça : la carte lui réclame déjà
+       * la bibliothèque entière à chaque ouverture.
+       */
+      selectAllResults: async () => {
+        set({ selecting: true })
+        try {
+          set({ selectedIds: await magpie.listPostIds(get().query) })
+        } catch (error) {
+          notifyError('notice.selectionFailed', error)
+        } finally {
+          set({ selecting: false })
+        }
+      },
       clearSelection: () => set({ selectedIds: [] }),
-      favoriteSelection: async () => {
+      favoriteSelection: async (value) => {
         try {
           const ids = get().selectedIds
-          await magpie.setFavoriteMany(ids, true)
+          for (const slice of chunk(ids)) await magpie.setFavoriteMany(slice, value)
           const selected = new Set(ids)
           set({
             posts: get().posts.map((post) =>
-              selected.has(post.id) ? { ...post, isFavorite: true } : post
+              selected.has(post.id) ? { ...post, isFavorite: value } : post
             )
           })
+          notifySuccess(value ? 'bulk.favorited' : 'bulk.unfavorited', { count: ids.length })
           refreshStatsSoon()
       } catch (error) {
           notifyError('notice.favoriteFailed', error)
@@ -544,7 +592,7 @@ export const useStore = create<State>()(
       tagSelection: async (name) => {
         try {
           const ids = get().selectedIds
-          await magpie.addTagMany(ids, name)
+          for (const slice of chunk(ids)) await magpie.addTagMany(slice, name)
           const selected = new Set(ids)
           const before = get().posts
           const posts = before
@@ -560,9 +608,36 @@ export const useStore = create<State>()(
               posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
             resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
           })
+          notifySuccess('bulk.tagged', { count: ids.length, name })
           refreshStatsSoon()
       } catch (error) {
           notifyError('notice.tagFailed', error)
+        }
+      },
+
+      /** Le pendant de `tagSelection`, qui n'existait pas : un tag posé par erreur sur trois
+       *  cents posts ne se retirait qu'un post à la fois, depuis la vue détaillée. */
+      untagSelection: async (name) => {
+        try {
+          const ids = get().selectedIds
+          for (const slice of chunk(ids)) await magpie.removeTagMany(slice, name)
+          const selected = new Set(ids)
+          set({
+            posts: get().posts.map((post) =>
+              selected.has(post.id)
+                ? {
+                    ...post,
+                    tags: post.tags.filter(
+                      (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
+                    )
+                  }
+                : post
+            )
+          })
+          notifySuccess('bulk.untagged', { count: ids.length, name })
+          refreshStatsSoon()
+        } catch (error) {
+          notifyError('notice.tagRemoveFailed', error)
         }
       },
 

@@ -159,6 +159,8 @@ const previewApi: MagpieApi = {
   toggleFavorite: async () => false,
   setFavoriteMany: async () => {},
   addTagMany: async () => {},
+  removeTagMany: async () => {},
+  postUrls: async (ids) => (await previewPosts()).filter((p) => ids.includes(p.id)).map((p) => p.url),
   // Une clé fictivement « présente » permet de tester le parcours d'organisation dans
   // l'aperçu visuel ; aucune requête réseau n'est émise par les méthodes ci-dessous.
   hasAiKey: async () => true,

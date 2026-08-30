@@ -20,7 +20,7 @@ import type {
   PreloadRequest,
   Settings
 } from '@shared/types'
-import { CONTENT_SOURCES, DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS } from '@shared/types'
+import { BULK_MAX, CONTENT_SOURCES, DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS } from '@shared/types'
 import { dataDir, getDb, mediaDir, writeDataDirLocation } from './db'
 import {
   addTag,
@@ -54,6 +54,8 @@ import {
   setLabel,
   setFavoriteMany,
   addTagMany,
+  postUrls,
+  removeTagMany,
   toggleFavorite,
   writeAccount
 } from './db/queries'
@@ -275,14 +277,24 @@ export function registerIpc({
 
   ipcMain.handle('posts:toggleFavorite', (_event, id: string) => toggleFavorite(id))
   ipcMain.handle('posts:setFavoriteMany', (_event, ids: string[], value: boolean) => {
-    if (!Array.isArray(ids) || ids.length > 10000) throw new Error('Sélection invalide')
+    if (!Array.isArray(ids) || ids.length > BULK_MAX) throw new Error('Sélection invalide')
     setFavoriteMany(ids.map(String), value === true)
   })
   ipcMain.handle('tags:addMany', (_event, ids: string[], name: string) => {
-    if (!Array.isArray(ids) || ids.length > 10000 || typeof name !== 'string') {
+    if (!Array.isArray(ids) || ids.length > BULK_MAX || typeof name !== 'string') {
       throw new Error('Sélection invalide')
     }
     addTagMany(ids.map(String), name)
+  })
+  ipcMain.handle('tags:removeMany', (_event, ids: string[], name: string) => {
+    if (!Array.isArray(ids) || ids.length > BULK_MAX || typeof name !== 'string') {
+      throw new Error('Sélection invalide')
+    }
+    removeTagMany(ids.map(String), name)
+  })
+  ipcMain.handle('posts:urls', (_event, ids: string[]) => {
+    if (!Array.isArray(ids) || ids.length > BULK_MAX) throw new Error('Sélection invalide')
+    return postUrls(ids.map(String))
   })
   ipcMain.handle('ai:hasKey', (_event, provider: AiProvider) => hasAiKey(provider))
   ipcMain.handle('ai:setKey', (_event, provider: AiProvider, key: string) => {
