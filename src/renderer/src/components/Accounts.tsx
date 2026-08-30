@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import type { Platform } from '@shared/types'
+import type { ConnectFailure, Platform } from '@shared/types'
 import { PUBLIC_PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
 import { formatDateTime, formatTime, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
-import { reportFailure } from '../notices'
+import { describeError, reportFailure } from '../notices'
 import { useStore, useT } from '../store'
 import { ConfirmButton } from './ConfirmButton'
 import { PlatformIcon } from './PlatformIcon'
@@ -13,6 +13,26 @@ const STATUS_NOTE: Record<string, TranslationKey> = {
   challenge: 'accounts.statusChallenge',
   expired: 'accounts.statusExpired',
   error: 'accounts.statusError'
+}
+
+/**
+ * Ce qu'une ligne de compte montre quand la connexion ne s'est pas faite.
+ *
+ * L'échec était une exception dont on lisait la **phrase** — `/annulée|cancelled/i` — pour
+ * savoir s'il fallait l'afficher. Deux conséquences : traduire les messages du processus
+ * principal aurait cassé ce filtre en silence, et ce qu'on affichait était le texte brut
+ * d'Electron, enveloppe d'IPC comprise. La cause est maintenant nommée, et `cancelled` n'a
+ * délibérément aucune entrée ici : refermer une fenêtre ne mérite pas une alerte rouge.
+ */
+const CONNECT_HINT: Partial<Record<ConnectFailure, TranslationKey>> = {
+  challenge: 'accounts.hintChallenge',
+  network: 'accounts.hintNetwork',
+  unknown: 'accounts.hintUnknown'
+}
+
+interface Trouble {
+  message: string
+  hint?: TranslationKey
 }
 
 interface Props {
@@ -27,7 +47,9 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
   const disconnect = useStore((s) => s.disconnectAccount)
   const sync = useStore((s) => s.sync)
   const [busy, setBusy] = useState<Set<Platform>>(() => new Set())
-  const [error, setError] = useState<string | null>(null)
+  /* Une erreur par ligne, et non plus une seule pour les trois : le message s'affichait sous
+     le bloc entier, sans jamais dire de quel compte il parlait. */
+  const [trouble, setTrouble] = useState<Partial<Record<Platform, Trouble>>>({})
 
   const lastSync = (ms: number | null): string => {
     if (!ms) return t('accounts.neverSynced')
@@ -35,15 +57,18 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
     return sameDay ? t('accounts.today', { time: formatTime(ms) }) : formatDateTime(ms)
   }
 
-  const run = async (platform: Platform, action: () => Promise<void>): Promise<void> => {
+  const run = async (platform: Platform, action: () => Promise<Trouble | null>): Promise<void> => {
     setBusy((current) => new Set(current).add(platform))
-    setError(null)
+    setTrouble(({ [platform]: _forgotten, ...rest }) => rest)
     try {
-      await action()
+      const failure = await action()
+      if (failure) setTrouble((current) => ({ ...current, [platform]: failure }))
     } catch (err) {
-      const message = (err as Error).message ?? ''
-      // Refermer la fenêtre de connexion est un choix délibéré, pas une panne.
-      if (!/annulée|cancelled/i.test(message)) setError(message)
+      // Le filet : une panne qu'aucune cause connue ne couvre reste visible plutôt que muette.
+      setTrouble((current) => ({
+        ...current,
+        [platform]: { message: describeError(err), hint: 'accounts.hintUnknown' }
+      }))
     } finally {
       setBusy((current) => {
         const next = new Set(current)
@@ -52,6 +77,14 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
       })
     }
   }
+
+  const attempt = (platform: Platform): Promise<Trouble | null> =>
+    connect(platform).then((result) => {
+      if (result.ok) return null
+      const hint = CONNECT_HINT[result.reason]
+      // Un abandon n'est pas une panne : rien à afficher, et la ligne reste propre.
+      return hint ? { message: result.message, hint } : null
+    })
 
   return (
     <div className="accounts">
@@ -62,6 +95,7 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
         const progress = sync.byPlatform[platform]
         const isSyncing = progress.phase === 'running'
         const isBusy = busy.has(platform)
+        const failure = trouble[platform]
         const syncPercent = Math.min(
           96,
           Math.max(5, (progress.page / SYNC_PAGE_LIMITS[platform]) * 100)
@@ -80,6 +114,16 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
                   : t('accounts.notConnected')}
               </span>
               {connected && noteKey ? <span className="account__warn">{t(noteKey)}</span> : null}
+              {failure ? (
+                /* `role="alert"` : le message n'apparaît qu'après un geste, et sans lui les
+                   lecteurs d'écran ne signalaient jamais l'échec d'une connexion. */
+                <p className="account__error" role="alert">
+                  {failure.message}
+                  {failure.hint ? (
+                    <span className="account__error-hint">{t(failure.hint)}</span>
+                  ) : null}
+                </p>
+              ) : null}
               {isSyncing ? (
                 <div className="account__sync" aria-live="polite">
                   <span
@@ -116,27 +160,32 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
                 }}
               />
             ) : null}
-            <button
-              type="button"
-              className={`btn ${emphasise && !connected ? 'btn--primary' : ''}`}
-              /* Seule la plateforme concernée est bloquée : une synchronisation en cours
-                 sur l'une ne doit pas empêcher d'en connecter une autre. */
-              disabled={isBusy || isSyncing}
-              onClick={() =>
-                void run(platform, () => (connected ? disconnect(platform) : connect(platform)))
-              }
-            >
-              {isBusy
-                ? '…'
-                : connected
-                  ? t('accounts.disconnect')
-                  : t('accounts.connect')}
-            </button>
+            {connected ? (
+              /* Déconnecter efface les cookies de session : il faut refaire toute
+                 l'authentification, double facteur compris. « Tout revérifier », juste à côté
+                 et sans conséquence, demandait pourtant confirmation — pas celui-ci. */
+              <ConfirmButton
+                className="btn"
+                disabled={isBusy || isSyncing}
+                label="accounts.disconnect"
+                confirm="accounts.disconnectYes"
+                onConfirm={() => void run(platform, () => disconnect(platform).then(() => null))}
+              />
+            ) : (
+              <button
+                type="button"
+                className={`btn ${emphasise ? 'btn--primary' : ''}`}
+                /* Seule la plateforme concernée est bloquée : une synchronisation en cours
+                   sur l'une ne doit pas empêcher d'en connecter une autre. */
+                disabled={isBusy || isSyncing}
+                onClick={() => void run(platform, () => attempt(platform))}
+              >
+                {isBusy ? '…' : t('accounts.connect')}
+              </button>
+            )}
           </div>
         )
       })}
-
-      {error ? <p className="account__error">{error}</p> : null}
 
       <p className="setting__note">{t('accounts.privacy')}</p>
     </div>

@@ -59,7 +59,8 @@
     "check:map-links": "tsx --tsconfig tsconfig.node.json scripts/check-map-links.ts",
     "check:map-pan": "tsx --tsconfig tsconfig.node.json scripts/check-map-pan.ts",
     "check:map-levels": "tsx --tsconfig tsconfig.node.json scripts/check-map-levels.ts",
-    "map:regions": "tsx --tsconfig tsconfig.node.json scripts/map-regions-preview.mts"
+    "map:regions": "tsx --tsconfig tsconfig.node.json scripts/map-regions-preview.mts",
+    "check:messages": "tsx scripts/check-messages.ts"
   },
   "dependencies": {
     "@fontsource-variable/plus-jakarta-sans": "^5.3.0",

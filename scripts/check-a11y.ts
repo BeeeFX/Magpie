@@ -44,7 +44,13 @@ function pass(message: string): void {
  */
 function code(text: string): string {
   const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  return text.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/\/\/[^\n]*/g, blank)
+  /* Les retours chariot partent d'abord : la copie de travail est en CRLF, et un `\r` resté en
+     fin de ligne empêche `.` — qui ne le traverse pas — d'atteindre une ancre `$`. Voir
+     `check:messages`, où une règle entière s'est révélée muette pour cette seule raison. */
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/\/\/[^\n]*/g, blank)
 }
 
 const files = readdirSync(ROOT)

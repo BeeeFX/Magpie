@@ -119,6 +119,11 @@ const fr = {
 
   'accounts.connect': 'Connecter',
   'accounts.disconnect': 'Déconnecter',
+  'accounts.disconnectYes': 'Oublier cette session',
+  'accounts.hintChallenge':
+    'La vérification se fait sur le site de la plateforme, pas ici — Magpie ne voit jamais votre mot de passe.',
+  'accounts.hintNetwork': 'Rien n’a été envoyé : la plateforme n’a pas répondu.',
+  'accounts.hintUnknown': 'Vous pouvez réessayer ; rien n’a été modifié.',
   'accounts.notConnected': 'non connecté',
   'accounts.connected': 'connecté',
   'accounts.neverSynced': 'jamais synchronisé',
@@ -780,6 +785,11 @@ const en: Record<TranslationKey, string> = {
 
   'accounts.connect': 'Connect',
   'accounts.disconnect': 'Disconnect',
+  'accounts.disconnectYes': 'Forget this session',
+  'accounts.hintChallenge':
+    'The check happens on the platform’s own site, not here — Magpie never sees your password.',
+  'accounts.hintNetwork': 'Nothing was sent: the platform did not answer.',
+  'accounts.hintUnknown': 'You can try again; nothing was changed.',
   'accounts.notConnected': 'not connected',
   'accounts.connected': 'connected',
   'accounts.neverSynced': 'never synced',

@@ -3,6 +3,7 @@ import { existsSync, statfsSync } from 'node:fs'
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type {
+  ConnectResult,
   AccountInfo,
   AiCollectionApplyResult,
   ClearCacheResult,
@@ -61,6 +62,7 @@ import {
 } from './db/queries'
 import { seedIfEmpty } from './fixtures/seed'
 import { backgroundTasks } from './tasks'
+import { connectFailure } from './messages'
 import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
 import { getCacheUsage, resetCacheUsage, VIDEO_NAME_PATTERN } from './media/cache'
@@ -938,16 +940,28 @@ export function registerIpc({
 
   ipcMain.handle('accounts:list', () => Promise.all(PUBLIC_PLATFORMS.map(accountInfo)))
 
-  ipcMain.handle('accounts:connect', async (event, platform: Platform) => {
+  /*
+   * Un abandon est un résultat, pas une exception.
+   *
+   * Refermer la fenêtre de connexion levait, et l'interface devait reconnaître ce cas **à la
+   * forme de la phrase** — `/annulée|cancelled/i` — pour ne pas afficher une erreur rouge à
+   * quelqu'un qui venait simplement de changer d'avis. Le résultat porte maintenant une cause
+   * nommée, et le message est déjà traduit.
+   */
+  ipcMain.handle('accounts:connect', async (event, platform: Platform): Promise<ConnectResult> => {
     platform = platformValue(platform)
     const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined
-    await ADAPTERS[platform].connect(parent)
+    try {
+      await ADAPTERS[platform].connect(parent)
+    } catch (err) {
+      return { ok: false, ...connectFailure(platform, err) }
+    }
 
     // Le pseudonyme est confortable mais pas indispensable : s'il échoue, la connexion
     // reste valide et on l'affichera simplement sans nom.
     const handle = await ADAPTERS[platform].resolveHandle().catch(() => null)
     writeAccount(platform, { handle: handle ?? undefined, connectedAt: Date.now() })
-    return accountInfo(platform)
+    return { ok: true, account: await accountInfo(platform) }
   })
 
   ipcMain.handle('accounts:disconnect', async (_event, platform: Platform) => {

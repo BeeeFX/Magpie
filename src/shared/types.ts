@@ -259,6 +259,29 @@ export interface AccountInfo {
   lastSyncStatus: string | null
 }
 
+/**
+ * Pourquoi une connexion ne s'est pas faite.
+ *
+ * `cancelled` n'est pas une panne — c'est quelqu'un qui referme la fenêtre. Il est ici pour
+ * que l'appelant n'ait pas à le deviner : le distinguer était auparavant l'affaire d'une
+ * expression régulière sur une phrase française.
+ */
+export type ConnectFailure = 'cancelled' | 'challenge' | 'network' | 'unknown'
+
+export type ConnectResult =
+  | { ok: true; account: AccountInfo }
+  /** `message` est déjà traduit ; `detail` porte le relevé technique brut, jamais affiché seul. */
+  | { ok: false; reason: ConnectFailure; message: string; detail?: string }
+
+/** Ce que `PlatformSync.message` dit, sous une forme qui se teste plutôt qu'elle ne se lit. */
+export type SyncMessageCode =
+  | 'challenge'
+  | 'expired'
+  | 'rateLimited'
+  | 'rateLimitWait'
+  | 'failed'
+  | 'paused'
+
 export type SyncPhase = 'idle' | 'running' | 'done' | 'error' | 'cancelled'
 
 export interface PlatformSync {
@@ -269,6 +292,15 @@ export interface PlatformSync {
   added: number
   page: number
   message: string | null
+  /**
+   * Ce que `message` dit, sous une forme qui se teste.
+   *
+   * La phrase est traduite avant de traverser l'IPC ; l'interface ne peut donc plus
+   * l'inspecter. Elle le faisait — `/annulée|cancelled/i` — et traduire aurait cassé ce
+   * filtre sans que rien ne le signale. Le code voyage à côté du texte : on décide sur le
+   * code, on affiche le texte.
+   */
+  messageCode: SyncMessageCode | null
   /** La plateforme exige une intervention manuelle : aucune reprise automatique. */
   needsAttention: boolean
 }
@@ -294,6 +326,7 @@ export const IDLE_PLATFORM_SYNC: PlatformSync = {
   added: 0,
   page: 0,
   message: null,
+  messageCode: null,
   needsAttention: false
 }
 
@@ -504,7 +537,14 @@ export interface MagpieApi {
   collectionsForPost(postId: string): Promise<number[]>
 
   listAccounts(): Promise<AccountInfo[]>
-  connectAccount(platform: Platform): Promise<AccountInfo>
+  /**
+   * Refermer la fenêtre de connexion n'est pas une panne.
+   *
+   * C'était pourtant une exception, que l'interface devait rattraper puis reconnaître **à la
+   * forme de sa phrase** pour ne pas afficher « Connexion annulée » en rouge à quelqu'un qui
+   * venait de changer d'avis. Un abandon est un résultat : il en a maintenant la forme.
+   */
+  connectAccount(platform: Platform): Promise<ConnectResult>
   disconnectAccount(platform: Platform): Promise<AccountInfo>
   startSync(platforms?: Platform[]): Promise<SyncState>
   startFullSync(platform: Platform): Promise<SyncState>

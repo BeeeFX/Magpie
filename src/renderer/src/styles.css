@@ -1348,7 +1348,7 @@ h1, h2, h3 {
   height: 100%;
   border-radius: inherit;
   background: var(--accent);
-  transition: width 240ms var(--ease-out);
+  transition: width 240ms var(--ease);
 }
 
 .ai-organizer {
@@ -4735,12 +4735,49 @@ html.window-is-moving .app *::after {
    en dur, sans variante claire : sur fond blanc, #fca5a5 tenait 1,6:1 — illisible pour la
    moitié des utilisateurs, au moment précis où le message compte. */
 .account__error {
-  margin: 0;
+  display: grid;
+  gap: 3px;
+  margin: 4px 0 0;
   padding: 8px 12px;
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger-ink);
   font-size: 11.5px;
+  animation: notice-in 180ms var(--ease) both;
+}
+
+/* La conduite à tenir, sous la cause. Elle ne crie pas : ce n'est pas elle qui alerte. */
+.account__error-hint {
+  color: var(--muted);
+}
+
+/*
+ * L'unique mode d'emploi de l'unique état bloquant de l'application.
+ *
+ * Il ne vivait que dans le `title` du bouton de synchronisation : invisible au clavier,
+ * invisible au doigt, tronqué par l'OS. Ancré au bouton qui porte l'état, pas dans le calque
+ * de notifications, parce qu'il décrit une situation qui dure — pas le résultat d'un geste.
+ */
+.sync-trouble {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  max-width: 340px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  box-shadow: var(--shadow-lg), 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.45;
+  animation: notice-in 200ms var(--ease) both;
+}
+
+.sync-trouble p {
+  margin: 0;
 }
 
 .settings-field {

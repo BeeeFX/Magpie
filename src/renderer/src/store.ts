@@ -7,6 +7,7 @@ import type {
   AfterSyncStep,
   AiProvider,
   AiTagProgress,
+  ConnectResult,
   ContentSource,
   GridMode,
   LabelColor,
@@ -286,7 +287,8 @@ interface State {
   setLabel: (postId: string, label: LabelColor | null) => Promise<void>
 
   loadAccounts: () => Promise<void>
-  connectAccount: (platform: Platform) => Promise<void>
+  /** Rend le résultat : c'est la ligne du compte qui décide quoi en montrer. */
+  connectAccount: (platform: Platform) => Promise<ConnectResult>
   disconnectAccount: (platform: Platform) => Promise<void>
   startSync: (platforms?: Platform[]) => Promise<void>
   cancelSync: (platform?: Platform) => Promise<void>
@@ -933,10 +935,13 @@ export const useStore = create<State>()(
       },
 
       connectAccount: async (platform) => {
-        /* Le rejet remonte : `Accounts` l'attend pour distinguer une fenêtre refermée d'un
-           vrai échec, et c'est lui qui l'affiche dans la ligne du compte concerné. */
-        await magpie.connectAccount(platform)
+        /* Le résultat porte sa cause : plus besoin de lire la phrase pour savoir si quelqu'un
+           a refermé la fenêtre. Un échec ne déclenche évidemment pas la première
+           synchronisation, ce que l'ancien code faisait bien — mais parce que le rejet
+           traversait, pas parce qu'on l'avait décidé. */
+        const result = await magpie.connectAccount(platform)
         await get().loadAccounts()
+        if (!result.ok) return result
         // Un compte fraîchement connecté n'a encore rien : on enchaîne sur son premier
         // rattrapage, ce que l'utilisateur attend de toute façon. Hors du `try` de l'appelant,
         // donc il lui faut le sien : sans quoi une première synchronisation qui échoue laissait
@@ -944,6 +949,7 @@ export const useStore = create<State>()(
         void get()
           .startSync([platform])
           .catch(reportFailure('notice.syncFailed'))
+        return result
       },
 
       disconnectAccount: async (platform) => {

@@ -3,6 +3,7 @@ import type {
   CollectionHeat,
   CollectionMembership,
   AccountInfo,
+  ConnectResult,
   AddToCollectionResult,
   AiCollectionApplyResult,
   AiCollectionChoice,
@@ -198,7 +199,7 @@ const api: MagpieApi = {
     ipcRenderer.invoke('collections:forPost', postId),
 
   listAccounts: (): Promise<AccountInfo[]> => ipcRenderer.invoke('accounts:list'),
-  connectAccount: (platform: Platform): Promise<AccountInfo> =>
+  connectAccount: (platform: Platform): Promise<ConnectResult> =>
     ipcRenderer.invoke('accounts:connect', platform),
   disconnectAccount: (platform: Platform): Promise<AccountInfo> =>
     ipcRenderer.invoke('accounts:disconnect', platform),

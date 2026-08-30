@@ -78,6 +78,7 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
   const cacheQuality = useStore((s) => s.videoCacheQuality)
   const [backlog, setBacklog] = useState<Backlog | null>(null)
   const [recheckArmed, setRecheckArmed] = useState(false)
+  const syncing = useStore((s) => s.sync.running)
 
   /* Relu à chaque changement du registre de tâches : un rattrapage qui tourne doit voir ses
      compteurs descendre sous les yeux, sinon rien ne dit qu'il travaille. */
@@ -247,6 +248,9 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
         <button
           type="button"
           role="menuitem"
+          /* Le geste le plus coûteux du menu ne se lance pas par-dessus lui-même : sans ce
+             verrou, deux passages relançaient tout l'historique de chaque compte en parallèle. */
+          disabled={syncing}
           className={recheckArmed ? 'is-armed' : ''}
           onClick={() => {
             if (!recheckArmed) {
@@ -437,7 +441,14 @@ export function SyncButton(): React.JSX.Element {
   }
 
   const attention = PUBLIC_PLATFORMS.filter((p) => sync.byPlatform[p].needsAttention)
-  const message = attention.map((p) => sync.byPlatform[p].message).filter(Boolean).join('\n')
+  /* Ces messages disent quoi faire — « ouvrez le site, débloquez le compte, reconnectez-le » —
+     et ils ne vivaient que dans le `title` du bouton. Une infobulle native n'apparaît qu'à la
+     souris, après une seconde d'immobilité, jamais au clavier ni sur un écran tactile, et
+     l'OS la coupe. Le seul mode d'emploi du seul état bloquant de l'application était donc
+     invisible à qui n'avait pas l'idée de survoler. */
+  const trouble = attention
+    .map((p) => sync.byPlatform[p].message)
+    .filter((line): line is string => Boolean(line))
 
   /* Bouton scindé : l'action la plus fréquente reste à un clic, et tout ce qui « agit sur la
      bibliothèque » se range derrière le même chevron. Ces commandes vivaient jusqu'ici à
@@ -452,7 +463,7 @@ export function SyncButton(): React.JSX.Element {
             attention.length > 0 ? 'is-warning' : ''
           }`}
           onClick={() => void startSync()}
-          title={message || t('sync.fetchNew')}
+          title={trouble.join('\n') || t('sync.fetchNew')}
         >
           <IconSync />
           <span>{attention.length > 0 ? t('sync.needsAttention') : t('sync.sync')}</span>
@@ -472,6 +483,16 @@ export function SyncButton(): React.JSX.Element {
           />
         </button>
       </div>
+
+      {/* La consigne est lisible sans survol, et `role="alert"` la fait annoncer : elle
+          n'apparaît qu'au moment où une plateforme se bloque. */}
+      {trouble.length > 0 ? (
+        <div className="sync-trouble" role="alert">
+          {trouble.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      ) : null}
 
       {mounted ? (
         <div ref={menuRef} className={`action-menu ${closing ? 'is-closing' : ''}`} role="menu">

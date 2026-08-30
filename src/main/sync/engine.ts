@@ -13,6 +13,7 @@ import {
   writeAccount,
   writeAccountSource
 } from '../db/queries'
+import { say, platformLabel } from '../messages'
 import { readSettings } from '../settings'
 import { applyRuleTags } from '../tagging/rules'
 
@@ -184,6 +185,7 @@ class SyncEngine {
       added: 0,
       page: 0,
       message: null,
+      messageCode: null,
       needsAttention: false
     })
 
@@ -222,7 +224,8 @@ class SyncEngine {
           this.patch(platform, {
             phase: 'error',
             needsAttention: true,
-            message: `${label(platform)} demande une vérification de sécurité. Ouvrez le site dans votre navigateur, débloquez le compte, puis reconnectez-le ici.`
+            message: say('sync.challenge', { platform: label(platform) }),
+            messageCode: 'challenge'
           })
           writeAccountSource(platform, source, { lastSyncStatus: 'challenge' })
           writeAccount(platform, { lastSyncStatus: 'challenge' })
@@ -233,7 +236,8 @@ class SyncEngine {
           this.patch(platform, {
             phase: 'error',
             needsAttention: true,
-            message: `La session ${label(platform)} a expiré. Reconnectez le compte dans les réglages.`
+            message: say('sync.expired', { platform: label(platform) }),
+            messageCode: 'expired'
           })
           writeAccountSource(platform, source, { lastSyncStatus: 'expired' })
           writeAccount(platform, { lastSyncStatus: 'expired' })
@@ -245,7 +249,8 @@ class SyncEngine {
           if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
             this.patch(platform, {
               phase: 'error',
-              message: `${label(platform)} limite toujours le débit après plusieurs tentatives.`
+              message: say('sync.rateLimited', { platform: label(platform) }),
+              messageCode: 'rateLimited'
             })
             writeAccountSource(platform, source, { lastSyncStatus: 'error' })
             writeAccount(platform, { lastSyncStatus: 'error' })
@@ -253,13 +258,21 @@ class SyncEngine {
           }
           backoffMs = Math.min(err.retryAfterMs || 60000, 5 * 60000)
           this.patch(platform, {
-            message: `${label(platform)} limite le débit, reprise dans ${Math.round(backoffMs / 1000)} s…`
+            message: say('sync.rateLimitWait', {
+              platform: label(platform),
+              seconds: Math.round(backoffMs / 1000)
+            }),
+            messageCode: 'rateLimitWait'
           })
           page--
           continue
         }
 
-        this.patch(platform, { phase: 'error', message: `${label(platform)} : ${(err as Error).message}` })
+        this.patch(platform, {
+          phase: 'error',
+          message: say('sync.failed', { platform: label(platform), detail: (err as Error).message }),
+          messageCode: 'failed'
+        })
         writeAccountSource(platform, source, { lastSyncStatus: 'error' })
         writeAccount(platform, { lastSyncStatus: 'error' })
         return
@@ -340,14 +353,18 @@ class SyncEngine {
       phase: 'done',
       fetched,
       added,
-      message: completed ? null : `${label(platform)} : import ${source === 'liked' ? 'des likes' : 'des signets'} mis en pause, reprise disponible.`
+      message: completed
+        ? null
+        : say(source === 'liked' ? 'sync.pausedLiked' : 'sync.pausedSaved', {
+            platform: label(platform)
+          }),
+      messageCode: completed ? null : 'paused'
     })
   }
 }
 
-function label(platform: Platform): string {
-  return platform === 'x' ? 'X' : platform === 'reddit' ? 'Reddit' : 'Instagram'
-}
+/* Le nom de la plateforme se dit pareil dans les deux langues : il reste hors du dictionnaire. */
+const label = platformLabel
 
 export const syncEngine = new SyncEngine()
 
