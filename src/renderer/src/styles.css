@@ -3959,14 +3959,28 @@ html.window-is-moving .app *::after {
   background: var(--accent-gradient);
 }
 
+/*
+ * Deux boutons de plus — « retirer des favoris », « retirer un tag » — et la barre ne tenait
+ * plus. En rangée flex, un enfant se laisse comprimer sous la largeur de son texte : les
+ * libellés se coupaient en deux lignes dans une pilule de trente pixels, et « favourites »
+ * s'affichait **sous** son propre bouton, en dehors du fond. Mesuré : 58 px de texte dans une
+ * boîte de 30.
+ *
+ * Le libellé ne se coupe donc plus, et c'est la barre qui passe à la ligne. Envelopper plutôt
+ * que faire défiler : ces huit gestes s'adressent à une sélection qu'on vient de faire, et une
+ * barre qui défile en cacherait la moitié sans le dire.
+ */
 .bulk-bar {
   position: fixed;
   z-index: 120;
   left: 50%;
   bottom: 24px;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 7px;
+  max-width: min(96vw, 900px);
   padding: 9px 11px;
   border: 1px solid var(--hairline);
   border-radius: 18px;
@@ -3979,6 +3993,10 @@ html.window-is-moving .app *::after {
 
 .bulk-bar strong {
   padding-inline: 7px;
+  white-space: nowrap;
+}
+
+.bulk-bar button {
   white-space: nowrap;
 }
 
