@@ -73,6 +73,7 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
   const [wordDraft, setWordDraft] = useState('')
   const [renameDraft, setRenameDraft] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [mergeInto, setMergeInto] = useState('')
   const [merging, setMerging] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   /**
@@ -481,18 +482,9 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
                     <select
                       className="rail__select"
                       defaultValue=""
-                      onChange={(event) => {
-                        const into = Number(event.target.value)
-                        if (!into) return
-                        setMerging(false)
-                        void magpie
-                          .mergeCollections(collection.id, into)
-                          .then(async () => {
-                            await refresh()
-                            await choose(into)
-                          })
-                          .catch(reportFailure('notice.collectionMergeFailed'))
-                      }}
+                      /* Choisir n'est pas commettre : une flèche du clavier suffisait à
+                         déclencher la fusion, qui finit par un `DELETE` sans retour possible. */
+                      onChange={(event) => setMergeInto(event.target.value)}
                     >
                       <option value="">{t('collections.mergeInto')}</option>
                       {collections
@@ -503,6 +495,28 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
                           </option>
                         ))}
                     </select>
+                  ) : null}
+
+                  {merging && mergeInto ? (
+                    <button
+                      type="button"
+                      className="rail__danger"
+                      onClick={() => {
+                        const into = Number(mergeInto)
+                        setMerging(false)
+                        setMergeInto('')
+                        if (!into) return
+                        void magpie
+                          .mergeCollections(collection.id, into)
+                          .then(async () => {
+                            await refresh()
+                            await choose(into)
+                          })
+                          .catch(reportFailure('notice.collectionMergeFailed'))
+                      }}
+                    >
+                      {t('collections.mergeYes')}
+                    </button>
                   ) : null}
 
                   {confirmDelete ? (

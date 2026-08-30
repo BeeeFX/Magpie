@@ -4,6 +4,7 @@ import { magpie } from '../bridge'
 import { notifyError } from '../notices'
 import { useModalFocus } from '../useModalFocus'
 import { useStore, useT } from '../store'
+import { ConfirmButton } from './ConfirmButton'
 import { IconClose } from './Icons'
 
 interface Props {
@@ -42,6 +43,8 @@ export function CollectionsManager({
   const [drafts, setDrafts] = useState<Record<number, string>>({})
   const [confirming, setConfirming] = useState<number | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
+  /** La cible choisie mais pas encore validée, par collection. */
+  const [mergeTarget, setMergeTarget] = useState<Record<number, string>>({})
   const panelRef = useRef<HTMLDivElement>(null)
 
   /* Le piège de tabulation, l'entrée du focus et son retour vivent dans `useModalFocus`.
@@ -165,15 +168,21 @@ export function CollectionsManager({
 
                   <span className="manager__count">{collection.count}</span>
 
+                  {/* Choisir une cible ne commet plus rien : le `change` d'un `<select>` part
+                      dès qu'une flèche du clavier le survole, et il appelait directement une
+                      fusion — c'est-à-dire un `DELETE`, sans confirmation ni retour possible.
+                      Juste à côté, « Supprimer » demandait pourtant confirmation en deux temps. */}
                   <select
                     className="manager__merge"
-                    value=""
+                    value={mergeTarget[collection.id] ?? ''}
                     disabled={busy !== null || collections.length < 2}
                     aria-label={t('collections.mergeInto')}
-                    onChange={(event) => {
-                      const into = Number(event.target.value)
-                      if (into) void merge(collection.id, into)
-                    }}
+                    onChange={(event) =>
+                      setMergeTarget((current) => ({
+                        ...current,
+                        [collection.id]: event.target.value
+                      }))
+                    }
                   >
                     <option value="">{t('collections.mergeInto')}</option>
                     {collections
@@ -184,6 +193,20 @@ export function CollectionsManager({
                         </option>
                       ))}
                   </select>
+
+                  {mergeTarget[collection.id] ? (
+                    <ConfirmButton
+                      className="btn"
+                      disabled={busy !== null}
+                      label="collections.merge"
+                      confirm="collections.mergeYes"
+                      onConfirm={() => {
+                        const into = Number(mergeTarget[collection.id])
+                        setMergeTarget(({ [collection.id]: _, ...rest }) => rest)
+                        if (into) void merge(collection.id, into)
+                      }}
+                    />
+                  ) : null}
 
                   {confirming === collection.id ? (
                     <span className="manager__confirm">

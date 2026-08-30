@@ -1414,7 +1414,18 @@ export function listCollections(): CollectionRow[] {
 export function createCollection(name: string, color: LabelColor | null = null): CollectionRow {
   const clean = name.trim()
   if (!clean) throw new Error('Nom de collection vide')
-  const info = getDb()
+  const db = getDb()
+  /* Le nom est unique depuis la migration 27 : demander une collection qui existe déjà rend
+     celle-là plutôt que d'échouer. C'est ce qui rend la double-Entrée inoffensive — deux
+     validations rapides du même formulaire créaient auparavant deux homonymes, que la barre
+     de sélection résolvait ensuite au hasard. */
+  const existing = db
+    .prepare('SELECT id, name, color FROM collections WHERE name = ? COLLATE NOCASE')
+    .get(clean) as { id: number; name: string; color: LabelColor | null } | undefined
+  if (existing) {
+    return { id: existing.id, name: existing.name, count: 0, color: existing.color, kind: 'manual' }
+  }
+  const info = db
     .prepare('INSERT INTO collections (name, color, sort_index) VALUES (?, ?, 0)')
     .run(clean, color)
   return { id: Number(info.lastInsertRowid), name: clean, count: 0, color, kind: 'manual' }

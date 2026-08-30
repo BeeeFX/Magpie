@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 26
+export const SCHEMA_VERSION = 27
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -509,6 +509,31 @@ export const MIGRATION_26_SQL = /* sql */ `
 UPDATE posts SET transcript = NULL WHERE TRIM(COALESCE(transcript, '')) = '';
 `
 
+/**
+ * Deux collections ne peuvent plus porter le même nom.
+ *
+ * Rien ne l'interdisait, et `createCollection` insérait sans vérifier. On pouvait donc créer
+ * deux « Musique », l'une depuis le panneau latéral et l'autre depuis la vue détaillée — puis
+ * la barre de sélection en résolvait une **au hasard**, par comparaison insensible à la casse,
+ * en rangeant des posts dans celle qu'on ne regardait pas.
+ *
+ * Le dédoublonnage précède l'index, et il est déterministe : le plus petit identifiant garde
+ * son nom, les autres reçoivent un suffixe numéroté. Du SQL pur, rejouable sur une base vide —
+ * l'`UPDATE` ne touche alors aucune ligne — donc `check:schema` peut le rejouer sur une
+ * connexion nue, sans aucune fonction enregistrée.
+ */
+export const MIGRATION_27_SQL = /* sql */ `
+UPDATE collections SET name = name || ' (' || (
+  SELECT COUNT(*) FROM collections AS earlier
+   WHERE earlier.name = collections.name COLLATE NOCASE AND earlier.id < collections.id
+) || ')'
+WHERE EXISTS (
+  SELECT 1 FROM collections AS earlier
+   WHERE earlier.name = collections.name COLLATE NOCASE AND earlier.id < collections.id
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON collections(name COLLATE NOCASE);
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -817,6 +842,8 @@ CREATE INDEX IF NOT EXISTS idx_collection_posts_post ON collection_posts(post_id
 CREATE INDEX IF NOT EXISTS idx_collection_removals_post ON collection_removals(post_id);
 CREATE INDEX IF NOT EXISTS idx_collection_feedback_post ON collection_feedback(post_id);
 CREATE INDEX IF NOT EXISTS idx_collections_cover ON collections(cover_post_id)
+;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON collections(name COLLATE NOCASE)
   WHERE cover_post_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_post_positions_post ON post_positions(post_id);
 `
@@ -856,5 +883,6 @@ export const MIGRATIONS: Record<number, string> = {
   23: MIGRATION_23_SQL,
   24: MIGRATION_24_SQL,
   25: MIGRATION_25_SQL,
-  26: MIGRATION_26_SQL
+  26: MIGRATION_26_SQL,
+  27: MIGRATION_27_SQL
 }
