@@ -16,8 +16,10 @@ import { ACCENTS, LANGUAGES } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { formatBytes } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
+import { reportFailure } from '../notices'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
+import { ConfirmButton } from './ConfirmButton'
 import { IconCards, IconClose, IconMap, IconMasonry } from './Icons'
 
 const THEMES: { key: ThemeChoice; label: TranslationKey }[] = [
@@ -590,7 +592,7 @@ export function Settings(): React.JSX.Element | null {
                 type="button"
                 className="btn"
                 disabled={choosingLibrary || (libraryMove !== null && libraryMove.phase !== 'error')}
-                onClick={() => void magpie.openDataFolder()}
+                onClick={() => void magpie.openDataFolder().catch(reportFailure('notice.openFailed'))}
               >
                 {t('settings.openFolder')}
               </button>
@@ -602,20 +604,17 @@ export function Settings(): React.JSX.Element | null {
               >
                 {choosingLibrary ? t('settings.choosingLibrary') : t('settings.moveLibrary')}
               </button>
-              <button
-                type="button"
+              {/* Le geste le plus destructeur de cet écran partait au premier clic, alors que
+                  « Tout revérifier », qui ne supprime rien, demandait confirmation. Le second
+                  temps nomme la conséquence plutôt que de dire « oui ». */}
+              <ConfirmButton
                 className="btn"
-                /* Le geste le plus destructeur de cet écran partait au premier clic, alors
-                   que « Tout revérifier », qui ne supprime rien, demandait confirmation.
-                   L'avertissement dit ce qui va réellement se passer, pas seulement que
-                   c'est irréversible. */
-                onClick={() => {
-                  if (window.confirm(t('settings.clearCacheConfirm'))) void clearCache()
-                }}
+                title={t('settings.clearCacheConfirm')}
+                label={clearing ? 'settings.clearing' : 'settings.clearCache'}
+                confirm="settings.clearCacheYes"
                 disabled={clearing || choosingLibrary || (libraryMove !== null && libraryMove.phase !== 'error')}
-              >
-                {clearing ? t('settings.clearing') : t('settings.clearCache')}
-              </button>
+                onConfirm={() => void clearCache()}
+              />
             </div>
             {cacheError ? (
               <p className="setting__error" role="alert">{cacheError}</p>
@@ -674,7 +673,9 @@ export function Settings(): React.JSX.Element | null {
                   updateState.phase === 'unsupported'
                 }
                 onClick={() => {
-                  if (updateState?.phase === 'ready') void magpie.installUpdate()
+                  if (updateState?.phase === 'ready') {
+                    void magpie.installUpdate().catch(reportFailure('notice.unexpected'))
+                  }
                   else void magpie.checkForUpdates().then(setUpdateState)
                 }}
               >
@@ -772,7 +773,10 @@ export function Settings(): React.JSX.Element | null {
                   className="btn"
                   disabled={!aiKey.trim()}
                   onClick={() =>
-                    void magpie.setAiKey(aiProvider, aiKey).then(() => {
+                    void magpie
+                    .setAiKey(aiProvider, aiKey)
+                    .catch(reportFailure('notice.unexpected'))
+                    .then(() => {
                       setAiKey('')
                       setAiKeyStored(true)
                     })
@@ -802,7 +806,7 @@ export function Settings(): React.JSX.Element | null {
                 type="button"
                 className="btn btn--primary"
                 disabled={!aiKeyStored || aiProgress?.running}
-                onClick={() => void magpie.startAiTagging()}
+                onClick={() => void magpie.startAiTagging().catch(reportFailure('notice.unexpected'))}
               >
                 {aiProgress?.running
                   ? t('settings.aiProgress', { done: aiProgress.done, total: aiProgress.total })

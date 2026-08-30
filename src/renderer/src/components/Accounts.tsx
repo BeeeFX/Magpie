@@ -3,7 +3,9 @@ import type { Platform } from '@shared/types'
 import { PUBLIC_PLATFORMS, SYNC_PAGE_LIMITS } from '@shared/types'
 import { formatDateTime, formatTime, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
+import { reportFailure } from '../notices'
 import { useStore, useT } from '../store'
+import { ConfirmButton } from './ConfirmButton'
 import { PlatformIcon } from './PlatformIcon'
 import { magpie } from '../bridge'
 
@@ -103,19 +105,16 @@ export function Accounts({ emphasise = false }: Props): React.JSX.Element {
               ) : null}
             </div>
             {connected ? (
-              <button
-                type="button"
+              <ConfirmButton
                 className="btn btn--quiet"
                 disabled={isBusy || isSyncing}
                 title={t('accounts.fullSyncHint')}
-                onClick={() => {
-                  if (window.confirm(t('accounts.fullSyncConfirm', { platform: PLATFORM_LABEL[platform] }))) {
-                    void magpie.startFullSync(platform)
-                  }
+                label="accounts.fullSync"
+                confirm="accounts.fullSyncYes"
+                onConfirm={() => {
+                  void magpie.startFullSync(platform).catch(reportFailure('notice.syncFailed'))
                 }}
-              >
-                {t('accounts.fullSync')}
-              </button>
+              />
             ) : null}
             <button
               type="button"

@@ -6,6 +6,7 @@ import { formatBytes, formatDuration } from '../format'
 import { useStore, useT } from '../store'
 import { IconClose, IconDownload, IconPause, IconPlay } from './Icons'
 import { Popover } from './Popover'
+import { reportFailure } from '../notices'
 
 /**
  * Téléchargements : ce qu'on peut demander, et ce qui se passe déjà.
@@ -78,7 +79,12 @@ export function Downloads(): React.JSX.Element {
               <button
                 type="button"
                 className="btn"
-                onClick={() => void magpie.setDownloadsPaused(!paused).then(setState)}
+                onClick={() =>
+                  void magpie
+                    .setDownloadsPaused(!paused)
+                    .then(setState)
+                    .catch(reportFailure('notice.unexpected'))
+                }
               >
                 {paused ? <IconPlay size={12} /> : <IconPause size={12} />}
                 {t(paused ? 'downloads.resume' : 'downloads.pauseAll')}
@@ -127,7 +133,10 @@ export function Downloads(): React.JSX.Element {
                   paused={paused}
                   onStop={setState}
                   onToggle={() =>
-                    void magpie.setTaskPaused(task.id, !task.paused).then(setState)
+                    void magpie
+                      .setTaskPaused(task.id, !task.paused)
+                      .then(setState)
+                      .catch(reportFailure('notice.unexpected'))
                   }
                 />
               ))}
@@ -147,7 +156,12 @@ export function Downloads(): React.JSX.Element {
                     key={profile}
                     type="button"
                     className={state?.loadProfile === profile ? 'is-active' : ''}
-                    onClick={() => void magpie.setLoadProfile(profile).then(setState)}
+                    onClick={() =>
+                      void magpie
+                        .setLoadProfile(profile)
+                        .then(setState)
+                        .catch(reportFailure('notice.unexpected'))
+                    }
                   >
                     {t(`downloads.load.${profile}` as Parameters<typeof t>[0])}
                   </button>
@@ -330,7 +344,9 @@ function TaskRow({
               void (task.kind === 'transcribe'
                 ? magpie.stopTranscription()
                 : magpie.stopPreload(task.kind as 'thumbnails' | 'clips')
-              ).then(onStop)
+              )
+                .then(onStop)
+                .catch(reportFailure('notice.unexpected'))
             }
           >
             <IconClose size={12} />

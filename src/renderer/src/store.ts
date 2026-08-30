@@ -16,6 +16,7 @@ import type {
   Platform,
   Post,
   PostQuery,
+  Settings,
   SortKey,
   SyncState,
   ThemeChoice,
@@ -25,6 +26,7 @@ import type {
 import type { Language, LanguageChoice } from '@shared/types'
 import { AFTER_SYNC_STEPS, DEFAULT_QUERY, idleSyncState } from '@shared/types'
 import { magpie } from './bridge'
+import { notifyError, reportFailure } from './notices'
 import { setFormatLanguage } from './format'
 import { resolveLanguage, translate, type TranslationKey } from './i18n'
 
@@ -120,6 +122,23 @@ function deferredStorage(): StateStorage {
  * éviter que le module de traduction ne dépende du store — la dépendance ne va que dans
  * un sens.
  */
+/**
+ * Écrit un réglage, et remet l'interface d'accord avec le disque si l'écriture échoue.
+ *
+ * Relire plutôt que mémoriser la valeur d'avant : le disque fait foi, et un retour en arrière
+ * par copie locale se tromperait dès que deux réglages changent en même temps. Une vingtaine
+ * d'appels passaient auparavant sans le moindre filet — un thème qui ne s'enregistre pas
+ * revenait au lancement suivant, sans que rien ne l'ait dit.
+ */
+async function persistSettings(patch: Partial<Settings>): Promise<void> {
+  try {
+    await magpie.setSettings(patch)
+  } catch (error) {
+    notifyError('notice.settingFailed', error)
+    await useStore.getState().loadSettings()
+  }
+}
+
 export function useT(): (key: TranslationKey, vars?: Record<string, string | number>) => string {
   const lang = useStore((s) => s.lang)
   return (key, vars) => translate(lang, key, vars)
@@ -508,35 +527,43 @@ export const useStore = create<State>()(
       selectAllVisible: () => set({ selectedIds: get().posts.map((post) => post.id) }),
       clearSelection: () => set({ selectedIds: [] }),
       favoriteSelection: async () => {
-        const ids = get().selectedIds
-        await magpie.setFavoriteMany(ids, true)
-        const selected = new Set(ids)
-        set({
-          posts: get().posts.map((post) =>
-            selected.has(post.id) ? { ...post, isFavorite: true } : post
-          )
-        })
-        refreshStatsSoon()
+        try {
+          const ids = get().selectedIds
+          await magpie.setFavoriteMany(ids, true)
+          const selected = new Set(ids)
+          set({
+            posts: get().posts.map((post) =>
+              selected.has(post.id) ? { ...post, isFavorite: true } : post
+            )
+          })
+          refreshStatsSoon()
+      } catch (error) {
+          notifyError('notice.favoriteFailed', error)
+        }
       },
       tagSelection: async (name) => {
-        const ids = get().selectedIds
-        await magpie.addTagMany(ids, name)
-        const selected = new Set(ids)
-        const before = get().posts
-        const posts = before
-          .map((post) =>
-            selected.has(post.id) && !post.tags.some((tag) => tag.name === name)
-              ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
-              : post
-          )
-          .filter((post) => !(get().query.untaggedOnly && selected.has(post.id)))
-        set({
-          posts,
-          layoutRevision:
-            posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
-        })
-        refreshStatsSoon()
+        try {
+          const ids = get().selectedIds
+          await magpie.addTagMany(ids, name)
+          const selected = new Set(ids)
+          const before = get().posts
+          const posts = before
+            .map((post) =>
+              selected.has(post.id) && !post.tags.some((tag) => tag.name === name)
+                ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
+                : post
+            )
+            .filter((post) => !(get().query.untaggedOnly && selected.has(post.id)))
+          set({
+            posts,
+            layoutRevision:
+              posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
+            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
+          })
+          refreshStatsSoon()
+      } catch (error) {
+          notifyError('notice.tagFailed', error)
+        }
       },
 
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
@@ -590,39 +617,39 @@ export const useStore = create<State>()(
         setFormatLanguage(lang)
         document.documentElement.lang = lang
         set({ language, lang })
-        await magpie.setSettings({ language })
+        await persistSettings({ language })
       },
 
       finishOnboarding: async (): Promise<void> => {
         set({ onboardingDone: true })
-        await magpie.setSettings({ onboardingDone: true })
+        await persistSettings({ onboardingDone: true })
         await get().refresh()
       },
 
       replayOnboarding: async (): Promise<void> => {
         set({ onboardingDone: false, settingsOpen: false })
-        await magpie.setSettings({ onboardingDone: false })
+        await persistSettings({ onboardingDone: false })
       },
 
       setTheme: async (theme) => {
         set({ theme })
-        await magpie.setSettings({ theme })
+        await persistSettings({ theme })
       },
 
       setAccent: async (accent) => {
         set({ accent })
-        await magpie.setSettings({ accent })
+        await persistSettings({ accent })
       },
 
       setNitrateEnabled: async (nitrateEnabled) => {
         set({ nitrateEnabled })
-        await magpie.setSettings({ nitrateEnabled })
+        await persistSettings({ nitrateEnabled })
       },
 
       setContentSources: async (contentSources) => {
         const next = contentSources.length > 0 ? [...new Set(contentSources)] : ['saved' as const]
         set({ contentSources: next })
-        await magpie.setSettings({ contentSources: next })
+        await persistSettings({ contentSources: next })
         // Une seule origine active doit aussi devenir la vue courante. Avec les deux,
         // `[]` conserve le sens ergonomique de « toute la bibliothèque ».
         get().setQuery({ sources: next.length === 1 ? [next[0]] : [] })
@@ -630,43 +657,43 @@ export const useStore = create<State>()(
 
       setVideoCacheQuality: async (videoCacheQuality) => {
         set({ videoCacheQuality })
-        await magpie.setSettings({ videoCacheQuality })
+        await persistSettings({ videoCacheQuality })
       },
 
       setMediaStorageMode: async (mediaStorageMode) => {
         set({ mediaStorageMode })
-        await magpie.setSettings({ mediaStorageMode })
+        await persistSettings({ mediaStorageMode })
       },
 
       setPlaybackQuality: async (playbackQuality) => {
         set({ playbackQuality })
-        await magpie.setSettings({ playbackQuality })
+        await persistSettings({ playbackQuality })
       },
 
       setCacheLimitGb: async (cacheLimitGb) => {
         const next = Math.min(500, Math.max(1, Math.round(cacheLimitGb)))
         set({ cacheLimitGb: next })
-        await magpie.setSettings({ cacheLimitGb: next })
+        await persistSettings({ cacheLimitGb: next })
       },
 
       setTrayEnabled: async (trayEnabled) => {
         set({ trayEnabled })
-        await magpie.setSettings({ trayEnabled })
+        await persistSettings({ trayEnabled })
       },
 
       setSyncOnLaunch: async (syncOnLaunch) => {
         set({ syncOnLaunch })
-        await magpie.setSettings({ syncOnLaunch })
+        await persistSettings({ syncOnLaunch })
       },
 
       setSyncSchedule: async (syncSchedule) => {
         set({ syncSchedule })
-        await magpie.setSettings({ syncSchedule })
+        await persistSettings({ syncSchedule })
       },
 
       setAutoOrganizeEnabled: async (autoOrganizeEnabled) => {
         set({ autoOrganizeEnabled })
-        await magpie.setSettings({ autoOrganizeEnabled })
+        await persistSettings({ autoOrganizeEnabled })
       },
 
       /* L'ordre canonique, et non celui des clics : le réglage se relit ailleurs comme une
@@ -675,19 +702,19 @@ export const useStore = create<State>()(
       setAfterSync: async (steps) => {
         const afterSync = AFTER_SYNC_STEPS.filter((step) => steps.includes(step))
         set({ afterSync })
-        await magpie.setSettings({ afterSync })
+        await persistSettings({ afterSync })
       },
 
       /* Écrit seulement quand un rangement est allé au bout. Le noter au lancement dirait que
          la carte est prête alors que l'analyse vient à peine de commencer. */
       setOrganizeMode: async (organizeMode) => {
         set({ organizeMode })
-        await magpie.setSettings({ organizeMode })
+        await persistSettings({ organizeMode })
       },
 
       setAiSettings: async (patch) => {
         set(patch)
-        await magpie.setSettings(patch)
+        await persistSettings(patch)
       },
       setAiProgress: (aiProgress) => set({ aiProgress }),
 
@@ -704,71 +731,83 @@ export const useStore = create<State>()(
       closeDetail: () => set({ detailIndex: null, detailOrigin: null }),
 
       addTag: async (postId, name) => {
-        await magpie.addTag(postId, name)
-        const before = get().posts
-        const posts = before
-          .map((post) =>
-            post.id === postId && !post.tags.some((tag) => tag.name === name)
-              ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
-              : post
-          )
-          .filter((post) => !(get().query.untaggedOnly && post.id === postId))
-        set({
-          posts,
-          layoutRevision:
-            posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
-        })
-        refreshStatsSoon()
+        try {
+          await magpie.addTag(postId, name)
+          const before = get().posts
+          const posts = before
+            .map((post) =>
+              post.id === postId && !post.tags.some((tag) => tag.name === name)
+                ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
+                : post
+            )
+            .filter((post) => !(get().query.untaggedOnly && post.id === postId))
+          set({
+            posts,
+            layoutRevision:
+              posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
+            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
+          })
+          refreshStatsSoon()
+      } catch (error) {
+          notifyError('notice.tagFailed', error)
+        }
       },
 
       removeTag: async (postId, name) => {
-        await magpie.removeTag(postId, name)
-        const before = get().posts
-        const selectedTags = new Set(get().query.tags.map((tag) => tag.toLocaleLowerCase()))
-        const posts = before
-          .map((post) =>
-            post.id === postId
-              ? {
-                  ...post,
-                  tags: post.tags.filter(
-                    (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
-                  )
-              }
-              : post
-          )
-          .filter(
-            (post) =>
-              !(
-                post.id === postId &&
-                selectedTags.size > 0 &&
-                !post.tags.some((tag) => selectedTags.has(tag.name.toLocaleLowerCase()))
-              )
-          )
-        set({
-          posts,
-          layoutRevision:
-            posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
-        })
-        refreshStatsSoon()
+        try {
+          await magpie.removeTag(postId, name)
+          const before = get().posts
+          const selectedTags = new Set(get().query.tags.map((tag) => tag.toLocaleLowerCase()))
+          const posts = before
+            .map((post) =>
+              post.id === postId
+                ? {
+                    ...post,
+                    tags: post.tags.filter(
+                      (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
+                    )
+                }
+                : post
+            )
+            .filter(
+              (post) =>
+                !(
+                  post.id === postId &&
+                  selectedTags.size > 0 &&
+                  !post.tags.some((tag) => selectedTags.has(tag.name.toLocaleLowerCase()))
+                )
+            )
+          set({
+            posts,
+            layoutRevision:
+              posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
+            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
+          })
+          refreshStatsSoon()
+      } catch (error) {
+          notifyError('notice.tagRemoveFailed', error)
+        }
       },
 
       setLabel: async (postId, label) => {
-        await magpie.setLabel(postId, label)
-        const before = get().posts
-        const posts = before
-          .map((post) => (post.id === postId ? { ...post, label } : post))
-          .filter(
-            (post) => !(post.id === postId && get().query.label && get().query.label !== label)
-          )
-        set({
-          posts,
-          layoutRevision:
-            posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
-        })
-        refreshStatsSoon()
+        try {
+          await magpie.setLabel(postId, label)
+          const before = get().posts
+          const posts = before
+            .map((post) => (post.id === postId ? { ...post, label } : post))
+            .filter(
+              (post) => !(post.id === postId && get().query.label && get().query.label !== label)
+            )
+          set({
+            posts,
+            layoutRevision:
+              posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
+            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
+          })
+          refreshStatsSoon()
+      } catch (error) {
+          notifyError('notice.labelFailed', error)
+        }
       },
 
       /** Navigation dans la vue détaillée, bornée aux extrémités plutôt que circulaire. */
@@ -792,22 +831,36 @@ export const useStore = create<State>()(
       },
 
       connectAccount: async (platform) => {
+        /* Le rejet remonte : `Accounts` l'attend pour distinguer une fenêtre refermée d'un
+           vrai échec, et c'est lui qui l'affiche dans la ligne du compte concerné. */
         await magpie.connectAccount(platform)
         await get().loadAccounts()
         // Un compte fraîchement connecté n'a encore rien : on enchaîne sur son premier
-        // rattrapage, ce que l'utilisateur attend de toute façon.
-        void get().startSync([platform])
+        // rattrapage, ce que l'utilisateur attend de toute façon. Hors du `try` de l'appelant,
+        // donc il lui faut le sien : sans quoi une première synchronisation qui échoue laissait
+        // un compte « connecté · jamais synchronisé » sans un mot.
+        void get()
+          .startSync([platform])
+          .catch(reportFailure('notice.syncFailed'))
       },
 
       disconnectAccount: async (platform) => {
-        await magpie.disconnectAccount(platform)
-        await get().loadAccounts()
+        try {
+          await magpie.disconnectAccount(platform)
+          await get().loadAccounts()
+        } catch (error) {
+          notifyError('notice.connectFailed', error)
+        }
       },
 
       startSync: async (platforms) => {
-        await magpie.startSync(platforms)
-        await get().loadAccounts()
-        await get().refresh()
+        try {
+          await magpie.startSync(platforms)
+          await get().loadAccounts()
+          await get().refresh()
+        } catch (error) {
+          notifyError('notice.syncFailed', error)
+        }
       },
 
       cancelSync: async (platform): Promise<void> => {
@@ -825,21 +878,25 @@ export const useStore = create<State>()(
       },
 
       toggleFavorite: async (id) => {
-        const isFavorite = await magpie.toggleFavorite(id)
-        const before = get().posts
-        const posts = before
-          .map((p) => (p.id === id ? { ...p, isFavorite } : p))
-          .filter((post) => !(get().query.favoritesOnly && post.id === id && !isFavorite))
-        set({
-          posts,
-          resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
-          stats: get().stats
-            ? {
-                ...get().stats!,
-                favorites: get().stats!.favorites + (isFavorite ? 1 : -1)
-              }
-            : null
-        })
+        try {
+          const isFavorite = await magpie.toggleFavorite(id)
+          const before = get().posts
+          const posts = before
+            .map((p) => (p.id === id ? { ...p, isFavorite } : p))
+            .filter((post) => !(get().query.favoritesOnly && post.id === id && !isFavorite))
+          set({
+            posts,
+            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
+            stats: get().stats
+              ? {
+                  ...get().stats!,
+                  favorites: get().stats!.favorites + (isFavorite ? 1 : -1)
+                }
+              : null
+          })
+      } catch (error) {
+          notifyError('notice.favoriteFailed', error)
+        }
       }
     }),
     {

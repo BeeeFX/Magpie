@@ -6,6 +6,7 @@ import { magpie } from '../bridge'
 import { formatBytes } from '../format'
 import { useStore, useT } from '../store'
 import { IconCheck, IconClose, IconCopy, IconSend } from './Icons'
+import { reportFailure } from '../notices'
 
 /**
  * Exporter la bibliothèque pour en parler avec l'assistant de son choix.
@@ -127,7 +128,7 @@ export function ExportPanel(): React.JSX.Element | null {
             type="button"
             className="btn"
             onClick={() => {
-              void magpie.copyToClipboard(prompt)
+              void magpie.copyToClipboard(prompt).catch(reportFailure('notice.copyFailed'))
               setCopied(true)
               setTimeout(() => setCopied(false), 1600)
             }}
@@ -135,7 +136,7 @@ export function ExportPanel(): React.JSX.Element | null {
             <IconCopy size={13} />
             {t(copied ? 'export.copied' : 'export.copyPrompt')}
           </button>
-          <button type="button" className="btn" onClick={() => void magpie.openExportFolder()}>
+          <button type="button" className="btn" onClick={() => void magpie.openExportFolder().catch(reportFailure('notice.openFailed'))}>
             {t('export.openFolder')}
           </button>
           <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void run()}>

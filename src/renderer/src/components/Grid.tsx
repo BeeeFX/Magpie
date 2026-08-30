@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { Post } from '@shared/types'
 import { magpie } from '../bridge'
 import { alignItemsToPosts, computeLayout, visibleItems } from '../layout'
+import { reportFailure } from '../notices'
 import { useStore, useT } from '../store'
 import { Card } from './Card'
 
@@ -251,7 +252,8 @@ export function Grid(): React.JSX.Element {
 
   useEffect(() => {
     if (prefetchIds.length === 0) return
-    const timer = setTimeout(() => void magpie.requestThumbnails(prefetchIds), 80)
+    const timer = setTimeout(
+      () => void magpie.requestThumbnails(prefetchIds).catch(reportFailure('notice.unexpected')), 80)
     return () => clearTimeout(timer)
   }, [prefetchIds])
 
@@ -281,7 +283,7 @@ export function Grid(): React.JSX.Element {
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
   const onCopy = useCallback((post: Post) => {
-    void magpie.copyToClipboard(post.url)
+    void magpie.copyToClipboard(post.url).catch(reportFailure('notice.copyFailed'))
     setCopiedId(post.id)
     setTimeout(() => setCopiedId((id) => (id === post.id ? null : id)), 1200)
   }, [])

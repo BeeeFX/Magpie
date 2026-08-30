@@ -11,6 +11,7 @@ import {
   PLATFORM_LABEL,
   SOURCE_LABEL
 } from '../format'
+import { notifyError, notifySuccess, reportFailure } from '../notices'
 import { useStore, useT } from '../store'
 import { LabelPicker } from './LabelPicker'
 import { MediaError } from './MediaError'
@@ -61,7 +62,6 @@ export function Detail(): React.JSX.Element | null {
   const [tagDraft, setTagDraft] = useState('')
   const [collections, setCollections] = useState<CollectionInfo[]>([])
   const [inCollections, setInCollections] = useState<number[]>([])
-  const [notice, setNotice] = useState<string | null>(null)
   const [creatingCollection, setCreatingCollection] = useState(false)
   const [collectionDraft, setCollectionDraft] = useState('')
   const [detailImageSrc, setDetailImageSrc] = useState<string | null>(null)
@@ -92,7 +92,7 @@ export function Detail(): React.JSX.Element | null {
    */
   const requestClose = useCallback(() => {
     if (nativeFullscreen) {
-      void magpie.setWindowFullscreen(false)
+      void magpie.setWindowFullscreen(false).catch(reportFailure('notice.unexpected'))
       setNativeFullscreen(false)
     }
     const panel = panelRef.current
@@ -141,7 +141,6 @@ export function Detail(): React.JSX.Element | null {
   /* Chaque post repart de son premier média et recharge ses collections. */
   useEffect(() => {
     setMediaIndex(0)
-    setNotice(null)
     if (!post) return
     void magpie.collectionsForPost(post.id).then(setInCollections)
   }, [post?.id])
@@ -207,8 +206,12 @@ export function Detail(): React.JSX.Element | null {
     } catch {
       // Certains environnements Chromium refusent l'API HTML malgré un clic utilisateur.
       // Electron peut alors mettre la fenêtre en plein écran et le CSS masque le panneau.
-      const enabled = await magpie.setWindowFullscreen(true)
-      setNativeFullscreen(enabled)
+      try {
+        const enabled = await magpie.setWindowFullscreen(true)
+        setNativeFullscreen(enabled)
+      } catch (error) {
+        notifyError('notice.unexpected', error)
+      }
     }
   }, [nativeFullscreen])
 
@@ -288,7 +291,7 @@ export function Detail(): React.JSX.Element | null {
   )
 
   const copy = (): void => {
-    void magpie.copyToClipboard(post.url)
+    void magpie.copyToClipboard(post.url).catch(reportFailure('notice.copyFailed'))
     setCopied(true)
     setTimeout(() => setCopied(false), 1400)
   }
@@ -301,34 +304,44 @@ export function Detail(): React.JSX.Element | null {
     void addTag(post.id, name)
   }
 
+  /* Le correctif ne s'applique qu'après l'écriture, et l'échec se dit : une pastille qui se
+     coche sur une écriture refusée est un mensonge que rien ne vient corriger. */
   const toggleCollection = async (collection: CollectionInfo): Promise<void> => {
-    if (inCollections.includes(collection.id)) {
-      await magpie.removeFromCollection(collection.id, post.id)
-      setInCollections((ids) => ids.filter((id) => id !== collection.id))
-      setNotice(t('detail.removedFrom', { name: collection.name }))
-      return
-    }
+    try {
+      if (inCollections.includes(collection.id)) {
+        await magpie.removeFromCollection(collection.id, post.id)
+        setInCollections((ids) => ids.filter((id) => id !== collection.id))
+        notifySuccess('detail.removedFrom', { name: collection.name })
+        return
+      }
 
-    const result = await magpie.addToCollection(collection.id, [post.id])
-    setInCollections((ids) => [...ids, collection.id])
-    // La clé primaire composite rend le doublon impossible : on rend compte de l'état
-    // réel plutôt que de proposer un « réajouter » qui ne ferait rien.
-    setNotice(
-      t(result.added > 0 ? 'detail.addedTo' : 'detail.alreadyIn', { name: collection.name })
-    )
+      const result = await magpie.addToCollection(collection.id, [post.id])
+      setInCollections((ids) => [...ids, collection.id])
+      // La clé primaire composite rend le doublon impossible : on rend compte de l'état
+      // réel plutôt que de proposer un « réajouter » qui ne ferait rien.
+      notifySuccess(result.added > 0 ? 'detail.addedTo' : 'detail.alreadyIn', {
+        name: collection.name
+      })
+    } catch (error) {
+      notifyError('notice.collectionFailed', error)
+    }
   }
 
   const createCollection = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
     const name = collectionDraft.trim()
     if (!name) return
-    const created = await magpie.createCollection(name)
-    setCollections(await magpie.listCollections())
-    await magpie.addToCollection(created.id, [post.id])
-    setInCollections((ids) => [...ids, created.id])
-    setNotice(t('detail.addedTo', { name: created.name }))
-    setCollectionDraft('')
-    setCreatingCollection(false)
+    try {
+      const created = await magpie.createCollection(name)
+      setCollections(await magpie.listCollections())
+      await magpie.addToCollection(created.id, [post.id])
+      setInCollections((ids) => [...ids, created.id])
+      notifySuccess('detail.addedTo', { name: created.name })
+      setCollectionDraft('')
+      setCreatingCollection(false)
+    } catch (error) {
+      notifyError('notice.collectionCreateFailed', error)
+    }
   }
 
   return (
@@ -551,7 +564,6 @@ export function Detail(): React.JSX.Element | null {
                 </button>
               </form>
             ) : null}
-            {notice ? <p className="detail__notice">{notice}</p> : null}
           </section>
 
           <footer className="detail__actions">
@@ -569,7 +581,7 @@ export function Detail(): React.JSX.Element | null {
             <button
               type="button"
               className="btn btn--icon"
-              onClick={() => void magpie.openExternal(post.url)}
+              onClick={() => void magpie.openExternal(post.url).catch(reportFailure('notice.openFailed'))}
               title={t('detail.openOnPlatform')}
             >
               <IconExternal size={15} />

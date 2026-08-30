@@ -4,6 +4,7 @@ import { LABELS, PUBLIC_PLATFORMS } from '@shared/types'
 import { magpie } from '../bridge'
 import { PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
+import { notifyError } from '../notices'
 import { useStore, useT } from '../store'
 import { useClosing } from '../useClosing'
 import { CollectionsManager } from './CollectionsManager'
@@ -139,18 +140,26 @@ export function Sidebar(): React.JSX.Element {
   const labelledColors = LABELS.filter((color) => (stats?.byLabel[color] ?? 0) > 0)
 
   const recolour = async (id: number, color: LabelColor | null): Promise<void> => {
-    await magpie.setCollectionColor(id, color)
-    setCollections(await magpie.listCollections())
+    try {
+      await magpie.setCollectionColor(id, color)
+      setCollections(await magpie.listCollections())
+    } catch (error) {
+      notifyError('notice.collectionColourFailed', error)
+    }
   }
 
   const createCollection = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
     const name = collectionDraft.trim()
     if (!name) return
-    await magpie.createCollection(name)
-    setCollections(await magpie.listCollections())
-    setCollectionDraft('')
-    setCreatingCollection(false)
+    try {
+      await magpie.createCollection(name)
+      setCollections(await magpie.listCollections())
+      setCollectionDraft('')
+      setCreatingCollection(false)
+    } catch (error) {
+      notifyError('notice.collectionCreateFailed', error)
+    }
   }
 
   const savedCount = stats?.bySource.saved ?? 0

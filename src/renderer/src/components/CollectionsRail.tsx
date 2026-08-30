@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LABELS, type CollectionHeat, type CollectionInfo } from '@shared/types'
 import { magpie } from '../bridge'
 import { SWATCH } from '../collection-colours'
+import { notifyError, reportFailure } from '../notices'
 import { useT } from '../store'
 import { IconClose } from './Icons'
 
@@ -163,7 +164,10 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
     (id: number, value: number): void => {
       if (commitRef.current) window.clearTimeout(commitRef.current)
       commitRef.current = window.setTimeout(() => {
-        void magpie.setCollectionSize(id, value).then(() => void refresh())
+        void magpie
+          .setCollectionSize(id, value)
+          .then(() => void refresh())
+          .catch(reportFailure('notice.collectionFailed'))
       }, 260)
     },
     [refresh]
@@ -179,6 +183,8 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
       setHeatState(next)
       setWords(await magpie.collectionKeywords(selected))
       await refresh()
+    } catch (error) {
+      notifyError('notice.collectionFailed', error)
     } finally {
       setBusy(null)
     }
@@ -197,6 +203,7 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
             setHeatState(next)
             return refresh()
           })
+          .catch(reportFailure('notice.collectionFailed'))
       }, 220)
     },
     [selected, refresh]
@@ -210,6 +217,8 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
         setHeatState(await magpie.removeCollectionKeyword(selected, word))
         setWords(await magpie.collectionKeywords(selected))
         await refresh()
+      } catch (error) {
+        notifyError('notice.collectionFailed', error)
       } finally {
         setBusy(null)
       }
@@ -226,6 +235,8 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
       setDraft('')
       await refresh()
       await choose(id)
+    } catch (error) {
+      notifyError('notice.collectionCreateFailed', error)
     } finally {
       setBusy(null)
     }
@@ -236,6 +247,8 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
     try {
       await magpie.seedCollectionsFromTopics()
       await refresh()
+    } catch (error) {
+      notifyError('notice.collectionCreateFailed', error)
     } finally {
       setBusy(null)
     }
@@ -405,7 +418,10 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
                         style={{ background: SWATCH[colour] }}
                         aria-label={colour}
                         onClick={() => {
-                          void magpie.setCollectionColor(collection.id, colour).then(refresh)
+                          void magpie
+                            .setCollectionColor(collection.id, colour)
+                            .then(refresh)
+                            .catch(reportFailure('notice.collectionColourFailed'))
                         }}
                       />
                     ))}
@@ -437,7 +453,10 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
                         const name = renameDraft.trim()
                         setRenameDraft(null)
                         if (!name) return
-                        void magpie.renameCollection(collection.id, name).then(refresh)
+                        void magpie
+                            .renameCollection(collection.id, name)
+                            .then(refresh)
+                            .catch(reportFailure('notice.collectionRenameFailed'))
                       }}
                     >
                       <input
@@ -465,10 +484,13 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
                         const into = Number(event.target.value)
                         if (!into) return
                         setMerging(false)
-                        void magpie.mergeCollections(collection.id, into).then(async () => {
-                          await refresh()
-                          await choose(into)
-                        })
+                        void magpie
+                          .mergeCollections(collection.id, into)
+                          .then(async () => {
+                            await refresh()
+                            await choose(into)
+                          })
+                          .catch(reportFailure('notice.collectionMergeFailed'))
                       }}
                     >
                       <option value="">{t('collections.mergeInto')}</option>
@@ -489,10 +511,13 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
                         type="button"
                         className="rail__danger"
                         onClick={() => {
-                          void magpie.deleteCollection(collection.id).then(async () => {
-                            await choose(null)
-                            await refresh()
-                          })
+                          void magpie
+                            .deleteCollection(collection.id)
+                            .then(async () => {
+                              await choose(null)
+                              await refresh()
+                            })
+                            .catch(reportFailure('notice.collectionDeleteFailed'))
                         }}
                       >
                         {t('collections.deleteYes')}

@@ -4,6 +4,7 @@ import type { BackgroundState, LibraryInfo, VideoQuality } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { formatBytes, formatDuration } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
+import { reportFailure } from '../notices'
 import { useStore, useT } from '../store'
 import { Accounts } from './Accounts'
 import { Logo } from './Logo'
@@ -339,7 +340,9 @@ export function Welcome(): React.JSX.Element {
                       void (preload
                         ? magpie.stopPreload('thumbnails')
                         : magpie.startPreload({ what: 'thumbnails' })
-                      ).then(setBackground)
+                      )
+                        .then(setBackground)
+                        .catch(reportFailure('notice.unexpected'))
                     }
                   >
                     {t(preload ? 'settings.preloadCancel' : 'settings.preloadStart')}
@@ -417,7 +420,12 @@ export function Welcome(): React.JSX.Element {
                         <button
                           type="button"
                           className="btn"
-                          onClick={() => void magpie.stopPreload('thumbnails').then(setBackground)}
+                          onClick={() =>
+                            void magpie
+                              .stopPreload('thumbnails')
+                              .then(setBackground)
+                              .catch(reportFailure('notice.unexpected'))
+                          }
                         >
                           {t('settings.preloadCancel')}
                         </button>
@@ -430,7 +438,12 @@ export function Welcome(): React.JSX.Element {
                     <button
                       type="button"
                       className="btn"
-                      onClick={() => void magpie.startPreload({ what: 'thumbnails' }).then(setBackground)}
+                      onClick={() =>
+                        void magpie
+                          .startPreload({ what: 'thumbnails' })
+                          .then(setBackground)
+                          .catch(reportFailure('notice.unexpected'))
+                      }
                     >
                       {t('settings.preloadStart')}
                     </button>

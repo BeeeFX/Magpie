@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { magpie } from '../bridge'
+import { reportFailure } from '../notices'
 import { useT } from '../store'
 import { report, setPerfEnabled, summary, type PerfSummary } from '../perf'
 
@@ -47,7 +48,7 @@ export function MapPerf(): React.JSX.Element | null {
   }, [open])
 
   const copy = useCallback(() => {
-    void magpie.copyToClipboard(report())
+    void magpie.copyToClipboard(report()).catch(reportFailure('notice.copyFailed'))
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1200)
   }, [])

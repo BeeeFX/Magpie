@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PostKind, SortKey } from '@shared/types'
+import type { CollectionInfo, PostKind, SortKey } from '@shared/types'
 import type { TranslationKey } from '../i18n'
+import { notifyError, notifyInfo, notifySuccess, reportFailure } from '../notices'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Popover } from './Popover'
 import { OrganizeButton } from './OrganizeButton'
@@ -57,6 +58,17 @@ export function Toolbar(): React.JSX.Element {
   const tagSelection = useStore((s) => s.tagSelection)
 
   const [search, setSearch] = useState(query.search)
+  /** Quel formulaire de la barre de sélection est ouvert, s'il y en a un. */
+  const [bulkForm, setBulkForm] = useState<'tag' | 'collection' | null>(null)
+  const [bulkDraft, setBulkDraft] = useState('')
+  const [bulkCollections, setBulkCollections] = useState<CollectionInfo[]>([])
+
+  /* Chargée seulement quand le formulaire s'ouvre : la barre de sélection ne doit pas
+     interroger le processus principal tant que personne ne lui demande rien. */
+  useEffect(() => {
+    if (bulkForm !== 'collection') return
+    void magpie.listCollections().then(setBulkCollections).catch(reportFailure('notice.collectionFailed'))
+  }, [bulkForm])
   const inputRef = useRef<HTMLInputElement>(null)
 
   /* Ctrl/⌘+K place le curseur dans la recherche depuis n'importe où. */
@@ -87,17 +99,44 @@ export function Toolbar(): React.JSX.Element {
   const activeFilters = query.kinds.length + (query.untaggedOnly ? 1 : 0)
   const sortKey = SORTS.find((s) => s.key === query.sort)?.label
 
-  const addSelectionToCollection = async (): Promise<void> => {
-    const name = window.prompt(t('bulk.collectionPrompt'))?.trim()
-    if (!name) return
-    const collections = await magpie.listCollections()
-    const collection =
-      collections.find((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase()) ??
-      (await magpie.createCollection(name))
-    const result = await magpie.addToCollection(collection.id, selectedIds)
-    if (result.alreadyThere.length > 0) {
-      const readd = window.confirm(t('bulk.duplicates', { count: result.alreadyThere.length }))
-      if (readd) await magpie.addToCollection(collection.id, result.alreadyThere, true)
+  /**
+   * Ranger la sélection dans une collection.
+   *
+   * Le nom se saisissait dans un `window.prompt` — qu'Electron n'implémente pas. Le retour
+   * était `null`, aucune boîte n'apparaissait, et le `if (!name) return` juste dessous avalait
+   * le cas : le bouton ne faisait **rien**, et l'échec était indiscernable d'un clic manqué.
+   * Seul l'aperçu navigateur, où `prompt` existe, pouvait donner l'illusion qu'il marchait.
+   *
+   * La question de doublon posait le même problème à l'envers : elle arrive *après* une
+   * réponse, donc aucun bouton ne peut la porter d'avance. Elle devient une notification avec
+   * action.
+   */
+  const addSelectionToCollection = async (name: string): Promise<void> => {
+    setBulkForm(null)
+    try {
+      const collections = await magpie.listCollections()
+      const collection =
+        collections.find((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase()) ??
+        (await magpie.createCollection(name))
+      const result = await magpie.addToCollection(collection.id, selectedIds)
+      if (result.alreadyThere.length === 0) {
+        notifySuccess('bulk.addedTo', { count: result.added, name: collection.name })
+        return
+      }
+      notifyInfo(
+        'bulk.duplicates',
+        { count: result.alreadyThere.length },
+        {
+          key: 'bulk.readd',
+          run: () => {
+            void magpie
+              .addToCollection(collection.id, result.alreadyThere, true)
+              .catch(reportFailure('notice.collectionFailed'))
+          }
+        }
+      )
+    } catch (error) {
+      notifyError('notice.collectionFailed', error)
     }
   }
 
@@ -108,7 +147,12 @@ export function Toolbar(): React.JSX.Element {
        un import, pour une valeur qu'aucun rendu ne lit. */
     const posts = useStore.getState().posts
     const selected = new Set(selectedIds)
-    void magpie.copyToClipboard(posts.filter((post) => selected.has(post.id)).map((post) => post.url).join('\n'))
+    void magpie
+      .copyToClipboard(
+        posts.filter((post) => selected.has(post.id)).map((post) => post.url).join('\n')
+      )
+      .then(() => notifySuccess('bulk.copied', { count: selected.size }))
+      .catch(reportFailure('notice.copyFailed'))
   }
 
   return (
@@ -310,20 +354,17 @@ export function Toolbar(): React.JSX.Element {
           </button>
           <button
             type="button"
-            className="btn"
+            className={`btn ${bulkForm === 'tag' ? 'is-active' : ''}`}
             disabled={selectedIds.length === 0}
-            onClick={() => {
-              const name = window.prompt(t('bulk.tagPrompt'))
-              if (name?.trim()) void tagSelection(name.trim())
-            }}
+            onClick={() => setBulkForm(bulkForm === 'tag' ? null : 'tag')}
           >
             {t('bulk.tag')}
           </button>
           <button
             type="button"
-            className="btn"
+            className={`btn ${bulkForm === 'collection' ? 'is-active' : ''}`}
             disabled={selectedIds.length === 0}
-            onClick={() => void addSelectionToCollection()}
+            onClick={() => setBulkForm(bulkForm === 'collection' ? null : 'collection')}
           >
             {t('bulk.collection')}
           </button>
@@ -335,6 +376,57 @@ export function Toolbar(): React.JSX.Element {
           >
             {t('bulk.copy')}
           </button>
+
+          {/* La saisie se fait dans la barre, à côté du bouton qui l'a demandée, et non dans une
+              boîte du système : c'est le formulaire en ligne déjà utilisé pour créer une
+              collection depuis le panneau latéral. */}
+          {bulkForm ? (
+            <form
+              className="collection-create collection-create--bulk"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const name = bulkDraft.trim()
+                if (!name) return
+                setBulkDraft('')
+                if (bulkForm === 'tag') {
+                  setBulkForm(null)
+                  void tagSelection(name)
+                } else void addSelectionToCollection(name)
+              }}
+            >
+              <input
+                autoFocus
+                value={bulkDraft}
+                maxLength={80}
+                placeholder={t(bulkForm === 'tag' ? 'bulk.tagPrompt' : 'bulk.collectionPrompt')}
+                aria-label={t(bulkForm === 'tag' ? 'bulk.tagPrompt' : 'bulk.collectionPrompt')}
+                list={bulkForm === 'collection' ? 'bulk-collections' : undefined}
+                onChange={(event) => setBulkDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setBulkForm(null)
+                }}
+              />
+              {/* Les collections existantes se proposent : le nom se résolvait par comparaison
+                  insensible à la casse, donc une frappe approximative en créait une seconde à
+                  côté de celle qu'on visait. */}
+              {bulkForm === 'collection' ? (
+                <datalist id="bulk-collections">
+                  {bulkCollections.map((collection) => (
+                    <option key={collection.id} value={collection.name} />
+                  ))}
+                </datalist>
+              ) : null}
+              <button
+                type="submit"
+                className="collection-create__submit"
+                disabled={!bulkDraft.trim()}
+                aria-label={t('bulk.apply')}
+                title={t('bulk.apply')}
+              >
+                <IconCheck size={13} />
+              </button>
+            </form>
+          ) : null}
         </div>
       ) : null}
     </header>

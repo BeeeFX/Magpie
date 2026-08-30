@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CollectionInfo } from '@shared/types'
 import { magpie } from '../bridge'
+import { notifyError } from '../notices'
 import { useStore, useT } from '../store'
 import { IconClose } from './Icons'
 
@@ -66,6 +67,8 @@ export function CollectionsManager({
     try {
       await magpie.renameCollection(collection.id, name)
       await settle()
+    } catch (error) {
+      notifyError('notice.collectionRenameFailed', error)
     } finally {
       setBusy(null)
     }
@@ -76,6 +79,8 @@ export function CollectionsManager({
     try {
       await magpie.mergeCollections(from, into)
       await settle()
+    } catch (error) {
+      notifyError('notice.collectionMergeFailed', error)
     } finally {
       setBusy(null)
     }
@@ -87,6 +92,8 @@ export function CollectionsManager({
       await magpie.deleteCollection(id)
       setConfirming(null)
       await settle()
+    } catch (error) {
+      notifyError('notice.collectionDeleteFailed', error)
     } finally {
       setBusy(null)
     }

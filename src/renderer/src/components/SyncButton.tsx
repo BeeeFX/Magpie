@@ -5,6 +5,7 @@ import { magpie, magpieEvents } from '../bridge'
 import { CLIP_BYTES, THUMBNAIL_BYTES } from '../estimates'
 import { formatBytes, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
+import { reportFailure } from '../notices'
 import { useStore, useT } from '../store'
 import { useClosing } from '../useClosing'
 import { useMenuKeys } from '../useMenuKeys'
@@ -76,6 +77,7 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
   const setExportOpen = useStore((s) => s.setExportOpen)
   const cacheQuality = useStore((s) => s.videoCacheQuality)
   const [backlog, setBacklog] = useState<Backlog | null>(null)
+  const [recheckArmed, setRecheckArmed] = useState(false)
 
   /* Relu à chaque changement du registre de tâches : un rattrapage qui tourne doit voir ses
      compteurs descendre sous les yeux, sinon rien ne dit qu'il travaille. */
@@ -238,22 +240,40 @@ function ActionsMenu({ onDone }: { onDone(): void }): React.JSX.Element {
           </span>
         </button>
       ) : null}
+      {/* Le geste le plus long du menu — il reparcourt tout l'historique des comptes — demande
+          confirmation sur place, en deux temps. Une boîte native l'aurait fait aussi, mais elle
+          bloque la boucle, ne se traduit pas et referme le menu sous elle. */}
       {connected.length > 0 ? (
         <button
           type="button"
           role="menuitem"
-          onClick={run(() => {
-            /* La conjonction se traduit : « Instagram et X » arrivait tel quel dans une phrase
-               anglaise par ailleurs traduite. */
-            const names = connected.map((a) => PLATFORM_LABEL[a.platform]).join(` ${t('common.and')} `)
-            if (!window.confirm(t('actions.recheckConfirm', { platforms: names }))) return
-            for (const account of connected) void magpie.startFullSync(account.platform)
-          })}
+          className={recheckArmed ? 'is-armed' : ''}
+          onClick={() => {
+            if (!recheckArmed) {
+              setRecheckArmed(true)
+              return
+            }
+            setRecheckArmed(false)
+            for (const account of connected) {
+              void magpie.startFullSync(account.platform).catch(reportFailure('notice.syncFailed'))
+            }
+            onDone()
+          }}
         >
           <IconClock size={15} />
           <span>
-            <strong>{t('actions.recheck')}</strong>
-            <em>{t('actions.recheckHint')}</em>
+            <strong>{t(recheckArmed ? 'actions.recheckYes' : 'actions.recheck')}</strong>
+            <em>
+              {recheckArmed
+                ? /* La conjonction se traduit : « Instagram et X » arrivait tel quel dans une
+                     phrase anglaise par ailleurs traduite. */
+                  t('actions.recheckConfirm', {
+                    platforms: connected
+                      .map((a) => PLATFORM_LABEL[a.platform])
+                      .join(` ${t('common.and')} `)
+                  })
+                : t('actions.recheckHint')}
+            </em>
           </span>
         </button>
       ) : null}

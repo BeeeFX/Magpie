@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Post } from '@shared/types'
 import { magpie } from '../bridge'
 import { displayName, formatDate, PLATFORM_LABEL } from '../format'
+import { reportFailure } from '../notices'
 import { useT } from '../store'
 import { IconClose, IconExternal } from './Icons'
 import { PlatformIcon } from './PlatformIcon'
@@ -237,7 +238,7 @@ export function MapPostPanel({
             <button
               type="button"
               className="btn map-panel__out"
-              onClick={() => void magpie.openExternal(shown.url)}
+              onClick={() => void magpie.openExternal(shown.url).catch(reportFailure('notice.openFailed'))}
             >
               <IconExternal />
               {t('organizer.panelOpen')}

@@ -10,6 +10,7 @@ import { AFTER_SYNC_STEPS } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { useClosing } from '../useClosing'
 import { formatDateTime } from '../format'
+import { notifyError, reportFailure } from '../notices'
 import { useStore, useT } from '../store'
 import { IconClock, IconClose, IconMap } from './Icons'
 import { OrganizerSteps } from './OrganizerSteps'
@@ -69,12 +70,17 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const stopEverything = useCallback(async (): Promise<void> => {
     setStepsRunning(false)
     setStepStates({ sync: 'todo', thumbnails: 'todo', clips: 'todo', transcribe: 'todo', group: 'todo' })
-    await Promise.allSettled([
+    /* `allSettled` ne rejette jamais : chaque arrêt qui échoue est simplement noté, et les
+       autres continuent. Couper une préparation ne doit pas dépendre du succès des quatre. */
+    const stops = await Promise.allSettled([
       cancelSync(),
       magpie.stopPreload('thumbnails'),
       magpie.stopPreload('clips'),
       magpie.stopTranscription()
     ])
+    for (const stop of stops) {
+      if (stop.status === 'rejected') notifyError('notice.unexpected', stop.reason)
+    }
   }, [cancelSync, setStepStates, setStepsRunning])
   const onClose = useCallback((): void => {
     if (stepsRunning) setLeaving(true)
@@ -406,10 +412,13 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                   type="button"
                   className="btn btn--primary"
                   onClick={() => {
-                    void magpie.keepOnlyCollections(keeping).then(() => {
-                      void refresh(false, true)
-                      setPhase('intro')
-                    })
+                    void magpie
+                      .keepOnlyCollections(keeping)
+                      .then(() => {
+                        void refresh(false, true)
+                        setPhase('intro')
+                      })
+                      .catch(reportFailure('notice.collectionFailed'))
                   }}
                 >
                   {t(
