@@ -6725,3 +6725,44 @@ html.window-is-moving .app *::after {
   padding: 0;
   align-items: center;
 }
+
+/* « Pourquoi ? » sur une carte dont l'aperçu a renoncé : le relevé technique existait déjà
+   dans la vue détaillée, il n'y avait aucune raison de le refuser à la grille. */
+.card__why {
+  padding: 2px 8px;
+  background: var(--field);
+  border: 1px solid var(--hairline);
+  border-radius: var(--pill);
+  color: var(--muted);
+  font-size: 10.5px;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.card__why:hover {
+  background: var(--field-hover);
+  color: var(--text);
+}
+
+.card__diagnostic {
+  position: absolute;
+  inset: 8px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  background: color-mix(in srgb, var(--sunken, #000) 78%, transparent);
+  border-radius: var(--radius-md);
+}
+
+/* Le relevé d'une lecture impossible, dans l'état vide de la grille. */
+.empty-state__detail {
+  max-width: 460px;
+  padding: 7px 10px;
+  background: var(--field);
+  border-radius: var(--radius-md);
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  word-break: break-word;
+}

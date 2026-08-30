@@ -11,6 +11,7 @@ import {
 import type { LayoutItem } from '../layout'
 import { magpie } from '../bridge'
 import { useStore, useT } from '../store'
+import { MediaError } from './MediaError'
 import {
   IconCheck,
   IconChevronLeft,
@@ -176,6 +177,24 @@ function CardImpl({
   const previewReady = Boolean((current?.thumbUrl && loaded) || (videoUrl && videoReady))
   const previewFailed = (current?.thumbStatus === 'failed' || broken) && !previewReady
 
+  /**
+   * Passé ce délai, « en préparation » cesse d'être vrai.
+   *
+   * L'état n'avait aucune borne : un `thumbStatus` bloqué sur `pending` — file arrêtée, disque
+   * plein, réseau coupé — produisait un mur de ronds qui tournent, dont aucun ne basculerait
+   * jamais, puisque l'échec n'est reconnu que sur un statut explicite ou une image qui lève.
+   * Vingt secondes : bien au-delà d'une vignette qui descend, bien en deçà de la patience.
+   */
+  const [pendingTooLong, setPendingTooLong] = useState(false)
+  const [diagnosing, setDiagnosing] = useState(false)
+  useEffect(() => {
+    setPendingTooLong(false)
+    setDiagnosing(false)
+    if (previewReady || previewFailed) return
+    const timer = setTimeout(() => setPendingTooLong(true), 20_000)
+    return () => clearTimeout(timer)
+  }, [post.id, current?.idx, previewReady, previewFailed])
+
   const mediaBlock = hasMedia ? (
     <div
       className={`card__media ${!previewReady && !previewFailed ? 'is-pending' : ''}`}
@@ -216,17 +235,42 @@ function CardImpl({
         />
       ) : null}
 
-      {!previewReady && !previewFailed ? (
+      {!previewReady && !previewFailed && !pendingTooLong ? (
         <span className="card__media-pending" aria-label={t('card.preparingMedia')}>
           <span className="spinner" />
           <span>{t('card.preparingMedia')}</span>
         </span>
       ) : null}
 
-      {previewFailed ? (
+      {/* Une carte qui « prépare » sans fin est le pire des états : elle promet quelque chose
+          qui n'arrivera pas. Passé le délai, on l'admet — et on propose de comprendre, comme le
+          lecteur vidéo le fait depuis toujours pour le même échec. */}
+      {previewFailed || pendingTooLong ? (
         <span className="card__media-pending card__media-pending--failed">
           <IconPlay size={15} />
           <span>{t('card.previewUnavailable')}</span>
+          <button
+            type="button"
+            className="card__why"
+            onClick={(event) => {
+              event.stopPropagation()
+              setDiagnosing(true)
+            }}
+          >
+            {t('card.why')}
+          </button>
+        </span>
+      ) : null}
+
+      {diagnosing ? (
+        <span className="card__diagnostic" onClick={(event) => event.stopPropagation()}>
+          <MediaError
+            message={t('player.streamError')}
+            postId={post.id}
+            mediaIndex={current?.idx ?? 0}
+            kind={current?.kind === 'video' ? 'video' : 'image'}
+            quality="auto"
+          />
         </span>
       ) : null}
 

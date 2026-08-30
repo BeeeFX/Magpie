@@ -49,6 +49,7 @@
     "check:notices": "tsx --tsconfig tsconfig.node.json scripts/check-notices.ts",
     "check:search": "tsx --tsconfig tsconfig.node.json scripts/check-search.ts",
     "check:query": "tsx --tsconfig tsconfig.node.json scripts/check-query.ts",
+    "check:paging": "tsx --tsconfig tsconfig.node.json scripts/check-paging.ts",
     "bench:map-quality": "tsx --tsconfig tsconfig.node.json scripts/bench-map-quality.mts",
     "map:compare": "tsx --tsconfig tsconfig.node.json scripts/map-compare.mts",
     "bench:map-regions": "tsx --tsconfig tsconfig.node.json scripts/bench-map-regions.mts",

@@ -26,7 +26,8 @@ import type {
 import type { Language, LanguageChoice } from '@shared/types'
 import { AFTER_SYNC_STEPS, DEFAULT_QUERY, idleSyncState } from '@shared/types'
 import { magpie } from './bridge'
-import { notifyError, notifySuccess, reportFailure } from './notices'
+import { describeError, notifyError, notifySuccess, reportFailure, useNotices } from './notices'
+import { afterPageFailure } from './paging'
 import { clearedQuery } from './query'
 import { chunk } from './selection'
 import { setFormatLanguage } from './format'
@@ -152,6 +153,8 @@ interface State {
   loading: boolean
   loadingMore: boolean
   hasMore: boolean
+  /** Ce que la lecture a refusé de rendre, s'il y a lieu. Distinct de « zéro résultat ». */
+  loadError: string | null
   resultTotal: number
   nextOffset: number
   /** Ne change que lorsque la position ou la taille des cartes peut changer. */
@@ -298,6 +301,7 @@ export const useStore = create<State>()(
       loading: true,
       loadingMore: false,
       hasMore: false,
+      loadError: null,
       resultTotal: 0,
       nextOffset: 0,
       layoutRevision: 0,
@@ -424,13 +428,19 @@ export const useStore = create<State>()(
               ? get().layoutRevision + 1
               : get().layoutRevision,
           loading: false,
+          loadError: null,
           hasMore: nextOffset < total,
           resultTotal: total,
           nextOffset
         })
         } catch (error) {
           console.error('[magpie] Page de posts illisible', error)
-          if (generation === pageGeneration) set({ loading: false, loadingMore: false })
+          /* Un troisième état, et il manquait : une base illisible retombait sur « aucun
+             signet ne correspond à ces filtres » — une panne présentée comme un filtre trop
+             strict, avec un bouton qui n'y pouvait rien. */
+          if (generation === pageGeneration) {
+            set({ loading: false, loadingMore: false, loadError: describeError(error) })
+          }
         }
       },
 
@@ -474,6 +484,23 @@ export const useStore = create<State>()(
             resultTotal: page.total ?? get().resultTotal,
             nextOffset: offset + page.posts.length,
             hasMore: page.hasMore
+          })
+        } catch (error) {
+          /* Ce qui coupe la boucle n'est pas d'attraper, c'est `hasMore: false`. Un `catch` qui
+             se contenterait de notifier laisserait la grille redemander la même page à chaque
+             frame de défilement, indéfiniment. On rend la décision à l'utilisateur. */
+          if (generation === pageGeneration) set(afterPageFailure())
+          useNotices.getState().push({
+            tone: 'error',
+            key: 'notice.pageFailed',
+            detail: describeError(error),
+            action: {
+              key: 'notice.retry',
+              run: () => {
+                set({ hasMore: true })
+                void get().loadMore()
+              }
+            }
           })
         } finally {
           if (generation === pageGeneration) set({ loadingMore: false })

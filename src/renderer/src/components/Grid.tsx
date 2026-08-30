@@ -3,6 +3,7 @@ import type { Post } from '@shared/types'
 import { magpie } from '../bridge'
 import { alignItemsToPosts, computeLayout, visibleItems } from '../layout'
 import { reportFailure } from '../notices'
+import { shouldPrefetch } from '../paging'
 import { useStore, useT } from '../store'
 import { Card } from './Card'
 
@@ -18,6 +19,8 @@ export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
   const clearFilters = useStore((s) => s.clearFilters)
+  const loadError = useStore((s) => s.loadError)
+  const refresh = useStore((s) => s.refresh)
   const layoutRevision = useStore((s) => s.layoutRevision)
   const loading = useStore((s) => s.loading)
   const loadingMore = useStore((s) => s.loadingMore)
@@ -191,10 +194,10 @@ export function Grid(): React.JSX.Element {
   /* Sur un grand écran ou une grille très dense, le premier lot peut ne pas dépasser
      assez loin sous la fenêtre. On précharge avant que le bas devienne visible. */
   useEffect(() => {
-    if (hasMore && !loadingMore && layout.totalHeight < scroll + viewport.height * 3) {
+    if (shouldPrefetch({ hasMore, loadingMore }, loading, layout.totalHeight, scroll, viewport.height)) {
       void loadMore()
     }
-  }, [hasMore, loadingMore, layout.totalHeight, scroll, viewport.height, loadMore])
+  }, [hasMore, loadingMore, loading, layout.totalHeight, scroll, viewport.height, loadMore])
 
   /* Une fois par lot, hors du chemin de défilement : voir `alignItemsToPosts`, dont
      l'identité stable est ce qui rend le `memo` de Card réellement efficace. */
@@ -306,7 +309,18 @@ export function Grid(): React.JSX.Element {
     <div className={`grid ${resizing ? 'is-resizing' : ''}`} ref={scrollerRef} onScroll={onScroll}>
       {posts.length === 0 && !loading ? (
         <div className="grid__empty">
-          {accounts.some((a) => a.connected) ? (
+          {loadError ? (
+            /* Une panne de lecture n'est pas un filtre trop strict. Elle retombait pourtant sur
+               le même message, avec un bouton qui n'y pouvait rien. */
+            <div className="empty-state">
+              <h2>{t('grid.loadErrorTitle')}</h2>
+              <p>{t('grid.loadErrorText')}</p>
+              <code className="empty-state__detail">{loadError}</code>
+              <button type="button" className="btn btn--primary" onClick={() => void refresh(true)}>
+                {t('grid.retry')}
+              </button>
+            </div>
+          ) : accounts.some((a) => a.connected) ? (
             /* Une phrase sans issue : on ne se souvient pas toujours de ce qu'on a coché,
                et il fallait retrouver chaque filtre pour le décocher un par un. */
             <div className="empty-state empty-state--tight">

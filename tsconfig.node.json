@@ -29,6 +29,7 @@
     // fonctions pures que `scripts/check-query.ts` rejoue sous Node.
     "src/renderer/src/query.ts",
     "src/renderer/src/selection.ts",
+    "src/renderer/src/paging.ts",
     // Même cas : la couverture du tampon de la carte est de la géométrie pure, et
     // `scripts/bench-map-zoom.mts` la rejoue sous Node pour compter les retracés.
     "src/renderer/src/map-coverage.ts",
