@@ -14,6 +14,7 @@ import type {
 import { CONTENT_SOURCES, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
 import { MEDIA_UPSERT_SQL } from './media-upsert'
 import { getDb } from './index'
+import { searchClause } from './search'
 
 interface PostRow {
   id: string
@@ -136,27 +137,10 @@ export function postFilter(query: PostQuery): { condition: string; params: unkno
    * de l'auteur, **ou** s'ils sont tous dans ses tags. Trois façons de dire oui plutôt qu'une :
    * la règle reste prévisible, et personne ne perd un résultat qu'il avait avant.
    */
-  const match = toFtsQuery(query.search)
-  if (match) {
-    const words = searchWords(query.search)
-    const clauses = ['p.rowid IN (SELECT rowid FROM posts_fts WHERE posts_fts MATCH ?)']
-    params.push(match)
-    if (words.length > 0) {
-      clauses.push(words.map(() => 'p.author_name LIKE ?').join(' AND '))
-      params.push(...words.map((word) => `%${word}%`))
-      clauses.push(
-        words
-          .map(
-            () => `EXISTS (
-        SELECT 1 FROM post_tags pt JOIN tags t ON t.id = pt.tag_id
-        WHERE pt.post_id = p.id AND t.name LIKE ?
-      )`
-          )
-          .join(' AND ')
-      )
-      params.push(...words.map((word) => `%${word}%`))
-    }
-    where.push(`(${clauses.join(' OR ')})`)
+  const search = searchClause(query.search)
+  if (search) {
+    where.push(search.sql)
+    params.push(...search.params)
   }
 
   return { condition: where.join(' AND '), params }
@@ -1913,36 +1897,6 @@ export function pendingVideos(rawLimit = 150): PendingMedia[] {
  * sens dans la syntaxe FTS pour qu'une apostrophe ou un guillemet ne fasse pas planter la
  * recherche, et on ajoute `*` au dernier terme pour chercher au fil de la frappe.
  */
-/**
- * Les mots de la saisie, pour les recherches qui ne passent pas par l'index.
- *
- * Mêmes coupes que `toFtsQuery` — c'est la même saisie qu'on lit — puis on retire les deux
- * jokers de `LIKE`. Les retirer plutôt que les échapper évite d'avoir à porter un `ESCAPE` sur
- * chaque comparaison : personne ne cherche un pour-cent, et un mot vidé de ses jokers cherche
- * encore ce qu'on voulait.
- *
- * Six mots au plus : au-delà, chaque mot ajoute deux comparaisons par post, et une saisie
- * pareille ne cherche plus rien.
- */
-function searchWords(raw: string): string[] {
-  return raw
-    .replace(/["'()*:^-]/g, ' ')
-    .split(/\s+/)
-    .map((word) => word.replace(/[%_]/g, ''))
-    .filter((word) => word.length > 1)
-    .slice(0, 6)
-}
-
-function toFtsQuery(raw: string): string | null {
-  const terms = raw
-    .replace(/["'()*:^-]/g, ' ')
-    .split(/\s+/)
-    .filter((t) => t.length > 0)
-
-  if (terms.length === 0) return null
-  return terms.map((t, i) => (i === terms.length - 1 ? `"${t}"*` : `"${t}"`)).join(' AND ')
-}
-
 /** Une position figée sur la carte, dans le repère unité. */
 export interface MapPosition {
   postId: string

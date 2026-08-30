@@ -12,7 +12,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { mediaIdentity } from '../media/identity'
+import { registerFunctions } from './functions'
 import { MIGRATIONS, SCHEMA_SQL, SCHEMA_VERSION } from './schema'
 
 let db: Database.Database | null = null
@@ -193,13 +193,10 @@ function prepareConnection(
      couvrent largement une transaction de cette base ; au-delà, c’est autre chose. */
   conn.pragma('busy_timeout = 5000')
 
-  /* Comparer deux liens de CDN dans une requête demande de savoir lequel des deux désigne
-     le même fichier — ce que seul `mediaIdentity` sait dire. La fonction est déclarée sur
-     la connexion plutôt que le calcul remonté en JavaScript : l'upsert de synchronisation
-     reste ainsi une seule instruction, sans lecture préalable ligne à ligne. */
-  conn.function('media_identity', { deterministic: true }, (value: unknown) =>
-    mediaIdentity(typeof value === 'string' ? value : null)
-  )
+  /* Les fonctions que le SQL du projet suppose disponibles — `media_identity` et `fold` —
+     vivent dans un module sans dépendances, pour que les contrôles puissent enregistrer les
+     mêmes sur une base en mémoire au lieu d'en recopier une version qui dériverait. */
+  registerFunctions(conn)
 
   const current = conn.pragma('user_version', { simple: true }) as number
 
