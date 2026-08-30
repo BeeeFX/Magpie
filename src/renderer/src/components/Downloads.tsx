@@ -178,6 +178,7 @@ export function Downloads(): React.JSX.Element {
               </span>
               <input
                 type="range"
+                aria-label={t('downloads.bandwidthOff')}
                 min={0}
                 max={20}
                 step={1}

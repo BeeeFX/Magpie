@@ -365,6 +365,7 @@ export function Welcome(): React.JSX.Element {
                 <span>{t('welcome.storageLimit', { size: cacheLimitGb })}</span>
                 <input
                   type="range"
+                  aria-label={t('settings.cacheLimit')}
                   min={1}
                   max={100}
                   value={cacheLimitGb}

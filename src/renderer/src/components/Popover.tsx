@@ -55,6 +55,11 @@ export function Popover({
         className={`control ${compact ? 'control--compact' : ''} ${
           open || (badge ?? 0) > 0 ? 'is-active' : ''
         }`}
+        /* `useMenuKeys` promet la navigation aux flèches à tout conteneur `role="menu"` : le
+           crochet était branché, le rôle manquait. Le bouton de synchronisation, lui, le
+           déclarait correctement — deux menus de la même barre ne se présentaient pas pareil. */
+        aria-expanded={open}
+        aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
         title={title}
       >
@@ -63,7 +68,11 @@ export function Popover({
       </button>
 
       {mounted ? (
-        <div ref={menuRef} className={`popover popover--${align} ${closing ? 'is-closing' : ''}`}>
+        <div
+          ref={menuRef}
+          role="menu"
+          className={`popover popover--${align} ${closing ? 'is-closing' : ''}`}
+        >
           {children(() => setOpen(false))}
         </div>
       ) : null}

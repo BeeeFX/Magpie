@@ -9,6 +9,7 @@ import type {
 import { AFTER_SYNC_STEPS } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { useClosing } from '../useClosing'
+import { useModalFocus } from '../useModalFocus'
 import { formatDateTime } from '../format'
 import { notifyError, reportFailure } from '../notices'
 import { useStore, useT } from '../store'
@@ -93,6 +94,8 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const [undone, setUndone] = useState<OrganizerUndoResult | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const { mounted, closing } = useClosing(open, 230)
+  /* Se déclarait `aria-modal` sans piéger le focus : Tab sortait derrière la fenêtre. */
+  useModalFocus(open, panelRef)
 
   useEffect(() => {
     if (!open) return
@@ -107,7 +110,6 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
     // Un classement se regrette souvent après avoir refermé la fenêtre : la proposition
     // d'annulation doit donc être là dès l'ouverture, pas seulement juste après coup.
     void magpie.lastOrganizerApplication().then(setLastApplication).catch(() => {})
-    requestAnimationFrame(() => panelRef.current?.focus())
   }, [open])
 
   /**

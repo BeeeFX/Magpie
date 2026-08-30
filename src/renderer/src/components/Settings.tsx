@@ -385,6 +385,7 @@ export function Settings(): React.JSX.Element | null {
               </div>
               <input
                 type="range"
+                aria-label={t('settings.cacheLimit')}
                 min={1}
                 max={100}
                 step={1}
@@ -499,6 +500,7 @@ export function Settings(): React.JSX.Element | null {
               <span className="density__cap density__cap--lg" />
               <input
                 type="range"
+                aria-label={t('toolbar.density')}
                 min={DENSITY_MIN}
                 max={DENSITY_MAX}
                 step={10}

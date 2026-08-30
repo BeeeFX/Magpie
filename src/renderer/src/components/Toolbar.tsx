@@ -179,7 +179,12 @@ export function Toolbar(): React.JSX.Element {
         <IconPanel />
       </button>
 
+      {/* Le nom accessible se calculait à partir du contenu textuel du label — deux `<kbd>`,
+          les icônes étant masquées — donc le champ s'annonçait « CtrlK », et le `placeholder`
+          était ignoré puisqu'un label existait. Le raccourci reste visible, il cesse d'être le
+          nom du champ. */}
       <label className="search">
+        <span className="search__label">{t('toolbar.search')}</span>
         <span className="search__icon">
           <IconSearch />
         </span>
@@ -190,7 +195,7 @@ export function Toolbar(): React.JSX.Element {
           placeholder={t('toolbar.search')}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <span className="search__kbd">
+        <span className="search__kbd" aria-hidden="true">
           <kbd>Ctrl</kbd>
           <kbd>K</kbd>
         </span>
@@ -317,6 +322,7 @@ export function Toolbar(): React.JSX.Element {
           <span className="density__cap density__cap--lg" />
           <input
             type="range"
+            aria-label={t('toolbar.density')}
             min={DENSITY_MIN}
             max={DENSITY_MAX}
             step={10}
@@ -331,6 +337,7 @@ export function Toolbar(): React.JSX.Element {
           <button
             type="button"
             className={mode === 'masonry' ? 'is-active' : ''}
+            aria-pressed={mode === 'masonry'}
             onClick={() => setGridMode('masonry')}
             title={t('toolbar.masonry')}
           >
@@ -339,6 +346,7 @@ export function Toolbar(): React.JSX.Element {
           <button
             type="button"
             className={mode === 'cards' ? 'is-active' : ''}
+            aria-pressed={mode === 'cards'}
             onClick={() => setGridMode('cards')}
             title={t('toolbar.cards')}
           >
@@ -349,6 +357,7 @@ export function Toolbar(): React.JSX.Element {
           <button
             type="button"
             className={mode === 'map' ? 'is-active' : ''}
+            aria-pressed={mode === 'map'}
             onClick={() => setGridMode('map')}
             title={t('toolbar.map')}
           >

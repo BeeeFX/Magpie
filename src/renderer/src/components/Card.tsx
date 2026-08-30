@@ -357,17 +357,30 @@ function CardImpl({
       onClick={(e) =>
         selectionMode ? onToggleSelected(post.id) : onOpen(post, e.currentTarget)
       }
-      role="button"
-      tabIndex={0}
-      aria-label={post.text ?? post.authorName ?? post.authorHandle ?? post.url}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          if (selectionMode) onToggleSelected(post.id)
-          else onOpen(post, event.currentTarget)
-        }
-      }}
     >
+      {/*
+        Ouvrir est un bouton en plein cadre, et non un `role="button"` posé sur l'article.
+
+        L'article portait `role="button"` tout en contenant quatre contrôles — favori, copier,
+        Nitrate, volume : un motif ARIA invalide, où les lecteurs d'écran aplatissent le contenu
+        et peuvent ne jamais exposer ces contrôles. Et son `onKeyDown` ne vérifiait pas la cible,
+        si bien qu'Entrée sur « Copier le lien » ouvrait le post au lieu de copier — le
+        `preventDefault` supprimait le clic que le navigateur allait synthétiser.
+
+        En faisant du bouton un **frère** des contrôles plutôt que leur ancêtre, les deux défauts
+        disparaissent d'un coup : il n'y a plus d'ancêtre à qui la touche puisse remonter.
+      */}
+      <button
+        type="button"
+        className="card__open"
+        aria-label={post.text ?? post.authorName ?? post.authorHandle ?? post.url}
+        {...(selectionMode ? { 'aria-pressed': selected } : {})}
+        onClick={(event) => {
+          event.stopPropagation()
+          if (selectionMode) onToggleSelected(post.id)
+          else onOpen(post, event.currentTarget.parentElement as HTMLElement)
+        }}
+      />
       {selectionMode ? (
         <span className={`card__select ${selected ? 'is-selected' : ''}`} aria-hidden="true">
           {selected ? <IconCheck size={15} /> : null}
@@ -380,14 +393,14 @@ function CardImpl({
               {initials(post)}
             </span>
             <span className="card__names">
-              <span className="card__name">{displayName(post)}</span>
+              <span className="card__name" title={displayName(post)}>{displayName(post)}</span>
               {post.authorHandle && post.authorHandle !== displayName(post) ? (
-                <span className="card__handle">{post.authorHandle}</span>
+                <span className="card__handle" title={post.authorHandle}>{post.authorHandle}</span>
               ) : null}
             </span>
           </header>
 
-          {post.text ? <p className="card__copy">{post.text}</p> : null}
+          {post.text ? <p className="card__copy" title={post.text}>{post.text}</p> : null}
 
           {mediaBlock}
 
@@ -488,8 +501,12 @@ function CardImpl({
       {mode === 'masonry' ? (
         <div className="card__overlay">
           <div className="card__foot">
-            {post.authorHandle ? <span className="card__author">{post.authorHandle}</span> : null}
-            {post.text ? <p className="card__excerpt">{post.text}</p> : null}
+            {post.authorHandle ? (
+              <span className="card__author" title={post.authorHandle}>{post.authorHandle}</span>
+            ) : null}
+            {post.text ? (
+              <p className="card__excerpt" title={post.text}>{post.text}</p>
+            ) : null}
           </div>
         </div>
       ) : null}

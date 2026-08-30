@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CollectionInfo } from '@shared/types'
 import { magpie } from '../bridge'
 import { notifyError } from '../notices'
+import { useModalFocus } from '../useModalFocus'
 import { useStore, useT } from '../store'
 import { IconClose } from './Icons'
 
@@ -43,8 +44,12 @@ export function CollectionsManager({
   const [busy, setBusy] = useState<number | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
+  /* Le piège de tabulation, l'entrée du focus et son retour vivent dans `useModalFocus`.
+     Cette fenêtre se déclarait `aria-modal` sans l'appeler : Tab sortait dans la grille
+     masquée derrière, et le focus ne revenait jamais d'où il venait. */
+  useModalFocus(true, panelRef)
+
   useEffect(() => {
-    requestAnimationFrame(() => panelRef.current?.focus())
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
     }

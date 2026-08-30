@@ -46,6 +46,7 @@ export function Detail(): React.JSX.Element | null {
   const origin = useStore((s) => s.detailOrigin)
   const close = useStore((s) => s.closeDetail)
   const step = useStore((s) => s.stepDetail)
+  const hasMore = useStore((s) => s.hasMore)
   const toggleFavorite = useStore((s) => s.toggleFavorite)
   const addTag = useStore((s) => s.addTag)
   const removeTag = useStore((s) => s.removeTag)
@@ -445,7 +446,11 @@ export function Detail(): React.JSX.Element | null {
                     type="button"
                     className={`detail__dot ${i === mediaIndex ? 'is-active' : ''}`}
                     onClick={() => setMediaIndex(i)}
-                    aria-label={`${t('detail.nextMedia')} ${i + 1}`}
+                    /* Ce sont des sélecteurs directs, pas des « suivant » : elles s'annonçaient
+                       « Média suivant 1 », « Média suivant 2 », et rien ne disait laquelle
+                       était la courante. */
+                    aria-label={t('detail.goToMedia', { n: i + 1, total: post.media.length })}
+                    aria-current={i === mediaIndex ? 'true' : undefined}
                   />
                 ))}
               </div>
@@ -614,7 +619,10 @@ export function Detail(): React.JSX.Element | null {
       <button
         type="button"
         className="detail__nav detail__nav--next"
-        disabled={index >= posts.length - 1}
+        /* `stepDetail` charge la suite et continue quand il reste des posts ; le bouton, lui,
+           s'éteignait au dernier chargé. À la trois-centième carte d'une recherche qui en
+           retourne neuf mille, la souris s'arrêtait là où la flèche du clavier continuait. */
+        disabled={index >= posts.length - 1 && !hasMore}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => step(1)}
         title={`${t('detail.nextPost')}  ·  →`}

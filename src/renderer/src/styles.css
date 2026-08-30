@@ -34,7 +34,15 @@
 
   --text: #f2f2f4;
   --muted: #9a9aa6;
-  --faint: #6a6a76;
+  /* Relevé : à #6a6a76 sur le canevas, ce gris tenait 3,5:1 pour du texte de dix à douze
+     pixels — sous le seuil AA de 4,5. Il porte les pseudos, les compteurs, les états des
+     cartes ; ce n'est pas de la décoration. */
+  --faint: #8a8a96;
+
+  /* Le rouge du produit, et l'encre qui se lit dessus. Chaque thème a la sienne : une seule
+     teinte pour les deux fonds ne peut pas tenir le contraste des deux côtés. */
+  --danger: #f87171;
+  --danger-ink: #fca5a5;
 
   --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.4);
   --shadow-md: 0 12px 28px rgb(0 0 0 / 0.4);
@@ -57,7 +65,11 @@
 
   --text: #16161a;
   --muted: #61616d;
-  --faint: #90909b;
+  /* Même mesure côté clair : 3,2:1 sur blanc. */
+  --faint: #696973;
+
+  --danger: #dc2626;
+  --danger-ink: #a01b1b;
 
   --shadow-lg: 0 24px 64px rgb(20 20 30 / 0.16), 0 2px 8px rgb(20 20 30 / 0.08);
   --shadow-md: 0 10px 24px rgb(20 20 30 / 0.14);
@@ -4719,12 +4731,15 @@ html.window-is-moving .app *::after {
   margin-left: auto;
 }
 
+/* Le seul retour d'erreur du parcours de connexion. Il était écrit en deux couleurs codées
+   en dur, sans variante claire : sur fond blanc, #fca5a5 tenait 1,6:1 — illisible pour la
+   moitié des utilisateurs, au moment précis où le message compte. */
 .account__error {
   margin: 0;
   padding: 8px 12px;
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, #f87171 16%, transparent);
-  color: #fca5a5;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger-ink);
   font-size: 11.5px;
 }
 
@@ -6765,4 +6780,32 @@ html.window-is-moving .app *::after {
   font-size: 10.5px;
   line-height: 1.5;
   word-break: break-word;
+}
+
+/* Ouvrir un post : un bouton en plein cadre, frère des contrôles de la carte et non leur
+   ancêtre. C'est ce qui rend le motif ARIA valide et empêche Entrée sur « Copier » d'ouvrir
+   le post. Transparent, sous les contrôles, au-dessus du média. */
+.card__open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+.card__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Les contrôles et le contenu passent au-dessus du bouton d'ouverture. */
+.card__actions,
+.card__media-nav,
+.card__select,
+.card__why,
+.card__diagnostic {
+  z-index: 3;
 }

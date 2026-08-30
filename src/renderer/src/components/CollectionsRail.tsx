@@ -380,6 +380,7 @@ export function CollectionsRail({ onHeat }: Props): React.JSX.Element {
                     <span>{t('collections.reachNarrow')}</span>
                     <input
                       type="range"
+                      aria-label={t('collections.reach')}
                       min={0}
                       max={1}
                       step={0.005}
