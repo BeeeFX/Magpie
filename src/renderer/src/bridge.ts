@@ -309,7 +309,11 @@ const previewApi: MagpieApi = {
       const radius = Math.sqrt(random()) * island.spread
       const post = posts.length > 0 ? posts[index % posts.length] : null
       return {
-        id: `map-${index}`,
+        /* L'identifiant d'un vrai post, pas un `map-N` inventé : la carte est filtrée par
+           `listPostIds`, donc des identifiants qui ne correspondent à aucun post donnaient
+           zéro point — et l'aperçu affichait « la carte demande l'analyse » sur une carte
+           parfaitement calculée. */
+        id: post?.id ?? `map-${index}`,
         x: Math.min(0.98, Math.max(0.02, island.cx + Math.cos(angle) * radius)),
         y: Math.min(0.98, Math.max(0.02, island.cy + Math.sin(angle) * radius)),
         group: island.group,

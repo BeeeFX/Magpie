@@ -1,4 +1,5 @@
 import type { Language, Platform, Post } from '@shared/types'
+import { magpie } from './bridge'
 import { LOCALE } from './i18n'
 
 /**
@@ -28,6 +29,17 @@ export const PLATFORM_LABEL: Record<Platform, string> = {
   x: 'X',
   reddit: 'Reddit'
 }
+
+/**
+ * Le nom de la touche de commande sur cette machine.
+ *
+ * `Shortcuts` le calculait bien — « afficher Ctrl à quelqu'un dont le clavier dit ⌘ revient à
+ * décrire un autre appareil » — mais les **deux endroits où le raccourci est réellement sous
+ * les yeux** l'écrivaient en dur : le champ de recherche et la ligne des réglages. Sur Mac, la
+ * fiche disait donc ⌘ et l'interface disait Ctrl, ce qui est pire que si les deux avaient tort
+ * ensemble : on ne sait plus laquelle croire.
+ */
+export const MODIFIER = magpie.platform === 'darwin' ? '⌘' : 'Ctrl'
 
 export function formatDate(ms: number | null): string {
   if (!ms) return ''

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { magpie } from '../bridge'
+import { MODIFIER } from '../format'
 import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
 import { useClosing } from '../useClosing'
@@ -52,6 +52,17 @@ const GROUPS: { title: TranslationKey; rows: Row[] }[] = [
   {
     title: 'shortcuts.groupWall',
     rows: [{ keys: ['shortcuts.enter'], translateKeys: true, label: 'shortcuts.openPost' }]
+  },
+  {
+    /* Les deux gestes de la carte que rien n'annonçait. Le clic droit est le **seul** geste
+       d'écriture qu'elle offre — nommer un endroit — et il n'apparaissait ni ici ni dans son
+       aide en bas d'écran. Un geste que personne ne peut deviner n'existe pas. */
+    title: 'shortcuts.groupMap',
+    rows: [
+      { keys: ['shortcuts.rightClick'], translateKeys: true, label: 'shortcuts.nameSpot' },
+      { keys: ['shortcuts.doubleClick'], translateKeys: true, label: 'shortcuts.zoomIn' },
+      { keys: ['shortcuts.wheel'], translateKeys: true, label: 'shortcuts.zoom' }
+    ]
   }
 ]
 
@@ -75,8 +86,9 @@ export function Shortcuts(): React.JSX.Element | null {
   if (!mounted) return null
 
   /* La touche de commande porte le nom qu'elle a sur la machine : afficher « Ctrl » à
-     quelqu'un dont le clavier dit ⌘ revient à décrire un autre appareil. */
-  const modifier = magpie.platform === 'darwin' ? '⌘' : 'Ctrl'
+     quelqu'un dont le clavier dit ⌘ revient à décrire un autre appareil. Nommée dans
+     `format.ts`, parce que trois écrans l'affichent et que deux se trompaient. */
+  const modifier = MODIFIER
 
   return (
     <div

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { CollectionInfo, LabelColor, Platform, PostKind } from '@shared/types'
 import { LABELS, PUBLIC_PLATFORMS } from '@shared/types'
 import { magpie } from '../bridge'
-import { PLATFORM_LABEL } from '../format'
+import { MODIFIER, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
 import { notifyError } from '../notices'
 import { useStore, useT } from '../store'
@@ -500,7 +500,7 @@ export function Sidebar(): React.JSX.Element {
         <button type="button" className="row" onClick={() => setSettingsOpen(true)}>
           <IconSettings />
           <span className="row__label">{t('sidebar.settings')}</span>
-          <span className="row__kbd">Ctrl ,</span>
+          <span className="row__kbd">{MODIFIER} ,</span>
         </button>
       </div>
 

@@ -5,6 +5,7 @@ import type { TranslationKey } from '../i18n'
 import { notifyError, notifyInfo, notifySuccess, reportFailure } from '../notices'
 import { activeFilterCount } from '../query'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
+import { MODIFIER } from '../format'
 import { ConfirmButton } from './ConfirmButton'
 import { Popover } from './Popover'
 import { OrganizeButton } from './OrganizeButton'
@@ -252,7 +253,7 @@ export function Toolbar(): React.JSX.Element {
         onClick={toggleSidebar}
         title={`${t('toolbar.togglePanel', {
           action: t(sidebarOpen ? 'toolbar.hide' : 'toolbar.show')
-        })}  ·  Ctrl+B`}
+        })}  ·  ${MODIFIER}+B`}
       >
         <IconPanel />
       </button>
@@ -274,7 +275,7 @@ export function Toolbar(): React.JSX.Element {
           onChange={(e) => setSearch(e.target.value)}
         />
         <span className="search__kbd" aria-hidden="true">
-          <kbd>Ctrl</kbd>
+          <kbd>{MODIFIER}</kbd>
           <kbd>K</kbd>
         </span>
       </label>

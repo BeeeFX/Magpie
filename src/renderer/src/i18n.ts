@@ -283,7 +283,11 @@ const fr = {
   'organizer.unassigned': 'sans catégorie',
   'organizer.joinedExisting':
     'Ces collections existaient déjà et ont été complétées plutôt que créées : {names}.',
-  'organizer.mapHint': 'Survolez un point pour le lire · cliquez pour ouvrir le post · molette pour zoomer · Maj + glisser pour entourer un groupe',
+  /* Le lasso a été retiré du produit — « la carte montre, elle ne saisit pas » — mais la
+     phrase est restée : on traçait le cercle, on le voyait, et il s'effaçait sans effet. Le
+     clic droit, lui, ouvre le menu qui nomme un endroit, et rien ne le disait. */
+  'organizer.mapHint':
+    'Survolez un point pour le lire · cliquez pour ouvrir le post · molette pour zoomer · clic droit pour nommer un endroit',
   'organizer.panelTitle': 'Aperçu du post',
   'organizer.panelLoading': 'Chargement…',
   'organizer.panelMissing': 'Ce post n’est plus dans la bibliothèque.',
@@ -656,6 +660,12 @@ const fr = {
   'shortcuts.groupGlobal': 'Partout',
   'shortcuts.groupPost': 'Dans un post ouvert',
   'shortcuts.groupWall': 'Sur le mur',
+  'shortcuts.groupMap': 'Carte sémantique',
+  'shortcuts.rightClick': 'Clic droit',
+  'shortcuts.doubleClick': 'Double-clic',
+  'shortcuts.nameSpot': 'Nommer un endroit',
+  'shortcuts.zoomIn': 'Zoomer sur cet endroit',
+  'shortcuts.zoom': 'Zoomer et dézoomer',
   'shortcuts.esc': 'Échap',
   'shortcuts.enter': 'Entrée',
   'shortcuts.wheel': 'Molette',
@@ -1009,7 +1019,8 @@ const en: Record<TranslationKey, string> = {
   'organizer.unassigned': 'uncategorised',
   'organizer.joinedExisting':
     'These collections already existed and were added to rather than created: {names}.',
-  'organizer.mapHint': 'Hover a point to read it · click to open the post · scroll to zoom · Shift-drag to lasso a group',
+  'organizer.mapHint':
+    'Hover a point to read it · click to open the post · scroll to zoom · right-click to name a place',
   'organizer.panelTitle': 'Post preview',
   'organizer.panelLoading': 'Loading…',
   'organizer.panelMissing': 'This post is no longer in the library.',
@@ -1381,6 +1392,12 @@ const en: Record<TranslationKey, string> = {
   'shortcuts.groupGlobal': 'Anywhere',
   'shortcuts.groupPost': 'In an open post',
   'shortcuts.groupWall': 'On the wall',
+  'shortcuts.groupMap': 'Semantic map',
+  'shortcuts.rightClick': 'Right-click',
+  'shortcuts.doubleClick': 'Double-click',
+  'shortcuts.nameSpot': 'Name a place',
+  'shortcuts.zoomIn': 'Zoom to this place',
+  'shortcuts.zoom': 'Zoom in and out',
   'shortcuts.esc': 'Esc',
   'shortcuts.enter': 'Enter',
   'shortcuts.wheel': 'Wheel',
