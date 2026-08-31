@@ -535,6 +535,8 @@ export interface MagpieApi {
   deleteCollection(collectionId: number): Promise<void>
   mergeCollections(from: number, into: number): Promise<void>
   /** Ne garder que ces collections, les autres disparaissant. Voir `keepOnly`. */
+  /** Rétablit les collections du dernier « Que garder ? ». Rend combien sont revenues. */
+  restoreRemovedCollections(): Promise<{ restored: number }>
   keepOnlyCollections(ids: number[]): Promise<{ kept: number; removed: number }>
   collectionMembership(): Promise<CollectionMembership[]>
   collectionKeywords(collectionId: number): Promise<{ word: string; weight: number }[]>

@@ -5,6 +5,7 @@ import type {
   OrganizerProgress
 } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
+import { reportFailure } from '../notices'
 import { displayName } from '../format'
 import { useStore, useT } from '../store'
 import type { TranslationKey } from '../i18n'
@@ -449,11 +450,14 @@ export function LibraryMap(): React.JSX.Element {
         showRegionNames={titles.regions}
         onRegenerate={() => {
           /* On jette la carte rangée, puis on redemande : `attempt` est le seul moyen de
-             refaire tourner l'effet, aucun autre état ne change. */
+             refaire tourner l'effet, aucun autre état ne change. La confirmation vit dans le
+             menu qui porte l'entrée : ~26 s de reprojection sur neuf mille posts, et les
+             étiquettes posées à la main perdent leurs ancres — le tout depuis un menu
+             contextuel dont l'entrée voisine sert simplement à nommer un endroit. */
           void magpie
             .regenerateMap()
             .then(() => setAttempt((count) => count + 1))
-            .catch((error) => console.warn('[magpie] Carte non regénérée', error))
+            .catch(reportFailure('notice.mapFailed'))
         }}
         onLasso={IGNORE}
         onHover={(point) => {

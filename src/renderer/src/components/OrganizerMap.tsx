@@ -388,6 +388,9 @@ export function OrganizerMap({
   )
 
   /** Le menu du clic droit : ce qu'il propose dépend de ce qu'il y a sous le curseur. */
+  /* Une question posée ne survit pas au menu qui la portait : rouvrir un menu contextuel
+     sur une entrée déjà armée ferait détruire au premier clic. */
+  const [regenerateArmed, setRegenerateArmed] = useState(false)
   const [menu, setMenu] = useState<{
     x: number
     y: number
@@ -2721,12 +2724,22 @@ export function OrganizerMap({
                  rangées en base et relues telles quelles, ce qui est tout l'intérêt — la carte
                  ne bouge plus sous les pieds. Il faut donc un geste explicite pour demander
                  qu'elle soit refaite, sinon rien ne la rafraîchirait jamais. */
+              className={regenerateArmed ? 'is-armed' : ''}
+              /* En deux temps, et sur place : ~26 s de reprojection sur neuf mille posts, et
+                 les étiquettes posées à la main perdent leurs ancres. L'entrée voisine sert
+                 simplement à nommer un endroit — l'écart de conséquence entre les deux ne se
+                 devine pas. Le second temps nomme le coût plutôt que de dire « oui ». */
               onClick={() => {
+                if (!regenerateArmed) {
+                  setRegenerateArmed(true)
+                  return
+                }
+                setRegenerateArmed(false)
                 setMenu(null)
                 onRegenerate()
               }}
             >
-              {t('organizer.edgeRegenerate')}
+              {t(regenerateArmed ? 'organizer.edgeRegenerateYes' : 'organizer.edgeRegenerate')}
             </button>
           ) : null}
         </div>

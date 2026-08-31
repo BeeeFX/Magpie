@@ -62,6 +62,7 @@ import {
 } from './db/queries'
 import { seedIfEmpty } from './fixtures/seed'
 import { backgroundTasks } from './tasks'
+import { restoreRemovedCollections } from './tagging/collections'
 import { connectFailure } from './messages'
 import { modelsUsage, pruneUnusedModels } from './models/store'
 import { readSettings, writeSettings } from './settings'
@@ -613,6 +614,8 @@ export function registerIpc({
       version: app.getVersion()
     }
   })
+
+  ipcMain.handle('collections:restoreRemoved', () => restoreRemovedCollections())
 
   ipcMain.handle('models:prune', () => pruneUnusedModels())
 

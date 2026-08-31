@@ -649,14 +649,17 @@ export function Settings(): React.JSX.Element | null {
               >
                 {t('settings.openFolder')}
               </button>
-              <button
-                type="button"
+              {/* Il copie des dizaines de gigaoctets **sans pouvoir être arrêté**, puis
+                  referme et rouvre l'application sans que rien ne l'ait annoncé. Juste à côté,
+                  « Vider le cache » — dont tout est retéléchargeable — demandait pourtant
+                  confirmation. Le second temps dit ce qui va arriver : le redémarrage. */}
+              <ConfirmButton
                 className="btn"
                 disabled={choosingLibrary || (libraryMove !== null && libraryMove.phase !== 'error')}
-                onClick={() => void moveLibrary()}
-              >
-                {choosingLibrary ? t('settings.choosingLibrary') : t('settings.moveLibrary')}
-              </button>
+                label={choosingLibrary ? 'settings.choosingLibrary' : 'settings.moveLibrary'}
+                confirm="settings.moveLibraryYes"
+                onConfirm={() => void moveLibrary()}
+              />
               {/* Le geste le plus destructeur de cet écran partait au premier clic, alors que
                   « Tout revérifier », qui ne supprime rien, demandait confirmation. Le second
                   temps nomme la conséquence plutôt que de dire « oui ». */}

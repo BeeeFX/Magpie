@@ -11,8 +11,9 @@ import { STEP_ORDER, type StepId, type StepState } from '../steps'
 import { magpie, magpieEvents } from '../bridge'
 import { useClosing } from '../useClosing'
 import { useModalFocus } from '../useModalFocus'
+import { ConfirmButton } from './ConfirmButton'
 import { formatDateTime } from '../format'
-import { notifyError, reportFailure } from '../notices'
+import { notifyError, notifyInfo, notifySuccess, reportFailure } from '../notices'
 import { useStore, useT } from '../store'
 import { IconClock, IconClose, IconMap } from './Icons'
 import { OrganizerSteps } from './OrganizerSteps'
@@ -96,6 +97,38 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
       if (stop.status === 'rejected') notifyError('notice.unexpected', stop.reason)
     }
   }, [cancelSync, setStepStates, setStepsRunning])
+  /**
+   * Applique le choix, et propose de le défaire.
+   *
+   * La suppression est irréversible pour l'annulation de l'organisateur — celle-ci ne sait que
+   * défaire un classement, jamais recréer ce qui a été détruit. Un instantané est donc pris
+   * côté base avant les suppressions, et c'est lui que « Rétablir » relit.
+   */
+  const applyKeep = useCallback((): void => {
+    const doomed = existing.length - keeping.length
+    void magpie
+      .keepOnlyCollections(keeping)
+      .then(() => {
+        void refresh(false, true)
+        setPhase('intro')
+        if (doomed > 0) {
+          notifyInfo('notice.collectionsRemoved', { count: doomed }, {
+            key: 'notice.restore',
+            run: () => {
+              void magpie
+                .restoreRemovedCollections()
+                .then((result) => {
+                  void refresh(false, true)
+                  notifySuccess('notice.collectionsRestored', { count: result.restored })
+                })
+                .catch(reportFailure('notice.collectionFailed'))
+            }
+          })
+        }
+      })
+      .catch(reportFailure('notice.collectionFailed'))
+  }, [existing.length, keeping, refresh])
+
   const onClose = useCallback((): void => {
     if (stepsRunning) setLeaving(true)
     else requestClose()
@@ -371,7 +404,12 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                        par-dessus. Sur une bibliothèque vierge, la question n'a pas lieu d'être. */
                     void magpie.listCollections().then((rows) => {
                       setExisting(rows)
-                      setKeeping([])
+                      /* Tout coché par défaut. Rien ne l'était, et le bouton principal du même
+                         écran supprimait donc **toutes** les collections en un clic — dans un
+                         écran où l'on vient de cliquer sur « Approfondi » pour lancer une
+                         analyse, pas pour faire du ménage. Un défaut qui détruit n'est pas un
+                         défaut. */
+                      setKeeping(rows.map((row) => row.id))
                       setPhase(rows.length > 0 ? 'keep' : 'intro')
                     })
                   }}
@@ -423,28 +461,22 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                 <button type="button" className="btn" onClick={() => setPhase('choose')}>
                   {t('organizer.cancel')}
                 </button>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={() => {
-                    void magpie
-                      .keepOnlyCollections(keeping)
-                      .then(() => {
-                        void refresh(false, true)
-                        setPhase('intro')
-                      })
-                      .catch(reportFailure('notice.collectionFailed'))
-                  }}
-                >
-                  {t(
-                    keeping.length === 0
-                      ? 'organizer.keepNone'
-                      : keeping.length === 1
-                        ? 'organizer.keepOne'
-                        : 'organizer.keepMany',
-                    { count: keeping.length }
-                  )}
-                </button>
+                {/* Le libellé annonçait ce qu'on **garde**, alors que la conséquence est ce
+                    qu'on perd : « Garder 2 collections » ne dit pas que les dix autres partent
+                    définitivement. Le second temps nomme donc la suppression, avec son nombre. */}
+                {existing.length > keeping.length ? (
+                  <ConfirmButton
+                    className="btn btn--primary"
+                    label="organizer.keepGo"
+                    confirm="organizer.keepConfirm"
+                    confirmVars={{ count: existing.length - keeping.length }}
+                    onConfirm={() => applyKeep()}
+                  />
+                ) : (
+                  <button type="button" className="btn btn--primary" onClick={() => applyKeep()}>
+                    {t('organizer.keepAll')}
+                  </button>
+                )}
               </div>
             </div>
           ) : null}

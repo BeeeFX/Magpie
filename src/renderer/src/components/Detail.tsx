@@ -50,6 +50,22 @@ export function Detail(): React.JSX.Element | null {
   const toggleFavorite = useStore((s) => s.toggleFavorite)
   const addTag = useStore((s) => s.addTag)
   const removeTag = useStore((s) => s.removeTag)
+  const setQuery = useStore((s) => s.setQuery)
+  const query = useStore((s) => s.query)
+
+  /**
+   * Filtrer le mur sur ce tag, et refermer.
+   *
+   * Rester ouvert n'aurait pas de sens : on vient de redéfinir ce qu'il y a derrière, et le
+   * post qu'on regarde n'en fait peut-être plus partie.
+   */
+  const filterByTag = (name: string): void => {
+    const active = query.tags.includes(name)
+    setQuery({
+      tags: active ? query.tags.filter((tag) => tag !== name) : [...query.tags, name]
+    })
+    close()
+  }
   const setLabel = useStore((s) => s.setLabel)
   const nitrateEnabled = useStore((s) => s.nitrateEnabled)
 
@@ -505,17 +521,30 @@ export function Detail(): React.JSX.Element | null {
           <section className="detail__section">
             <h3>{t('detail.tags')}</h3>
             <div className="detail__tags">
+              {/* Deux gestes, deux cibles. La puce entière retirait le tag : ailleurs — dans
+                  la barre latérale et dans le panneau de la carte — la même forme *filtre*.
+                  Sur un post portant dix tags issus d'une lecture d'images, on en perdait un
+                  en croyant filtrer dessus, et la croix laissait entendre le contraire. */}
               {post.tags.map((tag) => (
-                <button
-                  key={tag.name}
-                  type="button"
-                  className={`tag-chip tag-chip--${tag.source}`}
-                  onClick={() => void removeTag(post.id, tag.name)}
-                  title={t('detail.removeTag')}
-                >
-                  {tag.name}
-                  <IconClose size={11} />
-                </button>
+                <span key={tag.name} className={`tag-chip tag-chip--${tag.source}`}>
+                  <button
+                    type="button"
+                    className="tag-chip__name"
+                    onClick={() => filterByTag(tag.name)}
+                    title={t('detail.filterTag', { name: tag.name })}
+                  >
+                    {tag.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="tag-chip__remove"
+                    onClick={() => void removeTag(post.id, tag.name)}
+                    title={t('detail.removeTag')}
+                    aria-label={t('detail.removeTagOf', { name: tag.name })}
+                  >
+                    <IconClose size={11} />
+                  </button>
+                </span>
               ))}
             </div>
             <form onSubmit={submitTag}>

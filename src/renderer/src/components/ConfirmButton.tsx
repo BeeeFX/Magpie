@@ -17,6 +17,7 @@ import { useT } from '../store'
 export function ConfirmButton({
   label,
   confirm,
+  confirmVars,
   className = 'btn',
   disabled = false,
   title,
@@ -26,6 +27,8 @@ export function ConfirmButton({
   label: TranslationKey
   /** Ce que dit le bouton une fois retourné — il doit nommer la conséquence, pas dire « oui ». */
   confirm: TranslationKey
+  /** De quoi chiffrer cette conséquence : « Supprimer 10 collections » plutôt que « Supprimer ». */
+  confirmVars?: Record<string, string | number>
   className?: string
   disabled?: boolean
   title?: string
@@ -70,7 +73,7 @@ export function ConfirmButton({
           onConfirm()
         }}
       >
-        {t(confirm)}
+        {t(confirm, confirmVars)}
       </button>
       <button type="button" className="btn" onClick={() => setArmed(false)}>
         {t('organizer.cancel')}

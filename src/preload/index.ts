@@ -55,6 +55,8 @@ const api: MagpieApi = {
     ipcRenderer.invoke('collections:delete', collectionId),
   mergeCollections: (from: number, into: number): Promise<void> =>
     ipcRenderer.invoke('collections:merge', from, into),
+  restoreRemovedCollections: (): Promise<{ restored: number }> =>
+    ipcRenderer.invoke('collections:restoreRemoved'),
   keepOnlyCollections: (ids: number[]): Promise<{ kept: number; removed: number }> =>
     ipcRenderer.invoke('collections:keepOnly', ids),
   collectionMembership: (): Promise<CollectionMembership[]> =>

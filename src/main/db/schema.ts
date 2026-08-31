@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 27
+export const SCHEMA_VERSION = 28
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -534,6 +534,33 @@ WHERE EXISTS (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON collections(name COLLATE NOCASE);
 `
 
+/**
+ * De quoi rétablir des collections supprimées.
+ *
+ * L'écran « Que garder ? » supprimait définitivement toutes les collections en un clic. Son
+ * bouton principal, dans un écran où l'on venait de cliquer sur « Approfondi » pour lancer une
+ * analyse — pas pour faire du ménage — et avec **toutes les cases décochées par défaut**.
+ *
+ * On a d'abord cru pouvoir s'appuyer sur l'annulation existante : `revertOrganizerApplication`
+ * ne sait que **défaire un classement**, c'est-à-dire désarchiver des posts et supprimer les
+ * collections qu'il a lui-même créées. Rien, chez elle, ne peut recréer ce qui a été détruit.
+ *
+ * D'où cet instantané. Une seule ligne, remplacée à chaque fois, comme
+ * `organizer_applications` : ce n'est pas un historique, c'est un filet pour le geste qu'on
+ * vient de faire.
+ *
+ * Les prototypes ne sont pas conservés — ce sont des vecteurs recalculés à la passe suivante.
+ * Ce qu'on garde est ce qui ne se recalcule pas : le nom, la couleur, les mots-clés et leurs
+ * poids, et l'appartenance des posts, qui peut contenir des ajouts faits à la main.
+ */
+export const MIGRATION_28_SQL = /* sql */ `
+CREATE TABLE IF NOT EXISTS collection_snapshots (
+  id        INTEGER PRIMARY KEY CHECK (id = 1),
+  taken_at  INTEGER NOT NULL,
+  payload   TEXT NOT NULL
+);
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -705,6 +732,12 @@ CREATE TABLE IF NOT EXISTS collection_removals (
 -- verser des milliers de vidéos est une action lourde derrière un seul bouton : sans de
 -- quoi revenir en arrière, elle demande une confiance qu'on n'a pas encore gagnée.
 -- La colonne created_ids liste les collections nées de ce classement, filed ce qu'il a rangé.
+CREATE TABLE IF NOT EXISTS collection_snapshots (
+  id        INTEGER PRIMARY KEY CHECK (id = 1),
+  taken_at  INTEGER NOT NULL,
+  payload   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS organizer_applications (
   id            INTEGER PRIMARY KEY,
   applied_at    INTEGER NOT NULL,
@@ -884,5 +917,6 @@ export const MIGRATIONS: Record<number, string> = {
   24: MIGRATION_24_SQL,
   25: MIGRATION_25_SQL,
   26: MIGRATION_26_SQL,
-  27: MIGRATION_27_SQL
+  27: MIGRATION_27_SQL,
+  28: MIGRATION_28_SQL
 }

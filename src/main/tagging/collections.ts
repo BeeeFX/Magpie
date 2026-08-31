@@ -508,6 +508,55 @@ export function membership(): {
  * pas — elle n'a pas de définition à montrer. Ce n'est pas une archive figée pour autant : c'est
  * une collection ordinaire partout ailleurs, qu'on peut ouvrir, filtrer et exporter.
  */
+/** Ce qu'on garde d'une collection supprimée : tout ce qui ne se recalcule pas. */
+interface CollectionSnapshot {
+  name: string
+  color: string | null
+  kind: string
+  query: string | null
+  targetSize: number
+  sortIndex: number
+  keywords: { word: string; weight: number; sortIndex: number }[]
+  postIds: string[]
+}
+
+/**
+ * L'état des collections condamnées, avant qu'elles ne partent.
+ *
+ * Les prototypes — deux vecteurs par collection — ne sont pas conservés : ils se recalculent à
+ * la passe suivante. Ce qu'on garde est ce qui ne se recalcule pas, et notamment l'appartenance
+ * des posts, qui peut contenir des ajouts faits à la main.
+ */
+function snapshot(db: ReturnType<typeof getDb>, ids: number[]): CollectionSnapshot[] {
+  const row = db.prepare(
+    'SELECT name, color, kind, query, target_size, sort_index FROM collections WHERE id = ?'
+  )
+  const words = db.prepare(
+    'SELECT word, weight, sort_index FROM collection_keywords WHERE collection_id = ? ORDER BY sort_index'
+  )
+  const members = db.prepare('SELECT post_id FROM collection_posts WHERE collection_id = ?')
+  const out: CollectionSnapshot[] = []
+  for (const id of ids) {
+    const found = row.get(id) as
+      | { name: string; color: string | null; kind: string; query: string | null; target_size: number; sort_index: number }
+      | undefined
+    if (!found) continue
+    out.push({
+      name: found.name,
+      color: found.color,
+      kind: found.kind,
+      query: found.query,
+      targetSize: found.target_size,
+      sortIndex: found.sort_index,
+      keywords: (words.all(id) as { word: string; weight: number; sort_index: number }[]).map(
+        (word) => ({ word: word.word, weight: word.weight, sortIndex: word.sort_index })
+      ),
+      postIds: (members.all(id) as { post_id: string }[]).map((member) => member.post_id)
+    })
+  }
+  return out
+}
+
 export function keepOnly(ids: number[]): { kept: number; removed: number } {
   const db = getDb()
   const keep = new Set(ids.map(Number))
@@ -516,6 +565,14 @@ export function keepOnly(ids: number[]): { kept: number; removed: number } {
   )
   const doomed = all.filter((id) => !keep.has(id))
   db.transaction(() => {
+    /* L'instantané est pris **dans** la transaction, avant les suppressions : sinon un échec
+       à mi-parcours laisserait un filet qui décrit un état qui n'a jamais existé. */
+    if (doomed.length > 0) {
+      db.prepare(
+        `INSERT INTO collection_snapshots (id, taken_at, payload) VALUES (1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET taken_at = excluded.taken_at, payload = excluded.payload`
+      ).run(Date.now(), JSON.stringify(snapshot(db, doomed)))
+    }
     for (const id of keep) {
       db.prepare("UPDATE collections SET kind = 'manual' WHERE id = ?").run(id)
       /* Les mots ne servent plus à rien sur une liste, et les laisser ferait ressortir la
@@ -525,4 +582,77 @@ export function keepOnly(ids: number[]): { kept: number; removed: number } {
     for (const id of doomed) db.prepare('DELETE FROM collections WHERE id = ?').run(id)
   })()
   return { kept: keep.size, removed: doomed.length }
+}
+
+/** Combien de collections le dernier « Que garder ? » a supprimées, et quand. */
+export function removedCollections(): { count: number; at: number } | null {
+  const row = getDb()
+    .prepare('SELECT taken_at, payload FROM collection_snapshots WHERE id = 1')
+    .get() as { taken_at: number; payload: string } | undefined
+  if (!row) return null
+  try {
+    return { count: (JSON.parse(row.payload) as CollectionSnapshot[]).length, at: row.taken_at }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Rétablit les collections du dernier instantané.
+ *
+ * Les identifiants ne sont pas restaurés : ils seraient déjà repris. Ce qui compte est ce que
+ * l'utilisateur voit — un nom, une couleur, des mots et les mêmes posts dedans.
+ *
+ * L'appartenance passe par `INSERT OR IGNORE` sur des posts qui peuvent avoir disparu entre
+ * temps : une collection rétablie avec deux posts en moins vaut mieux qu'un rétablissement qui
+ * lève.
+ */
+export function restoreRemovedCollections(): { restored: number } {
+  const db = getDb()
+  const row = db
+    .prepare('SELECT payload FROM collection_snapshots WHERE id = 1')
+    .get() as { payload: string } | undefined
+  if (!row) return { restored: 0 }
+  let saved: CollectionSnapshot[]
+  try {
+    saved = JSON.parse(row.payload) as CollectionSnapshot[]
+  } catch {
+    return { restored: 0 }
+  }
+
+  return db.transaction(() => {
+    let restored = 0
+    for (const entry of saved) {
+      /* Le nom est unique depuis la migration 27 : une collection recréée entre-temps sous le
+         même nom garde la main, et on ne la double pas. */
+      const existing = db
+        .prepare('SELECT id FROM collections WHERE name = ? COLLATE NOCASE')
+        .get(entry.name) as { id: number } | undefined
+      if (existing) continue
+      const info = db
+        .prepare(
+          `INSERT INTO collections (name, color, kind, query, target_size, sort_index)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .run(entry.name, entry.color, entry.kind, entry.query, entry.targetSize, entry.sortIndex)
+      const id = Number(info.lastInsertRowid)
+      const word = db.prepare(
+        `INSERT INTO collection_keywords (collection_id, word, weight, sort_index)
+         VALUES (?, ?, ?, ?)`
+      )
+      for (const keyword of entry.keywords) {
+        word.run(id, keyword.word, keyword.weight, keyword.sortIndex)
+      }
+      /* `added_at` est obligatoire, et son sens ici est « rétabli maintenant » : la date
+         d'ajout d'origine n'est pas conservée, et prétendre la connaître serait faux. */
+      const member = db.prepare(
+        'INSERT OR IGNORE INTO collection_posts (collection_id, post_id, added_at) VALUES (?, ?, ?)'
+      )
+      const now = Date.now()
+      for (const postId of entry.postIds) member.run(id, postId, now)
+      restored++
+    }
+    db.prepare('DELETE FROM collection_snapshots').run()
+    return { restored }
+  })()
 }

@@ -4,6 +4,7 @@ import type { TranslationKey } from '../i18n'
 import { notifyError, notifyInfo, notifySuccess, reportFailure } from '../notices'
 import { activeFilterCount } from '../query'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
+import { ConfirmButton } from './ConfirmButton'
 import { Popover } from './Popover'
 import { OrganizeButton } from './OrganizeButton'
 import { SyncButton } from './SyncButton'
@@ -71,6 +72,8 @@ export function Toolbar(): React.JSX.Element {
   const [search, setSearch] = useState(query.search)
   /** Quel formulaire de la barre de sélection est ouvert, s'il y en a un. */
   const [bulkForm, setBulkForm] = useState<'tag' | 'untag' | 'collection' | null>(null)
+  /** Le tag dont le retrait attend une confirmation. */
+  const [pendingUntag, setPendingUntag] = useState<string | null>(null)
   const [bulkDraft, setBulkDraft] = useState('')
   const [bulkCollections, setBulkCollections] = useState<CollectionInfo[]>([])
 
@@ -95,12 +98,42 @@ export function Toolbar(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  /**
+   * Ce que le champ a lui-même poussé dans la requête.
+   *
+   * Sans ce repère, on ne peut pas distinguer « la requête a changé parce que je viens de la
+   * changer » de « quelqu'un d'autre l'a changée » — et adopter la première ferait boucler.
+   */
+  const pushed = useRef(query.search)
+
   /* Recherche au fil de la frappe, mais une requête seulement quand la frappe s'arrête. */
   useEffect(() => {
     if (search === query.search) return
-    const id = setTimeout(() => setQuery({ search }), 220)
+    const id = setTimeout(() => {
+      pushed.current = search
+      setQuery({ search })
+    }, 220)
     return () => clearTimeout(id)
   }, [search, query.search, setQuery])
+
+  /**
+   * Le champ suit la requête quand elle change ailleurs.
+   *
+   * **« Effacer les filtres » se défaisait tout seul.** Le champ tenait son texte dans un état
+   * local, initialisé une fois, que rien ne resynchronisait ; effacer les filtres mettait donc
+   * `query.search` à vide, puis l'effet ci-dessus voyait un écart entre le champ et la requête
+   * et **réécrivait le texte 220 ms plus tard**. Le bouton paraissait ne rien faire — la grille
+   * restait vide, le champ gardait sa saisie — alors qu'il faisait son travail avant d'être
+   * annulé par le champ lui-même.
+   *
+   * Trouvé en relisant l'écran vide dans l'aperçu, pas en lisant le code : les deux effets sont
+   * corrects séparément.
+   */
+  useEffect(() => {
+    if (query.search === pushed.current) return
+    pushed.current = query.search
+    setSearch(query.search)
+  }, [query.search])
 
   const toggleKind = (kind: PostKind): void => {
     const active = query.kinds.includes(kind)
@@ -436,7 +469,25 @@ export function Toolbar(): React.JSX.Element {
           {/* La saisie se fait dans la barre, à côté du bouton qui l'a demandée, et non dans une
               boîte du système : c'est le formulaire en ligne déjà utilisé pour créer une
               collection depuis le panneau latéral. */}
-          {bulkForm ? (
+          {bulkForm && pendingUntag ? (
+            /* La question remplace le formulaire plutôt que de s'y ajouter : le nom est
+               déjà saisi, il n'y a plus qu'une chose à décider. */
+            <span className="bulk-untag-confirm">
+              <ConfirmButton
+                className="btn btn--primary"
+                label="bulk.untagAsk"
+                confirm="bulk.untagYes"
+                confirmVars={{ count: selectedIds.length, name: pendingUntag }}
+                onConfirm={() => {
+                  const name = pendingUntag
+                  setPendingUntag(null)
+                  setBulkForm(null)
+                  void untagSelection(name)
+                }}
+              />
+            </span>
+          ) : null}
+          {bulkForm && !pendingUntag ? (
             <form
               className="collection-create collection-create--bulk"
               onSubmit={(event) => {
@@ -448,9 +499,17 @@ export function Toolbar(): React.JSX.Element {
                   void addSelectionToCollection(name)
                   return
                 }
-                setBulkForm(null)
-                if (bulkForm === 'tag') void tagSelection(name)
-                else void untagSelection(name)
+                if (bulkForm === 'tag') {
+                  setBulkForm(null)
+                  void tagSelection(name)
+                  return
+                }
+                /* Retirer est le seul geste destructeur de cette barre, et il porte jusqu'à
+                   toute la bibliothèque. Le retour arrière n'en est pas un : réappliquer le
+                   tag le recrée en `source: 'user'`, donc son origine — une règle, une lecture
+                   d'images — est perdue, et une purge ultérieure des tags automatiques ne le
+                   reprendra plus. La question se pose donc avant, avec le nombre. */
+                setPendingUntag(name)
               }}
             >
               <input

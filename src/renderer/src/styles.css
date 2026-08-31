@@ -4483,6 +4483,38 @@ html.window-is-moving .app *::after {
   color: var(--text);
 }
 
+/*
+ * La puce porte deux gestes, et ils ne coûtent pas la même chose.
+ *
+ * Elle était un seul bouton qui **retirait** le tag, alors que la même forme filtre dans la
+ * barre latérale et dans le panneau de la carte. Sur un post portant dix tags issus d'une
+ * lecture d'images, on en perdait un en croyant filtrer dessus — et la croix laissait
+ * précisément entendre que seule la croix retirait.
+ */
+.tag-chip__name,
+.tag-chip__remove {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tag-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.55;
+  transition: opacity var(--fast) var(--ease);
+}
+
+/* La croix ne se distingue qu'au survol : au repos, c'est le nom qui doit se lire. */
+.tag-chip__remove:hover,
+.tag-chip__remove:focus-visible {
+  opacity: 1;
+  color: var(--danger-ink);
+}
+
 /* Un tag généré par l'IA reste distinct d'un tag posé à la main : il doit être facile de
    purger les uns sans toucher aux autres. */
 .tag-chip--ai {
