@@ -350,11 +350,27 @@ export interface LibraryInfo {
   demoPosts: number
   /** Octets occupés par le cache de vignettes et de clips. */
   cacheBytes: number
+  /**
+   * Octets occupés par les modèles d'analyse, et la part de ceux que plus rien ne charge.
+   *
+   * Ils pèsent plus que tout le reste réuni — 1,1 Go mesuré — et n'apparaissaient nulle part :
+   * l'écran de stockage annonçait le seul cache média, soit le quart de ce que Magpie occupe.
+   */
+  modelBytes: number
+  unusedModelBytes: number
   dataPath: string
   version: string
 }
 
-export type LibraryMovePhase = 'preparing' | 'database' | 'media' | 'finalizing' | 'done' | 'error'
+export type LibraryMovePhase =
+  | 'preparing'
+  | 'database'
+  | 'media'
+  /** Les modèles pèsent plus que le reste : leur copie mérite d'être nommée. */
+  | 'models'
+  | 'finalizing'
+  | 'done'
+  | 'error'
 
 export interface LibraryMoveProgress {
   phase: LibraryMovePhase
@@ -482,6 +498,8 @@ export interface MagpieApi {
   installUpdate(): Promise<void>
   setWindowFullscreen(enabled: boolean): Promise<boolean>
   clearMediaCache(): Promise<ClearCacheResult>
+  /** Supprime les modèles que plus aucun code ne charge. Rend ce qui est parti. */
+  pruneModels(): Promise<{ removed: string[]; freed: number }>
   openDataFolder(): Promise<void>
   chooseLibraryFolder(): Promise<{ moved: boolean; path: string }>
   getMediaPlaybackUrl(

@@ -16,7 +16,7 @@ import { ACCENTS, LANGUAGES } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
 import { formatBytes } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
-import { reportFailure } from '../notices'
+import { notifyError, notifySuccess, reportFailure } from '../notices'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
 import { ConfirmButton } from './ConfirmButton'
@@ -86,6 +86,7 @@ export function Settings(): React.JSX.Element | null {
   const refresh = useStore((s) => s.refresh)
 
   const [info, setInfo] = useState<LibraryInfo | null>(null)
+  const [pruning, setPruning] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [cacheError, setCacheError] = useState<string | null>(null)
   const [aiKey, setAiKey] = useState('')
@@ -137,6 +138,27 @@ export function Settings(): React.JSX.Element | null {
   }, [open, setOpen])
 
   if (!mounted) return null
+
+  /**
+   * Supprime les modèles que plus aucun code ne charge.
+   *
+   * Le décompte vient du processus principal, qui dérive la liste des modèles en service des
+   * quatre constantes réellement utilisées — jamais d'une copie à la main, qui deviendrait
+   * incomplète au premier changement et effacerait alors un modèle en service.
+   */
+  const pruneModels = async (): Promise<void> => {
+    setPruning(true)
+    setCacheError(null)
+    try {
+      const result = await magpie.pruneModels()
+      notifySuccess('notice.modelsPruned', { size: formatBytes(result.freed) })
+      setInfo(await magpie.getLibraryInfo())
+    } catch (reason) {
+      notifyError('notice.modelsPruneFailed', reason)
+    } finally {
+      setPruning(false)
+    }
+  }
 
   const clearCache = async (): Promise<void> => {
     setClearing(true)
@@ -547,6 +569,35 @@ export function Settings(): React.JSX.Element | null {
                   : '…'}
               </p>
             </div>
+            {/* Les modèles pèsent plus que tout le reste réuni — 1,1 Go mesuré — et
+                n'apparaissaient nulle part : le chiffre au-dessus ne compte que le cache
+                média, soit le quart de ce que Magpie occupe réellement. Leur purge est
+                distincte de « vider le cache » parce qu'elle ne porte pas sur la même chose :
+                le cache se reconstruit à la demande, un modèle se retélécharge par centaines
+                de mégaoctets. */}
+            {info && info.modelBytes > 0 ? (
+              <div className="library-models">
+                <span>
+                  {t('settings.models', { size: formatBytes(info.modelBytes) })}
+                  {info.unusedModelBytes > 0 ? (
+                    <em>
+                      {t('settings.modelsUnused', {
+                        size: formatBytes(info.unusedModelBytes)
+                      })}
+                    </em>
+                  ) : null}
+                </span>
+                {info.unusedModelBytes > 0 ? (
+                  <ConfirmButton
+                    className="btn btn--quiet"
+                    label={pruning ? 'settings.pruning' : 'settings.pruneModels'}
+                    confirm="settings.pruneModelsYes"
+                    disabled={pruning}
+                    onConfirm={() => void pruneModels()}
+                  />
+                ) : null}
+              </div>
+            ) : null}
             <div className="library-location">
               <span>{t('settings.libraryLocation')}</span>
               <code title={info?.dataPath}>{info?.dataPath ?? '…'}</code>

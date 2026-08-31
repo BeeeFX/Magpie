@@ -147,6 +147,8 @@ const api: MagpieApi = {
   setWindowFullscreen: (enabled: boolean): Promise<boolean> =>
     ipcRenderer.invoke('window:setFullscreen', enabled),
   clearMediaCache: (): Promise<ClearCacheResult> => ipcRenderer.invoke('library:clearCache'),
+  pruneModels: (): Promise<{ removed: string[]; freed: number }> =>
+    ipcRenderer.invoke('models:prune'),
   openDataFolder: (): Promise<void> => ipcRenderer.invoke('app:openDataFolder'),
   chooseLibraryFolder: (): Promise<{ moved: boolean; path: string }> =>
     ipcRenderer.invoke('library:chooseFolder'),

@@ -19,6 +19,12 @@
  * côté du processus principal, avec la base.
  */
 
+/* Les quatre noms de modèles vivent dans `models.ts` : la comptabilité du disque, la purge
+   et le déplacement de bibliothèque ont besoin de la même liste, et une seconde copie est
+   précisément ce qui a laissé cinq modèles abandonnés sur le disque. Ce module n'importe
+   rien, donc le charger ici ne coûte rien au démarrage du processus. */
+import { MEANING_MODEL, SPEECH_MODEL, STRUCTURE_MODEL, TEXT_MODEL } from './models'
+
 /** Ce qu'on demande. `id` revient tel quel dans la réponse : c'est ce qui les apparie. */
 export type InferenceRequest =
   | { id: number; kind: 'configure'; cacheDir: string }
@@ -40,14 +46,6 @@ export type InferenceReply =
   | { id: number; ok: true; kind: 'text'; text: string }
   | { id: number; ok: false; message: string }
 
-/** La structure et le style. Le plus petit des candidats, et le meilleur : 23 Mo, 26 ms. */
-const STRUCTURE_MODEL = 'Xenova/dinov2-small'
-/** Le sujet. Sait aussi comparer une image à des mots, ce que DINOv2 ne sait pas faire. */
-const MEANING_MODEL = 'Xenova/siglip-base-patch16-224'
-/** Multilingue à dessein : une bibliothèque française et anglaise mélangées est la norme. */
-const TEXT_MODEL = 'Xenova/multilingual-e5-small'
-/** `tiny` transcrit mal le français ; `small` triple le coût pour un gain modeste. */
-const SPEECH_MODEL = 'Xenova/whisper-base'
 /** Préfixe attendu par la famille e5, des deux côtés pour une comparaison symétrique. */
 const TEXT_PREFIX = 'query: '
 

@@ -1229,6 +1229,39 @@ h1, h2, h3 {
   line-height: 1.45;
 }
 
+/*
+ * Les modèles, enfin visibles.
+ *
+ * Ils pèsent plus que tout le reste réuni — 1,1 Go mesuré — et l'écran de stockage
+ * n'annonçait que le cache média. Ils prennent la même boîte que l'emplacement de la
+ * bibliothèque : c'est la même nature d'information, un fait sur le disque.
+ */
+.library-models {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 13px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--field);
+  font-size: 11.5px;
+}
+
+.library-models > span {
+  display: grid;
+  gap: 3px;
+  color: var(--text);
+}
+
+/* Ce qui ne sert plus se dit sans crier : c'est une information, pas une alerte. */
+.library-models em {
+  color: var(--faint);
+  font-size: 10.5px;
+  font-style: normal;
+}
+
 .library-location {
   display: grid;
   gap: 5px;

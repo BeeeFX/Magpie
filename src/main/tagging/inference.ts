@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
-import { dataDir } from '../db'
+import { modelsDir } from '../db'
 import type { InferenceReply, InferenceRequest } from './inference.worker'
 
 /**
@@ -149,7 +149,7 @@ let configured: Promise<unknown> | null = null
 async function ready(): Promise<void> {
   const worker = await spawn()
   if (!configured) {
-    configured = ask({ kind: 'configure', cacheDir: join(dataDir(), 'models') })
+    configured = ask({ kind: 'configure', cacheDir: modelsDir() })
     worker.once('exit', () => {
       configured = null
     })

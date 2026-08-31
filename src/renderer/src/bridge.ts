@@ -327,6 +327,10 @@ const previewApi: MagpieApi = {
       media: posts.reduce((n, p) => n + p.media.length, 0),
       demoPosts: posts.length,
       cacheBytes: 0,
+      /* Des chiffres vraisemblables plutôt que zéro : la ligne des modèles se relit dans
+         l'aperçu, purge comprise, ce qui est le seul endroit où on peut la regarder. */
+      modelBytes: 688 * 1024 ** 2,
+      unusedModelBytes: 380 * 1024 ** 2,
       dataPath: 'aperçu navigateur',
       version: '0.4.0'
     }
@@ -347,6 +351,7 @@ const previewApi: MagpieApi = {
   }),
   installUpdate: async () => {},
   setWindowFullscreen: async () => false,
+  pruneModels: async () => ({ removed: ['Xenova/clip-vit-base-patch32'], freed: 380 * 1024 ** 2 }),
   clearMediaCache: async () => ({ removed: 0, failed: 0 }),
   openDataFolder: async () => {},
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),

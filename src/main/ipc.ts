@@ -63,6 +63,7 @@ import {
 import { seedIfEmpty } from './fixtures/seed'
 import { backgroundTasks } from './tasks'
 import { connectFailure } from './messages'
+import { modelsUsage, pruneUnusedModels } from './models/store'
 import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
 import { getCacheUsage, resetCacheUsage, VIDEO_NAME_PATTERN } from './media/cache'
@@ -604,10 +605,16 @@ export function registerIpc({
       media,
       demoPosts: countDemoPosts(),
       cacheBytes: await getCacheUsage(),
+      ...(await modelsUsage().then((usage) => ({
+        modelBytes: usage.total,
+        unusedModelBytes: usage.unused
+      }))),
       dataPath: dataDir(),
       version: app.getVersion()
     }
   })
+
+  ipcMain.handle('models:prune', () => pruneUnusedModels())
 
   ipcMain.handle('updates:state', () => getUpdateState())
   ipcMain.handle('updates:check', () => checkForUpdates())
@@ -693,6 +700,12 @@ export function registerIpc({
     const targetDb = join(target, 'magpie.db')
     const targetMedia = join(target, 'media')
     const sourceMedia = join(source, 'media')
+    /* Les modèles suivent la bibliothèque. Ils restaient sur l'ancien disque, et comme leur
+       chemin dérive de `dataDir()`, l'application en **redemandait 688 Mo** au premier
+       rangement suivant, en silence, tout en abandonnant 1,1 Go derrière elle. C'est le seul
+       geste des réglages qui pouvait coûter un gigaoctet sans le dire. */
+    const targetModels = join(target, 'models')
+    const sourceModels = join(source, 'models')
     let startedWriting = false
     const sendProgress = (progress: LibraryMoveProgress): void => {
       if (!event.sender.isDestroyed()) event.sender.send('library:moveProgress', progress)
@@ -703,9 +716,14 @@ export function registerIpc({
       await pauseMedia()
 
       const mediaFiles = await listLibraryFiles(sourceMedia)
+      const modelFiles = await listLibraryFiles(sourceModels)
       const databaseBytes = await stat(join(source, 'magpie.db')).then((value) => value.size)
       const mediaBytes = mediaFiles.reduce((sum, file) => sum + file.size, 0)
-      const total = Math.max(1, databaseBytes + mediaBytes)
+      const modelBytes = modelFiles.reduce((sum, file) => sum + file.size, 0)
+      /* Les modèles comptent dans le total : sans eux la vérification d'espace libre se
+         trompait d'un gigaoctet, et la barre de progression annonçait une fin qui arrivait
+         bien avant que la copie soit finie. */
+      const total = Math.max(1, databaseBytes + mediaBytes + modelBytes)
       const disk = statfsSync(target)
       const available = disk.bavail * disk.bsize
       if (available < total * 1.05) {
@@ -744,6 +762,24 @@ export function registerIpc({
         })
       }
 
+      let copiedModelBytes = 0
+      if (modelFiles.length > 0) {
+        await mkdir(targetModels, { recursive: true })
+        for (const file of modelFiles) {
+          const destination = join(targetModels, file.relativePath)
+          await mkdir(resolve(destination, '..'), { recursive: true })
+          await copyFile(file.path, destination)
+          copiedModelBytes += file.size
+          sendProgress({
+            phase: 'models',
+            done: databaseBytes + copiedMediaBytes + copiedModelBytes,
+            total,
+            path: target,
+            message: null
+          })
+        }
+      }
+
       sendProgress({ phase: 'finalizing', done: total, total, path: target, message: null })
       writeDataDirLocation(target)
       sendProgress({ phase: 'done', done: total, total, path: target, message: null })
@@ -761,6 +797,7 @@ export function registerIpc({
       if (startedWriting) {
         await rm(targetDb, { force: true }).catch(() => {})
         await rm(targetMedia, { recursive: true, force: true }).catch(() => {})
+        await rm(targetModels, { recursive: true, force: true }).catch(() => {})
       }
       resumeMedia()
       throw error

@@ -71,6 +71,23 @@ export function mediaDir(): string {
   return dir
 }
 
+/**
+ * Où vivent les modèles.
+ *
+ * Le chemin était calculé à la volée au seul endroit qui en avait besoin — `join(dataDir(),
+ * 'models')` dans le lanceur du fil d'inférence. Trois autres en ont besoin depuis : la
+ * comptabilité du disque, la purge, et le déplacement de bibliothèque.
+ *
+ * Il suit `dataDir()`, donc le dossier choisi par l'utilisateur — ce qui est la raison même
+ * pour laquelle le déplacement doit les emporter : sans quoi l'application en redemande
+ * 688 Mo au premier rangement suivant, sans le dire.
+ */
+export function modelsDir(): string {
+  const dir = join(dataDir(), 'models')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
 export function getDb(): Database.Database {
   if (db) return db
   /* Un échec se retient, et c’est ce qui manquait le plus.
