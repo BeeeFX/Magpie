@@ -67,6 +67,18 @@ export function postFilter(query: PostQuery): { condition: string; params: unkno
     params.push(...query.platforms)
   }
 
+  /* La même expression que le tri par défaut : un post sans `saved_at` — il en existe — doit
+     se ranger sous sa date de découverte des deux côtés, sinon il apparaît dans un ordre et
+     disparaît de la plage qui le contient. */
+  if (query.savedFrom !== null) {
+    where.push('COALESCE(p.saved_at, p.discovered_at) >= ?')
+    params.push(query.savedFrom)
+  }
+  if (query.savedTo !== null) {
+    where.push('COALESCE(p.saved_at, p.discovered_at) <= ?')
+    params.push(query.savedTo)
+  }
+
   if (query.sources.length > 0) {
     where.push(`EXISTS (
       SELECT 1 FROM post_sources ps
@@ -266,6 +278,10 @@ function orderBy(sort: PostQuery['sort'], randomSeed: number): string {
       // Ordre pseudo-aléatoire déterministe et paginable : la première tranche apparaît
       // immédiatement sans charger toute la bibliothèque avant de la mélanger.
       return `((p.rowid * 1103515245 + ${Math.max(1, Math.floor(randomSeed))}) & 2147483647), p.id`
+    case 'added':
+      /* Ce que Magpie a vu en dernier, indépendamment de la date que la plateforme annonce :
+         après une synchronisation, c'est le seul ordre qui remonte les nouveautés. */
+      return 'p.discovered_at DESC, p.id'
     case 'saved':
     default:
       return 'COALESCE(p.saved_at, p.discovered_at) DESC, p.saved_rank ASC, p.id'

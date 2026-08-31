@@ -504,8 +504,18 @@ export function Detail(): React.JSX.Element | null {
           <div className="detail__chips">
             <span className="chip-static">{PLATFORM_LABEL[post.platform]}</span>
             <span className="chip-static">{SOURCE_LABEL[post.platform]}</span>
+            {/* Les deux dates, nommées. La vue détaillée a la place, et l'écart entre elles
+                dit quelque chose : un signet de trois ans rapporté hier n'est ni récent ni
+                ancien selon celle qu'on regarde. */}
+            {post.savedAt ? (
+              <span className="chip-static" title={t('detail.savedOn')}>
+                {t('detail.savedOn')} · {formatDate(post.savedAt)}
+              </span>
+            ) : null}
             {post.publishedAt ? (
-              <span className="chip-static">{formatDate(post.publishedAt)}</span>
+              <span className="chip-static" title={t('detail.publishedOn')}>
+                {t('detail.publishedOn')} · {formatDate(post.publishedAt)}
+              </span>
             ) : null}
           </div>
 

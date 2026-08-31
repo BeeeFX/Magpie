@@ -220,7 +220,7 @@ export function MapPostPanel({
 
           <div className="map-panel__meta">
             <span>{PLATFORM_LABEL[shown?.platform ?? 'instagram']}</span>
-            {shown?.publishedAt ? <span>· {formatDate(shown.publishedAt)}</span> : null}
+            {shown?.savedAt ? <span>· {formatDate(shown.savedAt)}</span> : null}
             {shown && shown.mediaCount > 1 ? (
               <span>· {t('organizer.panelMediaCount', { count: shown.mediaCount })}</span>
             ) : null}

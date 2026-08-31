@@ -104,6 +104,31 @@ console.log('\nle découpage ne perd rien')
   assert(chunk([]).length === 0, 'une sélection vide ne produit aucun envoi')
 }
 
+console.log('\nla plage de dates est un filtre, pas une catégorie')
+{
+  /* On la pose depuis le menu Filtres, à côté des types et des plateformes : la garder à
+     travers « Effacer les filtres » ferait mentir ce bouton exactement comme la recherche le
+     faisait avant lui. */
+  const ranged = { ...DEFAULT_QUERY, savedFrom: 1_700_000_000_000, savedTo: 1_800_000_000_000 }
+  assert(activeFilterCount(ranged) === 1, 'ses deux bornes comptent pour un seul filtre')
+  assert(
+    activeFilterCount(clearedQuery(ranged)) === 0,
+    'et « Effacer les filtres » les emporte'
+  )
+  assert(
+    clearedQuery(ranged).savedFrom === null && clearedQuery(ranged).savedTo === null,
+    'les deux bornes, pas seulement l’une'
+  )
+  assert(
+    activeFilterCount({ ...DEFAULT_QUERY, savedFrom: 1_700_000_000_000 }) === 1,
+    'une seule borne suffit à compter'
+  )
+  assert(
+    emptyReason(ranged).kind === 'filters',
+    'un écran vide sous une plage parle de filtres, et l’effacement peut donc en sortir'
+  )
+}
+
 console.log('\nl’écran vide nomme ce qui l’a vidé')
 {
   /* Le défaut, énoncé comme propriété : un écran vide sans aucun filtre posé ne doit **jamais**

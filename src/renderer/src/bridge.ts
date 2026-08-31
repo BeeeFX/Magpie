@@ -152,6 +152,11 @@ function previewFilter(posts: Post[], query: PostQuery): Post[] {
     if (query.platforms.length > 0 && !query.platforms.includes(post.platform)) return false
     if (query.kinds.length > 0 && !query.kinds.includes(post.kind)) return false
     if (query.untaggedOnly && post.tags.length > 0) return false
+    /* La plage se relit ici aussi : c'est le seul endroit où l'on peut voir ce que le filtre
+       donne quand il ne garde rien. */
+    const saved = post.savedAt ?? post.discoveredAt
+    if (query.savedFrom !== null && saved < query.savedFrom) return false
+    if (query.savedTo !== null && saved > query.savedTo) return false
     if (query.label && post.label !== query.label) return false
     if (query.tags.length > 0 && !post.tags.some((tag) => query.tags.includes(tag.name))) {
       return false

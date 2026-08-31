@@ -21,7 +21,7 @@ import type {
   PreloadRequest,
   Settings
 } from '@shared/types'
-import { BULK_MAX, CONTENT_SOURCES, DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS } from '@shared/types'
+import { BULK_MAX, CONTENT_SOURCES, DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS, SORT_KEYS } from '@shared/types'
 import { dataDir, getDb, mediaDir, writeDataDirLocation } from './db'
 import {
   addTag,
@@ -169,9 +169,11 @@ function postQueryValue(value: unknown): PostQuery {
     ],
     label: LABELS.includes(raw.label as never) ? raw.label! : null,
     search: typeof raw.search === 'string' ? raw.search.slice(0, 500) : '',
-    sort: ['saved', 'published', 'author', 'platform', 'random'].includes(raw.sort ?? '')
-      ? raw.sort!
-      : 'saved',
+    /* Dérivé de `SORT_KEYS`, jamais recopié : la liste écrite ici à la main faisait
+       retomber tout tri nouveau sur « Date de sauvegarde », en silence. */
+    sort: SORT_KEYS.includes(raw.sort as never) ? raw.sort! : 'saved',
+    savedFrom: Number.isFinite(raw.savedFrom) ? Number(raw.savedFrom) : null,
+    savedTo: Number.isFinite(raw.savedTo) ? Number(raw.savedTo) : null,
     randomSeed: Number.isFinite(raw.randomSeed) ? Number(raw.randomSeed) : 1
   }
 }

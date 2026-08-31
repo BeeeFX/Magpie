@@ -123,7 +123,26 @@ export interface PostPage {
   hasMore: boolean
 }
 
-export type SortKey = 'saved' | 'published' | 'author' | 'platform' | 'random'
+/**
+ * `added` n'est pas `saved`.
+ *
+ * `saved_at` est la date à laquelle **la plateforme** dit que le post a été enregistré ;
+ * `discovered_at` celle à laquelle Magpie l'a vu pour la première fois. Après une
+ * synchronisation qui rapporte un signet de trois ans, les deux sont à trois ans d'écart — et
+ * c'est la seconde qui répond à « qu'est-ce qui vient d'arriver ? », question qu'aucun tri ne
+ * savait poser.
+ */
+/**
+ * Les tris, énumérés une fois.
+ *
+ * Le processus principal en tenait une **seconde liste**, écrite à la main dans son
+ * assainisseur de requête. Ajouter un tri sans y penser le faisait retomber silencieusement
+ * sur « Date de sauvegarde » : le menu le proposait, le clic ne changeait rien, et rien nulle
+ * part ne pouvait le signaler.
+ */
+export const SORT_KEYS = ['saved', 'added', 'published', 'author', 'platform', 'random'] as const
+
+export type SortKey = (typeof SORT_KEYS)[number]
 /**
  * Comment la bibliothèque s'affiche.
  *
@@ -415,6 +434,14 @@ export interface PostQuery {
   /** Vide = toutes les collections ; plusieurs valeurs sont combinées avec OU. */
   collectionIds: number[]
   label: LabelColor | null
+  /**
+   * Bornes sur la date d'enregistrement, en millisecondes. Nulles = pas de borne.
+   *
+   * On ne pouvait pas retrouver un post par sa date, alors même que c'est le tri par défaut :
+   * « ce que j'ai gardé en janvier » n'était pas une question qu'on pouvait poser.
+   */
+  savedFrom: number | null
+  savedTo: number | null
   search: string
   sort: SortKey
   /** Graine du tri aléatoire, pour qu'il reste stable pendant qu'on scrolle. */
@@ -430,6 +457,8 @@ export const DEFAULT_QUERY: PostQuery = {
   tags: [],
   collectionIds: [],
   label: null,
+  savedFrom: null,
+  savedTo: null,
   search: '',
   sort: 'saved',
   randomSeed: 1

@@ -22,6 +22,10 @@ export function activeFilterCount(query: PostQuery): number {
     query.platforms.length +
     (query.untaggedOnly ? 1 : 0) +
     (query.label ? 1 : 0) +
+    /* La plage compte pour **un** filtre même avec ses deux bornes : c'est une seule idée
+       — « gardé entre » — et le badge doit dire combien de choses restreignent la vue, pas
+       combien de champs sont remplis. */
+    (query.savedFrom !== null || query.savedTo !== null ? 1 : 0) +
     (query.search.trim() ? 1 : 0)
   )
 }
@@ -39,6 +43,11 @@ export function clearedQuery(query: PostQuery): PostQuery {
     platforms: [],
     untaggedOnly: false,
     label: null,
+    /* La plage part avec les filtres, pas avec la catégorie. On la pose depuis le menu
+       Filtres, à côté des types et des plateformes ; la garder ferait mentir « Effacer les
+       filtres » exactement comme la recherche le faisait avant. */
+    savedFrom: null,
+    savedTo: null,
     search: ''
   }
 }

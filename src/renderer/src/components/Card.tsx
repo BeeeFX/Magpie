@@ -10,6 +10,7 @@ import {
 } from '../format'
 import type { LayoutItem } from '../layout'
 import { magpie } from '../bridge'
+import type { TranslationKey } from '../i18n'
 import { useStore, useT } from '../store'
 import { MediaError } from './MediaError'
 import {
@@ -58,6 +59,7 @@ function CardImpl({
   onToggleSelected
 }: Props): React.JSX.Element {
   const t = useT()
+  const sort = useStore((state) => state.query.sort)
   const hoverAudio = useStore((s) => s.hoverAudio)
   const setHoverAudio = useStore((s) => s.setHoverAudio)
   const muted = useStore((s) => s.muted)
@@ -65,6 +67,12 @@ function CardImpl({
   const setVolume = useStore((s) => s.setVolume)
   const setMuted = useStore((s) => s.setMuted)
   const { post } = item
+  /* Quelle date montrer : celle sur laquelle le mur est trié. Le mur est ordonné par « Date de
+     sauvegarde » — le tri par défaut — et la carte n'affichait que la date de **publication**.
+     Sur les tris qui n'ordonnent pas par date — auteur, plateforme, aléatoire — la date de
+     sauvegarde reste la plus utile : c'est celle qu'on ne pouvait lire nulle part. */
+  const shownDate = sort === 'published' ? post.publishedAt : (post.savedAt ?? post.discoveredAt)
+  const shownDateLabel: TranslationKey = sort === 'published' ? 'sort.published' : 'sort.saved'
   const [loaded, setLoaded] = useState(false)
   /** Fichier de vignette référencé mais illisible : mieux vaut le dire qu'un carré noir. */
   const [broken, setBroken] = useState(false)
@@ -410,10 +418,15 @@ function CardImpl({
               <PlatformIcon platform={post.platform} size={12} coloured />
               {SOURCE_LABEL[post.platform]}
             </span>
-            {post.publishedAt ? (
-              <span className="chip-source">
+            {/* La date suit le tri. Le mur est trié par « Date de sauvegarde » — c'est le
+                tri par défaut — et la carte n'affichait que la date de **publication** : les
+                dates lues semblaient donc dans le désordre, et personne ne pouvait répondre à
+                « quand est-ce que j'ai gardé ça ? », qui est la question centrale d'une
+                bibliothèque personnelle. Une seule puce, mais la bonne. */}
+            {shownDate ? (
+              <span className="chip-source" title={t(shownDateLabel)}>
                 <IconClock size={11} />
-                {formatShortDate(post.publishedAt)}
+                {formatShortDate(shownDate)}
               </span>
             ) : null}
             {post.isFavorite ? (

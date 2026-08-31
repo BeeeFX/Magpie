@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CollectionInfo, PostKind, SortKey } from '@shared/types'
+import { SORT_KEYS } from '@shared/types'
 import type { TranslationKey } from '../i18n'
 import { notifyError, notifyInfo, notifySuccess, reportFailure } from '../notices'
 import { activeFilterCount } from '../query'
@@ -29,13 +30,56 @@ const BULK_PROMPT = {
   collection: 'bulk.collectionPrompt'
 } as const satisfies Record<'tag' | 'untag' | 'collection', TranslationKey>
 
-const SORTS: { key: SortKey; label: TranslationKey }[] = [
-  { key: 'saved', label: 'sort.saved' },
-  { key: 'published', label: 'sort.published' },
-  { key: 'author', label: 'sort.author' },
-  { key: 'platform', label: 'sort.platform' },
-  { key: 'random', label: 'sort.random' }
-]
+/**
+ * Le libellé de chaque tri.
+ *
+ * Un `Record<SortKey, …>` plutôt qu'une liste : une liste accepte un sous-ensemble, donc un
+ * tri ajouté au type pouvait rester absent du menu sans que rien ne le dise. Le processus
+ * principal avait exactement ce défaut de son côté — une seconde liste écrite à la main, qui
+ * faisait retomber tout tri nouveau sur « Date de sauvegarde ».
+ *
+ * L'ordre d'affichage vient de `SORT_KEYS`, pour qu'il n'y ait toujours qu'une source.
+ */
+/**
+ * Le va-et-vient entre un `<input type="date">` et un instant.
+ *
+ * Le champ parle en `AAAA-MM-JJ` **local**, la base en millisecondes. Les deux bornes ne se
+ * convertissent pas pareil : « jusqu'au 3 » veut dire « jusqu'à la fin du 3 », sans quoi la
+ * journée choisie comme borne haute est exclue — l'erreur classique, et celle qui fait dire
+ * qu'un filtre « perd » des posts.
+ */
+function dateValue(ms: number | null): string {
+  if (ms === null) return ''
+  const date = new Date(ms)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function dayStart(value: string): number | null {
+  if (!value) return null
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+}
+
+function dayEnd(value: string): number | null {
+  if (!value) return null
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day, 23, 59, 59, 999).getTime()
+}
+
+const SORT_LABEL: Record<SortKey, TranslationKey> = {
+  saved: 'sort.saved',
+  added: 'sort.added',
+  published: 'sort.published',
+  author: 'sort.author',
+  platform: 'sort.platform',
+  random: 'sort.random'
+}
+
+const SORTS: { key: SortKey; label: TranslationKey }[] = SORT_KEYS.map((key) => ({
+  key,
+  label: SORT_LABEL[key]
+}))
 
 const KINDS: { key: PostKind; label: TranslationKey }[] = [
   { key: 'image', label: 'kind.image' },
@@ -300,6 +344,31 @@ export function Toolbar(): React.JSX.Element {
                 </span>
                 {t('sidebar.untagged')}
               </button>
+              <div className="popover__sep" />
+              {/* « Ce que j'ai gardé en janvier » n'était pas une question qu'on pouvait poser :
+                  `PostQuery` n'avait aucune borne temporelle, alors même que la date
+                  d'enregistrement est le tri par défaut. Deux champs natifs plutôt qu'un
+                  calendrier maison : le sélecteur du système connaît déjà la locale, les
+                  semaines et le clavier. */}
+              <div className="popover__range">
+                <h3 className="popover__title">{t('toolbar.savedBetween')}</h3>
+                <label>
+                  <span>{t('toolbar.from')}</span>
+                  <input
+                    type="date"
+                    value={dateValue(query.savedFrom)}
+                    onChange={(event) => setQuery({ savedFrom: dayStart(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  <span>{t('toolbar.to')}</span>
+                  <input
+                    type="date"
+                    value={dateValue(query.savedTo)}
+                    onChange={(event) => setQuery({ savedTo: dayEnd(event.target.value) })}
+                  />
+                </label>
+              </div>
             </>
           )}
         </Popover>
