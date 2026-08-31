@@ -695,10 +695,13 @@ const fr = {
     'Des tags, des collections, des favoris — par-dessus les plateformes, sans dépendre de leur classement. Magpie lit aussi vos images : un post sans légende trouve quand même sa place.',
   'welcome.mapTitle': 'Une carte de ce que vous gardez',
   'welcome.mapText':
-    'Un point par post, placé de sorte que la distance soit la ressemblance. Les collections y forment des îlots dont vous pouvez déplacer les frontières.',
+    'Un point par post, placé de sorte que la distance soit la ressemblance. Les collections y forment des îlots, et vous nommez vous-même les endroits qui comptent. Elle attend l’analyse approfondie.',
   'welcome.findTitle': 'Retrouver',
   'welcome.findText':
     'Recherche instantanée sur les légendes, les auteurs et les tags — et sur ce que l’analyse a lu des images et entendu des vidéos. Insensible aux accents.',
+  'welcome.trayTitle': 'Magpie reste à portée',
+  'welcome.trayText':
+    'Fermer la fenêtre ne quitte pas l’application : elle continue à rapporter vos nouveaux signets depuis la barre des tâches. Vous pouvez changer cela dans les réglages.',
   'welcome.storageTitle': 'Avant de télécharger vos médias',
   'welcome.sourcesTitle': 'Que voulez-vous rassembler ?',
   'welcome.sourcesText': 'Vous pourrez changer ce choix plus tard dans les réglages.',
@@ -1427,10 +1430,13 @@ const en: Record<TranslationKey, string> = {
     'Tags, collections and favourites — across platforms, independent of how each one files things. Magpie reads your images too: a post with no caption still finds its place.',
   'welcome.mapTitle': 'A map of what you keep',
   'welcome.mapText':
-    'One dot per post, placed so that distance is similarity. Collections form islands whose boundaries you can reshape.',
+    'One dot per post, placed so that distance is similarity. Collections form islands, and you name the places that matter to you. It waits for the thorough analysis.',
   'welcome.findTitle': 'Find things again',
   'welcome.findText':
     'Instant search across captions, authors and tags — and across what the analysis read in images and heard in videos. Accent-insensitive.',
+  'welcome.trayTitle': 'Magpie stays within reach',
+  'welcome.trayText':
+    'Closing the window does not quit the app: it keeps bringing in your new bookmarks from the system tray. You can change that in settings.',
   'welcome.storageTitle': 'Before downloading your media',
   'welcome.sourcesTitle': 'What do you want to collect?',
   'welcome.sourcesText': 'You can change this later in Settings.',

@@ -18,6 +18,7 @@ import {
   IconGrid,
   IconInbox,
   IconMap,
+  IconPanel,
   IconSearch,
   IconSend,
   IconStar,
@@ -154,6 +155,11 @@ export function Welcome(): React.JSX.Element {
          téléchargement de plusieurs centaines de mégaoctets de modèles et des minutes de
          calcul. Une bonne surprise ne s'annonce pas, une longue attente si. */
       { key: 'analysis', icon: <IconEye size={18} />, title: 'welcome.analysisTitle', text: 'welcome.analysisText' },
+      /* Fermer la fenêtre ne quitte pas l'application — `trayEnabled` est vrai par défaut. Le
+         réglage l'explique, mais dans les réglages : personne ne les ouvre pour vérifier ce
+         qu'un bouton de fermeture va faire. On le découvrait en cherchant où était passée
+         l'application. */
+      { key: 'tray', icon: <IconPanel size={18} />, title: 'welcome.trayTitle', text: 'welcome.trayText' },
       { key: 'next', icon: <IconSend size={18} />, title: 'welcome.nextTitle', text: 'welcome.nextText' }
     ]
   ]
