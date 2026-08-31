@@ -21,6 +21,7 @@ const PREFETCH_MARGIN_MAX = 40000
 const EMPTY_TEXT = {
   filters: 'grid.noMatch',
   favorites: 'grid.emptyFavorites',
+  archived: 'grid.emptyArchived',
   collection: 'grid.emptyCollection',
   tag: 'grid.emptyTag',
   source: 'grid.emptySource'

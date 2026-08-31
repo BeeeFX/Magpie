@@ -61,7 +61,8 @@ const DESTRUCTIVE: Record<string, string> = {
   regenerateMap: 'jette la projection rangée — ~26 s, et les étiquettes perdent leurs ancres',
   untagSelection: 'retire un tag sur toute la sélection, et perd son origine',
   deleteCollection: 'supprime une collection et son contenu',
-  mergeCollections: 'fond deux collections, la source disparaît'
+  mergeCollections: 'fond deux collections, la source disparaît',
+  archivePosts: 'retire des posts de la bibliothèque — ils quittent toutes les vues et tous les calculs'
 }
 
 /** Ce qui couvre chaque site d'appel, nommément. */
@@ -125,6 +126,18 @@ const GUARDS: { file: string; call: string; guard: RegExp | null; why: string }[
     call: 'mergeCollections',
     guard: /ConfirmButton/,
     why: 'un ConfirmButton distinct du choix de la cible'
+  },
+  {
+    file: 'Detail.tsx',
+    call: 'archivePost',
+    guard: /confirm=\{post\.isArchived/,
+    why: 'un ConfirmButton en icône, et la notification porte l’annulation'
+  },
+  {
+    file: 'Toolbar.tsx',
+    call: 'archiveSelection',
+    guard: /confirm=\{query\.archived/,
+    why: 'un ConfirmButton qui compte les posts, et la notification porte l’annulation'
   }
 ]
 

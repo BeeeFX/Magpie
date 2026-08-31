@@ -51,6 +51,8 @@ function previewStats(posts: Post[]): LibraryStats {
   return {
     total: posts.length,
     favorites: posts.filter((p) => p.isFavorite).length,
+    /* Deux retirés, pour que la catégorie et son état vide se relisent dans l'aperçu. */
+    archived: 2,
     byPlatform,
     bySource: {
       saved: posts.filter((post) => post.sources?.includes('saved') ?? true).length,
@@ -275,6 +277,7 @@ const previewApi: MagpieApi = {
   openExportFolder: async () => {},
   /* Un texte plutôt que `null` : les deux blocs de la vue détaillée ne se relisent nulle part
      ailleurs, la fixture n'ayant ni description ni transcription. */
+  archivePosts: async () => 0,
   postTranscript: async () =>
     'Alors ce qu’on va faire, c’est partir du plan large, et laisser la lumière tomber à gauche. ' +
     'On garde la même focale sur les trois plans suivants, sinon le raccord ne tient pas.',

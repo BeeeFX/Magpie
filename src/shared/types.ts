@@ -428,6 +428,18 @@ export interface PostQuery {
   /** Vide = tous les types. */
   kinds: PostKind[]
   favoritesOnly: boolean
+  /**
+   * Regarder ce qu'on a retiré, plutôt que le reste.
+   *
+   * `is_archived` existait en base, était filtré par quinze requêtes et exposé dans `Post` —
+   * et **rien ne l'écrivait jamais**. Le schéma avait prévu le geste ; le produit ne l'a
+   * jamais offert, si bien qu'un post entré par erreur y restait pour toujours : se
+   * désenregistrer côté plateforme n'y change rien, la synchronisation n'insère que.
+   *
+   * C'est une catégorie, pas un filtre : elle redéfinit l'ensemble regardé, comme les favoris.
+   * Elle survit donc à « Effacer les filtres » et part avec « Tous ».
+   */
+  archived: boolean
   untaggedOnly: boolean
   /** Vide = tous les tags ; plusieurs valeurs sont combinées avec OU. */
   tags: string[]
@@ -453,6 +465,7 @@ export const DEFAULT_QUERY: PostQuery = {
   sources: [],
   kinds: [],
   favoritesOnly: false,
+  archived: false,
   untaggedOnly: false,
   tags: [],
   collectionIds: [],
@@ -467,6 +480,8 @@ export const DEFAULT_QUERY: PostQuery = {
 export interface LibraryStats {
   total: number
   favorites: number
+  /** Posts retirés de la bibliothèque. Zéro tant que personne n'a jamais retiré. */
+  archived: number
   byPlatform: Record<Platform, number>
   bySource: Record<ContentSource, number>
   /** Nombre de posts par étiquette de couleur ; les teintes inutilisées sont absentes. */
@@ -503,6 +518,14 @@ export interface MagpieApi {
   openExportFolder(): Promise<void>
   /** La transcription d'un post, lue à la demande : trop longue pour voyager avec la page. */
   postTranscript(id: string): Promise<string | null>
+  /**
+   * Retire des posts de la bibliothèque, ou les y remet.
+   *
+   * Rien ne les supprime : ils restent en base, hors de toute vue et de tout calcul, et la
+   * catégorie « Retirés » les rend joignables. Une suppression franche serait de toute façon
+   * défaite à la synchronisation suivante, qui les réinsérerait.
+   */
+  archivePosts(ids: string[], archived: boolean): Promise<number>
   transcriptState(): Promise<{ pending: number; running: boolean }>
   imageReadingState(): Promise<{ pending: number; running: boolean; failure?: string | null }>
   startImageReading(): Promise<BackgroundState>

@@ -63,6 +63,7 @@ export function activeCategoryCount(query: PostQuery): number {
   return (
     query.sources.length +
     (query.favoritesOnly ? 1 : 0) +
+    (query.archived ? 1 : 0) +
     query.tags.length +
     query.collectionIds.length
   )
@@ -88,7 +89,7 @@ export function activeCategoryCount(query: PostQuery): number {
  */
 export type EmptyReason =
   | { kind: 'filters'; count: number }
-  | { kind: 'category'; axis: 'favorites' | 'collection' | 'tag' | 'source' }
+  | { kind: 'category'; axis: 'favorites' | 'archived' | 'collection' | 'tag' | 'source' }
   | { kind: 'library' }
 
 export function emptyReason(query: PostQuery): EmptyReason {
@@ -99,6 +100,7 @@ export function emptyReason(query: PostQuery): EmptyReason {
   if (query.collectionIds.length > 0) return { kind: 'category', axis: 'collection' }
   if (query.tags.length > 0) return { kind: 'category', axis: 'tag' }
   if (query.favoritesOnly) return { kind: 'category', axis: 'favorites' }
+  if (query.archived) return { kind: 'category', axis: 'archived' }
   if (query.sources.length > 0) return { kind: 'category', axis: 'source' }
   return { kind: 'library' }
 }

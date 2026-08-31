@@ -109,6 +109,7 @@ export function Toolbar(): React.JSX.Element {
   const selectAllResults = useStore((s) => s.selectAllResults)
   const selecting = useStore((s) => s.selecting)
   const untagSelection = useStore((s) => s.untagSelection)
+  const archiveSelection = useStore((s) => s.archiveSelection)
   const clearSelection = useStore((s) => s.clearSelection)
   const favoriteSelection = useStore((s) => s.favoriteSelection)
   const tagSelection = useStore((s) => s.tagSelection)
@@ -518,6 +519,17 @@ export function Toolbar(): React.JSX.Element {
           >
             {t('bulk.untag')}
           </button>
+          {/* Le seul geste qui fait disparaître un post du mur. Il ne détruit rien — le post
+              reste en base, joignable par « Retirés » — mais il faut le demander, et la
+              notification porte l'annulation pour le cas courant : « oups ». */}
+          <ConfirmButton
+            className="btn"
+            disabled={selectedIds.length === 0}
+            label={query.archived ? 'detail.restore' : 'bulk.archive'}
+            confirm={query.archived ? 'detail.restore' : 'bulk.archiveYes'}
+            confirmVars={{ count: selectedIds.length }}
+            onConfirm={() => void archiveSelection(!query.archived)}
+          />
           <button
             type="button"
             className={`btn ${bulkForm === 'collection' ? 'is-active' : ''}`}

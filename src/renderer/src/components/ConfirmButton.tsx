@@ -18,6 +18,7 @@ export function ConfirmButton({
   label,
   confirm,
   confirmVars,
+  icon,
   className = 'btn',
   disabled = false,
   title,
@@ -29,6 +30,13 @@ export function ConfirmButton({
   confirm: TranslationKey
   /** De quoi chiffrer cette conséquence : « Supprimer 10 collections » plutôt que « Supprimer ». */
   confirmVars?: Record<string, string | number>
+  /**
+   * Ce que montre le premier temps, quand une rangée d'icônes n'a pas la place d'un libellé.
+   *
+   * Le second temps reste du texte, toujours : c'est là qu'il faut nommer la conséquence, et
+   * une icône ne la nomme pas. `label` sert alors d'infobulle et de nom accessible.
+   */
+  icon?: React.ReactNode
   className?: string
   disabled?: boolean
   title?: string
@@ -54,10 +62,11 @@ export function ConfirmButton({
         type="button"
         className={className}
         disabled={disabled}
-        title={title}
+        title={title ?? t(label)}
+        aria-label={icon ? t(label) : undefined}
         onClick={() => setArmed(true)}
       >
-        {t(label)}
+        {icon ?? t(label)}
       </button>
     )
   }

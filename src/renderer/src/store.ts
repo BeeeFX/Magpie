@@ -245,6 +245,9 @@ interface State {
   selecting: boolean
   clearSelection: () => void
   favoriteSelection: (value: boolean) => Promise<void>
+  /** Retire des posts de la bibliothèque, ou les y remet. Toujours défaisable. */
+  archiveSelection: (archived: boolean) => Promise<void>
+  archivePost: (id: string, archived: boolean) => Promise<void>
   tagSelection: (name: string) => Promise<void>
   untagSelection: (name: string) => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
@@ -528,6 +531,7 @@ export const useStore = create<State>()(
             ...query,
             sources: [],
             favoritesOnly: false,
+            archived: false,
             tags: [],
             collectionIds: []
           },
@@ -602,6 +606,59 @@ export const useStore = create<State>()(
         }
       },
       clearSelection: () => set({ selectedIds: [] }),
+      /**
+       * Retirer, et pouvoir revenir.
+       *
+       * La notification porte l'annulation. Ce n'est pas un luxe : sans elle, le seul geste
+       * qui fait disparaître un post serait aussi le seul qu'on ne pourrait pas défaire sur
+       * le moment — et la catégorie « Retirés » demande de savoir qu'elle existe.
+       */
+      archiveSelection: async (archived) => {
+        try {
+          const ids = get().selectedIds
+          for (const slice of chunk(ids)) await magpie.archivePosts(slice, archived)
+          set({ selectedIds: [] })
+          await get().refresh()
+          notifySuccess(archived ? 'bulk.archived' : 'bulk.restored', { count: ids.length }, {
+            key: 'notice.undo',
+            run: () => {
+              void (async () => {
+                try {
+                  for (const slice of chunk(ids)) await magpie.archivePosts(slice, !archived)
+                  await get().refresh()
+                } catch (error) {
+                  notifyError('notice.archiveFailed', error)
+                }
+              })()
+            }
+          })
+          refreshStatsSoon()
+        } catch (error) {
+          notifyError('notice.archiveFailed', error)
+        }
+      },
+
+      archivePost: async (id, archived) => {
+        try {
+          await magpie.archivePosts([id], archived)
+          /* Le post quitte la liste en place : recharger la page entière ferait sauter le mur
+             sous les yeux pour un seul élément. */
+          set({ posts: get().posts.filter((post) => post.id !== id) })
+          notifySuccess(archived ? 'bulk.archived' : 'bulk.restored', { count: 1 }, {
+            key: 'notice.undo',
+            run: () => {
+              void magpie
+                .archivePosts([id], !archived)
+                .then(() => get().refresh())
+                .catch((error: unknown) => notifyError('notice.archiveFailed', error))
+            }
+          })
+          refreshStatsSoon()
+        } catch (error) {
+          notifyError('notice.archiveFailed', error)
+        }
+      },
+
       favoriteSelection: async (value) => {
         try {
           const ids = get().selectedIds

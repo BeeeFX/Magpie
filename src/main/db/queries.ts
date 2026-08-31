@@ -66,6 +66,23 @@ const SELECT_POST = /* sql */ `
  * texte : on payait le calcul, la recherche en profitait, et l'on ne pouvait jamais voir ce
  * qu'elle avait entendu — ni vérifier qu'elle avait bien entendu.
  */
+/**
+ * Retire des posts, ou les remet. Rend combien ont changé d'état.
+ *
+ * Une écriture, pas une suppression : la synchronisation suivante réinsérerait un post
+ * supprimé, et l'on aurait fait disparaître un geste de l'utilisateur sans le lui dire.
+ */
+export function archivePosts(ids: string[], archived: boolean): number {
+  if (ids.length === 0) return 0
+  const db = getDb()
+  const stmt = db.prepare('UPDATE posts SET is_archived = ? WHERE id = ?')
+  return db.transaction(() => {
+    let changed = 0
+    for (const id of ids) changed += stmt.run(archived ? 1 : 0, id).changes
+    return changed
+  })()
+}
+
 export function postTranscript(id: string): string | null {
   const row = getDb().prepare('SELECT transcript FROM posts WHERE id = ?').get(id) as
     | { transcript: string | null }
@@ -75,7 +92,9 @@ export function postTranscript(id: string): string | null {
 
 export function postFilter(query: PostQuery): { condition: string; params: unknown[] } {
   const where: string[] = [
-    `p.is_archived = 0`,
+    /* La seule des quinze occurrences qui se laisse retourner : les quatorze autres — statistiques,
+       comptages, travaux de fond — excluent à raison ce qu'on a retiré. */
+    `p.is_archived = ${query.archived ? 1 : 0}`,
     `p.platform IN (${PUBLIC_PLATFORMS.map(() => '?').join(', ')})`
   ]
   const params: unknown[] = []
@@ -492,6 +511,18 @@ export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): L
     n: number
   }[]
 
+  /* Le décompte des retirés, à part : le rollup ci-dessus les exclut par construction, et
+     l'entête du panneau latéral doit savoir s'il faut même proposer la catégorie. Une requête
+     d'un chiffre sur une colonne entière à zéro dans l'immense majorité des bibliothèques. */
+  const archived = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM posts p
+          WHERE p.is_archived = 1 AND p.platform IN (${PUBLIC_PLATFORM_SLOTS})`
+      )
+      .get(...PUBLIC_PLATFORMS) as { n: number }
+  ).n
+
   const byPlatform = Object.fromEntries(PLATFORMS.map((p) => [p, 0])) as Record<Platform, number>
   const byLabel: Partial<Record<LabelColor, number>> = {}
   let total = 0
@@ -537,7 +568,7 @@ export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): L
     source: TagSource
   }[]
 
-  return { total, favorites, byPlatform, bySource, byLabel, topTags }
+  return { total, favorites, archived, byPlatform, bySource, byLabel, topTags }
 }
 
 export function toggleFavorite(id: string): boolean {

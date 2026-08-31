@@ -55,6 +55,7 @@ import {
   setLabel,
   setFavoriteMany,
   addTagMany,
+  archivePosts,
   postTranscript,
   postUrls,
   removeTagMany,
@@ -147,6 +148,7 @@ function postQueryValue(value: unknown): PostQuery {
       ? raw.kinds.slice(0, 5).filter((kind) => POST_KINDS.includes(kind as never))
       : [],
     favoritesOnly: raw.favoritesOnly === true,
+    archived: raw.archived === true,
     untaggedOnly: raw.untaggedOnly === true,
     tags: [
       ...new Set(
@@ -320,6 +322,12 @@ export function registerIpc({
   ipcMain.handle('ai:proposeCollections', () => proposeVideoCollections())
   ipcMain.handle('ai:stopProposal', () => stopProposal())
   ipcMain.handle('posts:transcript', (_event, id: string) => postTranscript(String(id)))
+  ipcMain.handle('posts:archive', (_event, ids: string[], archived: boolean) => {
+    // Le même plafond que les autres gestes groupés : c'est `BULK_MAX` qui borne la tranche
+    // côté rendu, et le refuser ici empêche qu'une tranche plus large ne passe jamais.
+    if (!Array.isArray(ids) || ids.length > BULK_MAX) throw new Error('Sélection invalide')
+    return archivePosts(ids.map(String), archived === true)
+  })
   ipcMain.handle(
     'ai:applyCollections',
     (

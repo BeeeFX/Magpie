@@ -14,6 +14,8 @@ import {
 import { notifyError, notifySuccess, reportFailure } from '../notices'
 import { useStore, useT } from '../store'
 import { LabelPicker } from './LabelPicker'
+import { ConfirmButton } from './ConfirmButton'
+import { IconArchive } from './Icons'
 import { MediaError } from './MediaError'
 import { VideoPlayer } from './VideoPlayer'
 import {
@@ -51,6 +53,7 @@ export function Detail(): React.JSX.Element | null {
   const addTag = useStore((s) => s.addTag)
   const removeTag = useStore((s) => s.removeTag)
   const setQuery = useStore((s) => s.setQuery)
+  const archivePost = useStore((s) => s.archivePost)
 
   /**
    * La transcription, lue quand on ouvre le post.
@@ -699,6 +702,21 @@ export function Detail(): React.JSX.Element | null {
                 Nitrate
               </button>
             ) : null}
+            {/* Retirer un post était impossible : `is_archived` existait en base et rien ne
+                l'écrivait jamais, si bien qu'un post entré par erreur y restait pour toujours —
+                se désenregistrer côté plateforme n'y change rien, la synchronisation n'insère
+                que. Rien n'est détruit : le post reste joignable par « Retirés », et la
+                notification porte l'annulation. */}
+            <ConfirmButton
+              className="btn btn--icon"
+              icon={<IconArchive size={15} />}
+              label={post.isArchived ? 'detail.restore' : 'detail.archive'}
+              confirm={post.isArchived ? 'detail.restore' : 'detail.archiveYes'}
+              onConfirm={() => {
+                void archivePost(post.id, !post.isArchived)
+                close()
+              }}
+            />
           </footer>
         </aside>
       </div>

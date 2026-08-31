@@ -22,6 +22,7 @@ import {
   IconPlus,
   IconSettings,
   IconStar,
+  IconArchive,
   IconTag,
   IconVideo
 } from './Icons'
@@ -94,11 +95,14 @@ export function Sidebar(): React.JSX.Element {
    * recherche et tri, au lieu de reconstruire toute la requête.
    */
   const selectCategory = (
-    patch: Partial<Pick<typeof query, 'sources' | 'favoritesOnly' | 'tags' | 'collectionIds'>> = {}
+    patch: Partial<
+      Pick<typeof query, 'sources' | 'favoritesOnly' | 'archived' | 'tags' | 'collectionIds'>
+    > = {}
   ): void => {
     setQuery({
       sources: [],
       favoritesOnly: false,
+      archived: false,
       tags: [],
       collectionIds: [],
       // Â« Tous les tags Â» et Â« Sans tag Â» ne peuvent pas être vrais ensemble.
@@ -234,6 +238,23 @@ export function Sidebar(): React.JSX.Element {
             <span className="row__label">{t('sidebar.favorites')}</span>
             <span className="row__count">{stats?.favorites ?? 0}</span>
           </button>
+
+          {/* Ce qu'on a retiré reste joignable. Sans cette entrée, retirer serait une porte à
+              sens unique — et c'est précisément le défaut qu'on répare : `is_archived` existait,
+              était filtré partout, et rien ne l'écrivait jamais, si bien qu'un post entré par
+              erreur y restait pour toujours. La ligne n'apparaît qu'une fois qu'il y a quelque
+              chose dedans : personne n'a besoin d'une corbeille vide. */}
+          {query.archived || (stats?.archived ?? 0) > 0 ? (
+            <button
+              type="button"
+              className={`row ${query.archived ? 'is-active' : ''}`}
+              onClick={() => selectCategory(query.archived ? {} : { archived: true })}
+            >
+              <IconArchive />
+              <span className="row__label">{t('sidebar.archived')}</span>
+              <span className="row__count">{stats?.archived ?? 0}</span>
+            </button>
+          ) : null}
         </div>
 
         <div className="sidebar__group">
