@@ -54,6 +54,25 @@ const SELECT_POST = /* sql */ `
  * ont besoin. Le préchargement se limite ainsi exactement à ce que l'utilisateur voit —
  * un tag, une collection, une recherche — sans réécrire ni faire diverger ces filtres.
  */
+/**
+ * La transcription d'un post, lue à la demande.
+ *
+ * Elle n'est pas dans `SELECT_POST`, et c'est délibéré : une page en charge trois cents, et
+ * quelques minutes de parole font des milliers de caractères — la page grossirait de plusieurs
+ * mégaoctets pour un texte que l'on ne regarde qu'un post à la fois.
+ *
+ * Jusqu'ici elle n'était lisible **nulle part**. La transcription coûte 2,4 s par clip, soit
+ * des heures sur une bibliothèque de vidéos, et son résultat n'existait que dans l'index plein
+ * texte : on payait le calcul, la recherche en profitait, et l'on ne pouvait jamais voir ce
+ * qu'elle avait entendu — ni vérifier qu'elle avait bien entendu.
+ */
+export function postTranscript(id: string): string | null {
+  const row = getDb().prepare('SELECT transcript FROM posts WHERE id = ?').get(id) as
+    | { transcript: string | null }
+    | undefined
+  return row?.transcript ?? null
+}
+
 export function postFilter(query: PostQuery): { condition: string; params: unknown[] } {
   const where: string[] = [
     `p.is_archived = 0`,

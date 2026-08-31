@@ -51,6 +51,18 @@ export function Detail(): React.JSX.Element | null {
   const addTag = useStore((s) => s.addTag)
   const removeTag = useStore((s) => s.removeTag)
   const setQuery = useStore((s) => s.setQuery)
+
+  /**
+   * La transcription, lue quand on ouvre le post.
+   *
+   * Elle ne voyage pas avec la page — trois cents posts à quelques milliers de caractères
+   * feraient plusieurs mégaoctets pour un texte qu'on ne lit qu'un à la fois. Elle n'était
+   * jusqu'ici lisible **nulle part** : la transcription coûte 2,4 s par clip, soit des heures
+   * sur une bibliothèque de vidéos, et son résultat n'existait que dans l'index plein texte.
+   * On payait le calcul, la recherche en profitait, et l'on ne pouvait ni le voir ni le
+   * vérifier.
+   */
+  const [transcript, setTranscript] = useState<string | null>(null)
   const query = useStore((s) => s.query)
 
   /**
@@ -88,6 +100,25 @@ export function Detail(): React.JSX.Element | null {
   const fullscreen = htmlFullscreen || nativeFullscreen
 
   const post: Post | undefined = index === null ? undefined : posts[index]
+
+  const postId = post?.id ?? null
+  useEffect(() => {
+    setTranscript(null)
+    if (!postId) return
+    let cancelled = false
+    void magpie
+      .postTranscript(postId)
+      .then((text) => {
+        if (!cancelled) setTranscript(text)
+      })
+      /* Une transcription illisible n'empêche pas de regarder le post : on la laisse absente
+         plutôt que d'occuper l'écran avec une panne sans conséquence. */
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [postId])
+
   const selectedMedia = post?.media[mediaIndex] ?? post?.media[0]
 
   /** Transformation qui fait coïncider le panneau avec la vignette d'origine. */
@@ -527,6 +558,23 @@ export function Detail(): React.JSX.Element | null {
               ariaLabel={t('label.section')}
             />
           </section>
+
+          {/* Ce que l'analyse a compris du post, quand elle a tourné. Deux étapes coûteuses
+              écrivaient un résultat que rien ne montrait : on demandait des heures de calcul en
+              annonçant honnêtement le prix, sans jamais montrer ce qu'on avait acheté. */}
+          {post.aiDescription ? (
+            <section className="detail__section">
+              <h3>{t('detail.description')}</h3>
+              <p className="detail__read">{post.aiDescription}</p>
+            </section>
+          ) : null}
+
+          {transcript ? (
+            <section className="detail__section">
+              <h3>{t('detail.transcript')}</h3>
+              <p className="detail__read detail__read--transcript">{transcript}</p>
+            </section>
+          ) : null}
 
           <section className="detail__section">
             <h3>{t('detail.tags')}</h3>

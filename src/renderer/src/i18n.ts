@@ -113,6 +113,8 @@ const fr = {
   'detail.close': 'Fermer',
   'detail.title': 'Détail du post',
   'detail.tags': 'Tags',
+  'detail.description': 'Ce que l’analyse a vu',
+  'detail.transcript': 'Ce qui est dit',
   'detail.savedOn': 'Gardé le',
   'detail.publishedOn': 'Publié le',
   'detail.removeTag': 'Retirer ce tag',
@@ -675,7 +677,7 @@ const fr = {
     'Un point par post, placé de sorte que la distance soit la ressemblance. Les collections y forment des îlots dont vous pouvez déplacer les frontières.',
   'welcome.findTitle': 'Retrouver',
   'welcome.findText':
-    'Recherche instantanée sur les légendes et les auteurs, insensible aux accents.',
+    'Recherche instantanée sur les légendes, les auteurs et les tags — et sur ce que l’analyse a lu des images et entendu des vidéos. Insensible aux accents.',
   'welcome.storageTitle': 'Avant de télécharger vos médias',
   'welcome.sourcesTitle': 'Que voulez-vous rassembler ?',
   'welcome.sourcesText': 'Vous pourrez changer ce choix plus tard dans les réglages.',
@@ -827,6 +829,8 @@ const en: Record<TranslationKey, string> = {
   'detail.close': 'Close',
   'detail.title': 'Post detail',
   'detail.tags': 'Tags',
+  'detail.description': 'What the analysis saw',
+  'detail.transcript': 'What is said',
   'detail.savedOn': 'Saved on',
   'detail.publishedOn': 'Published on',
   'detail.removeTag': 'Remove this tag',
@@ -1386,7 +1390,8 @@ const en: Record<TranslationKey, string> = {
   'welcome.mapText':
     'One dot per post, placed so that distance is similarity. Collections form islands whose boundaries you can reshape.',
   'welcome.findTitle': 'Find things again',
-  'welcome.findText': 'Instant search across captions and authors, accent-insensitive.',
+  'welcome.findText':
+    'Instant search across captions, authors and tags — and across what the analysis read in images and heard in videos. Accent-insensitive.',
   'welcome.storageTitle': 'Before downloading your media',
   'welcome.sourcesTitle': 'What do you want to collect?',
   'welcome.sourcesText': 'You can change this later in Settings.',

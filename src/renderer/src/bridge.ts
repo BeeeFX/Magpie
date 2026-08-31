@@ -273,6 +273,11 @@ const previewApi: MagpieApi = {
   }),
   exportPrompt: async () => 'Aperçu : le prompt système est écrit par le processus principal.',
   openExportFolder: async () => {},
+  /* Un texte plutôt que `null` : les deux blocs de la vue détaillée ne se relisent nulle part
+     ailleurs, la fixture n'ayant ni description ni transcription. */
+  postTranscript: async () =>
+    'Alors ce qu’on va faire, c’est partir du plan large, et laisser la lumière tomber à gauche. ' +
+    'On garde la même focale sur les trois plans suivants, sinon le raccord ne tient pas.',
   transcriptState: async () => ({ pending: 1287, running: false }),
   imageReadingState: async () => ({ pending: 0, running: false, failure: null }),
   startImageReading: async () => PREVIEW_TASKS,

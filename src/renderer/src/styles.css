@@ -4467,6 +4467,27 @@ html.window-is-moving .app *::after {
   gap: 6px;
 }
 
+/*
+ * Ce que l'analyse a produit, enfin lisible.
+ *
+ * Deux étapes coûteuses écrivaient un résultat que rien ne montrait. Le texte se lit comme du
+ * texte, pas comme une étiquette : interligne confortable, et la transcription plafonnée —
+ * quelques minutes de parole font des milliers de caractères, qui pousseraient les tags et les
+ * collections hors de l'écran.
+ */
+.detail__read {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.detail__read--transcript {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 .detail__section {
   display: flex;
   flex-direction: column;

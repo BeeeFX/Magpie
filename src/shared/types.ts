@@ -501,6 +501,8 @@ export interface MagpieApi {
   exportLibrary(): Promise<ExportSummary>
   exportPrompt(): Promise<string>
   openExportFolder(): Promise<void>
+  /** La transcription d'un post, lue à la demande : trop longue pour voyager avec la page. */
+  postTranscript(id: string): Promise<string | null>
   transcriptState(): Promise<{ pending: number; running: boolean }>
   imageReadingState(): Promise<{ pending: number; running: boolean; failure?: string | null }>
   startImageReading(): Promise<BackgroundState>

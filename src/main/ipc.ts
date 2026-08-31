@@ -55,6 +55,7 @@ import {
   setLabel,
   setFavoriteMany,
   addTagMany,
+  postTranscript,
   postUrls,
   removeTagMany,
   toggleFavorite,
@@ -318,6 +319,7 @@ export function registerIpc({
   })
   ipcMain.handle('ai:proposeCollections', () => proposeVideoCollections())
   ipcMain.handle('ai:stopProposal', () => stopProposal())
+  ipcMain.handle('posts:transcript', (_event, id: string) => postTranscript(String(id)))
   ipcMain.handle(
     'ai:applyCollections',
     (
