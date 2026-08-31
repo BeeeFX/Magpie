@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import type { Post } from '@shared/types'
 import { magpie } from '../bridge'
 import { displayName, formatDate, PLATFORM_LABEL } from '../format'
-import { reportFailure } from '../notices'
-import { useT } from '../store'
-import { IconClose, IconExternal } from './Icons'
+import { notifySuccess, reportFailure } from '../notices'
+import { useStore, useT } from '../store'
+import { IconChevronLeft, IconChevronRight, IconClose, IconCopy, IconExternal, IconStar } from './Icons'
 import { PlatformIcon } from './PlatformIcon'
 import { VideoPlayer } from './VideoPlayer'
 
@@ -54,6 +54,9 @@ export function MapPostPanel({
   onResize
 }: Props): React.JSX.Element | null {
   const t = useT()
+  const toggleFavorite = useStore((state) => state.toggleFavorite)
+  const setQuery = useStore((state) => state.setQuery)
+  const query = useStore((state) => state.query)
   const [post, setPost] = useState<Post | null>(null)
   const [missing, setMissing] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -67,6 +70,14 @@ export function MapPostPanel({
    * vraie image dès que son URL revient.
    */
   const [fullImage, setFullImage] = useState<string | null>(null)
+  /**
+   * Le média regardé, quand le post en porte plusieurs.
+   *
+   * Le panneau affichait `media[0]` **seul** tout en annonçant « 4 médias » juste en dessous :
+   * il disait donc lui-même ce qu'il ne montrait pas. Un carrousel de plusieurs images est
+   * exactement le cas où le premier ne suffit pas.
+   */
+  const [mediaIndex, setMediaIndex] = useState(0)
 
   useEffect(() => {
     if (!postId) return
@@ -75,6 +86,7 @@ export function MapPostPanel({
        clignoter le panneau à chaque clic, alors que la réponse arrive en quelques
        millisecondes — tout est local. */
     setMissing(false)
+    setMediaIndex(0)
     void magpie
       .getPostsByIds([postId])
       .then((found) => {
@@ -90,7 +102,7 @@ export function MapPostPanel({
     }
   }, [postId])
 
-  const image = post?.media[0] ?? null
+  const image = post?.media[mediaIndex] ?? post?.media[0] ?? null
   const isImage = image?.kind === 'image' || (image?.kind === 'video' && !image.videoUrl)
 
   useEffect(() => {
@@ -133,6 +145,16 @@ export function MapPostPanel({
   if (!postId && !floating) return null
 
   const open = postId !== null
+  /* Filtrer le mur sur ce tag et refermer le panneau : ce qu'on vient de redéfinir est
+     derrière la carte, pas devant. Même geste que dans la vue détaillée. */
+  const filterByTag = (name: string): void => {
+    const active = query.tags.includes(name)
+    setQuery({
+      tags: active ? query.tags.filter((tag) => tag !== name) : [...query.tags, name]
+    })
+    onClose()
+  }
+
   const shown = post
   const media = shown?.media[0] ?? null
   const isVideo = media?.kind === 'video' && Boolean(media.videoUrl)
@@ -214,6 +236,35 @@ export function MapPostPanel({
             ) : (
               <div className="map-panel__nomedia">{t('organizer.panelNoMedia')}</div>
             )}
+            {/* Le panneau annonçait « 4 médias » en n'en montrant qu'un : il disait lui-même
+                ce qu'il ne montrait pas. */}
+            {shown && shown.media.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  className="map-panel__arrow map-panel__arrow--prev"
+                  onClick={() => setMediaIndex((index) => Math.max(0, index - 1))}
+                  disabled={mediaIndex === 0}
+                  aria-label={t('detail.prevMedia')}
+                >
+                  <IconChevronLeft size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="map-panel__arrow map-panel__arrow--next"
+                  onClick={() =>
+                    setMediaIndex((index) => Math.min(shown.media.length - 1, index + 1))
+                  }
+                  disabled={mediaIndex >= shown.media.length - 1}
+                  aria-label={t('detail.nextMedia')}
+                >
+                  <IconChevronRight size={16} />
+                </button>
+                <span className="map-panel__count">
+                  {mediaIndex + 1} / {shown.media.length}
+                </span>
+              </>
+            ) : null}
           </div>
 
           {shown?.text ? <p className="map-panel__text">{shown.text}</p> : null}
@@ -229,20 +280,57 @@ export function MapPostPanel({
           {shown?.tags.length ? (
             <ul className="map-panel__tags">
               {shown.tags.slice(0, 8).map((tag) => (
-                <li key={tag.name}>{tag.name}</li>
+                <li key={tag.name}>
+                  {/* Filtrer, comme dans la barre latérale et dans la vue détaillée. La même
+                      forme doit faire la même chose sur les trois surfaces. */}
+                  <button type="button" onClick={() => filterByTag(tag.name)}>
+                    {tag.name}
+                  </button>
+                </li>
               ))}
             </ul>
           ) : null}
 
+          {/* On trouvait un post grâce à la carte, et le seul geste possible était de
+              **quitter l'application**. Les deux plus fréquents rejoignent donc l'ouverture :
+              mettre en favori et copier le lien. Poser une étiquette ou définir une collection
+              reste dans le rail, juste à côté sur le même écran — les refaire ici dans une
+              colonne étroite serait un doublon moins bon que l'original. */}
           {shown ? (
-            <button
-              type="button"
-              className="btn map-panel__out"
-              onClick={() => void magpie.openExternal(shown.url).catch(reportFailure('notice.openFailed'))}
-            >
-              <IconExternal />
-              {t('organizer.panelOpen')}
-            </button>
+            <div className="map-panel__actions">
+              <button
+                type="button"
+                className={`btn btn--icon ${shown.isFavorite ? 'is-active' : ''}`}
+                onClick={() => void toggleFavorite(shown.id)}
+                title={t('detail.favorite')}
+                aria-label={t('detail.favorite')}
+                aria-pressed={shown.isFavorite}
+              >
+                <IconStar size={15} filled={shown.isFavorite} />
+              </button>
+              <button
+                type="button"
+                className="btn btn--icon"
+                onClick={() => {
+                  void magpie
+                    .copyToClipboard(shown.url)
+                    .then(() => notifySuccess('notice.copied'))
+                    .catch(reportFailure('notice.copyFailed'))
+                }}
+                title={t('card.copyLink')}
+                aria-label={t('card.copyLink')}
+              >
+                <IconCopy size={15} />
+              </button>
+              <button
+                type="button"
+                className="btn map-panel__out"
+                onClick={() => void magpie.openExternal(shown.url).catch(reportFailure('notice.openFailed'))}
+              >
+                <IconExternal />
+                {t('organizer.panelOpen')}
+              </button>
+            </div>
           ) : null}
         </>
       )}

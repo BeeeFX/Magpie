@@ -68,6 +68,7 @@ export function LibraryMap(): React.JSX.Element {
   const query = useStore((state) => state.query)
   const setOrganizerOpen = useStore((state) => state.setOrganizerOpen)
   const organizeMode = useStore((state) => state.organizeMode)
+  const settingsLoading = useStore((state) => state.settingsLoading)
   const [data, setData] = useState<OrganizerMapData | null>(null)
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
@@ -294,6 +295,18 @@ export function LibraryMap(): React.JSX.Element {
    * Le fond est un décor, pas des données : un semis de points qui suggère ce qui viendra, sans
    * prétendre montrer une carte qui n'existe pas encore.
    */
+  /* Tant que les réglages arrivent, on ne sait pas encore : `organizeMode` vaut `null` à
+     l'initialisation, ce qui n'est pas « deep » — le verrou s'affichait donc à quelqu'un qui
+     avait bien lancé l'analyse, avec un bouton proposant de la relancer. Une offre fausse
+     pendant une fraction de seconde reste une offre fausse. */
+  if (settingsLoading) {
+    return (
+      <div className="library-map__empty">
+        <span className="spinner" />
+      </div>
+    )
+  }
+
   if (organizeMode !== 'deep') {
     return (
       <div className="library-map__empty library-map__locked">

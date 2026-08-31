@@ -3106,6 +3106,8 @@ h1, h2, h3 {
 }
 
 .map-panel__stage {
+  /* Ancre des flèches et du compteur du carrousel. */
+  position: relative;
   display: flex;
   justify-content: center;
   border-radius: var(--radius-md);
@@ -3157,15 +3159,88 @@ h1, h2, h3 {
 }
 
 .map-panel__tags li {
-  padding: 2px 7px;
   border-radius: var(--pill);
   background: var(--field);
   color: var(--faint);
   font-size: 11px;
 }
 
-.map-panel__out {
+/* Le tag filtre, comme dans la barre latérale et la vue détaillée : la même forme fait la
+   même chose sur les trois surfaces. */
+.map-panel__tags button {
+  padding: 2px 7px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.map-panel__tags button:hover {
+  color: var(--text);
+}
+
+/*
+ * Le carrousel du panneau.
+ *
+ * Il montrait `media[0]` seul en annonçant « 4 médias » juste en dessous — il disait donc
+ * lui-même ce qu'il ne montrait pas. Les flèches restent discrètes : c'est la carte qui doit
+ * garder l'attention, le panneau n'est qu'un aperçu.
+ */
+.map-panel__arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--fast) var(--ease);
+  backdrop-filter: blur(8px);
+}
+
+.map-panel__arrow--prev { left: 8px; }
+.map-panel__arrow--next { right: 8px; }
+
+.map-panel__stage:hover .map-panel__arrow,
+.map-panel__arrow:focus-visible {
+  opacity: 1;
+}
+
+.map-panel__arrow:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Le compteur, lui, reste visible : c'est lui qui dit qu'il y a autre chose à voir. */
+.map-panel__count {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  padding: 2px 7px;
+  border-radius: var(--pill);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  color: var(--muted);
+  font-size: 10.5px;
+  backdrop-filter: blur(8px);
+}
+
+.map-panel__actions {
+  display: flex;
+  gap: 6px;
   margin-top: auto;
+}
+
+.map-panel__out {
+  flex: 1;
   justify-content: center;
 }
 
