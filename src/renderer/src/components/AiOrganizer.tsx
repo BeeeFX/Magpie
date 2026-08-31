@@ -129,15 +129,29 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
       .catch(reportFailure('notice.collectionFailed'))
   }, [existing.length, keeping, refresh])
 
+  /**
+   * Refermer pendant que ça travaille demande d'abord.
+   *
+   * Il ne testait que `stepsRunning` — le drapeau de la **préparation**, que `OrganizerSteps`
+   * remet à faux *avant* d'appeler `onFinished()`, c'est-à-dire juste avant que l'analyse ne
+   * démarre. Pendant toute la phase la plus longue, celle qui « a pu durer deux heures » selon
+   * le commentaire d'à côté, Échap ou un clic à l'extérieur refermaient sans un mot.
+   */
   const onClose = useCallback((): void => {
-    if (stepsRunning) setLeaving(true)
+    if (stepsRunning || phase === 'loading') setLeaving(true)
     else requestClose()
-  }, [requestClose, stepsRunning])
+  }, [requestClose, stepsRunning, phase])
   const [result, setResult] = useState<AiCollectionApplyResult | null>(null)
   const [rememberChoices, setRememberChoices] = useState(false)
   const [lastApplication, setLastApplication] = useState<OrganizerApplicationSummary | null>(null)
   const [undoing, setUndoing] = useState(false)
+  /** Vrai entre la demande d'arrêt et la respiration qui la prend en compte. */
+  const [stopping, setStopping] = useState(false)
   const [undone, setUndone] = useState<OrganizerUndoResult | null>(null)
+  /* Un miroir de `phase`, lu par l'effet d'ouverture. Le mettre en dépendance relancerait
+     l'effet à chaque changement de phase — donc remettrait l'écran à zéro en plein travail. */
+  const phaseRef = useRef(phase)
+  phaseRef.current = phase
   const panelRef = useRef<HTMLDivElement>(null)
   const { mounted, closing } = useClosing(open, 230)
   /* Se déclarait `aria-modal` sans piéger le focus : Tab sortait derrière la fenêtre. */
@@ -147,6 +161,11 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
     if (!open) return
     // Rouvrir pendant une préparation doit retrouver l'écran tel qu'il était, pas le vider.
     if (useStore.getState().stepsRunning) return
+    /* Ni pendant l'analyse. Elle survit à la fermeture — c'est le processus principal qui
+       travaille — mais l'écran revenait à « Rapide ou approfondi ? », proposant de lancer ce
+       qui tournait déjà. `phase` est un état du composant, qui reste monté : il suffit de ne
+       pas l'écraser. */
+    if (phaseRef.current === 'loading') return
     setPhase('choose')
     setError(null)
     setResult(null)
@@ -202,6 +221,7 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   const analyse = async (): Promise<void> => {
     setPhase('loading')
     setError(null)
+    setStopping(false)
     try {
       const proposed = await magpie.proposeAiCollections()
       if (depth === 'quick') {
@@ -242,8 +262,15 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
       await refresh(false, true)
       setPhase('done')
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-      setPhase('intro')
+      /* Un arrêt demandé n'est pas une panne : il n'a rien à rapporter, et l'afficher en
+         rouge ferait passer un choix de l'utilisateur pour un échec de l'application.
+         L'étiquette du rejet est le seul signal qui traverse l'IPC — Electron n'y fait pas
+         voyager les classes d'erreur. */
+      const stopped = reason instanceof Error && /ProposalCancelled|Analyse interrompue/.test(reason.message)
+      if (!stopped) setError(reason instanceof Error ? reason.message : String(reason))
+      setPhase(stopped ? 'choose' : 'intro')
+    } finally {
+      setStopping(false)
     }
   }
 
@@ -523,6 +550,22 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
                   />
                 </div>
               ) : null}
+              {/* La sortie manquait à l'écran qui en avait le plus besoin. « Tout couper »
+                  existait, mais il n'était atteignable qu'en **essayant de fermer la fenêtre**,
+                  ce qui n'est pas le geste qu'on cherche quand on veut simplement arrêter. */}
+              <button
+                type="button"
+                className="btn"
+                disabled={stopping}
+                onClick={() => {
+                  setStopping(true)
+                  void magpie
+                    .stopAnalysis()
+                    .catch(reportFailure('notice.unexpected'))
+                }}
+              >
+                {t(stopping ? 'organizer.stopping' : 'organizer.stopAnalysis')}
+              </button>
             </div>
           ) : null}
 

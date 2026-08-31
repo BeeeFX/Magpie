@@ -1,7 +1,8 @@
 import { join } from 'node:path'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import { modelsDir } from '../db'
-import type { InferenceReply, InferenceRequest } from './inference.worker'
+import type { DownloadProgress, InferenceReply, InferenceRequest } from './inference.worker'
+import { backgroundTasks } from '../tasks'
 
 /**
  * Le guichet des modèles, vu du processus principal.
@@ -89,7 +90,14 @@ function spawn(): Promise<UtilityProcess> {
       stdio: 'inherit'
     })
 
-    process_.on('message', (message: InferenceReply) => {
+    process_.on('message', (message: InferenceReply | DownloadProgress) => {
+      /* `id: 0` n'est la réponse à rien : c'est la diffusion du téléchargement. Un premier
+         rangement rapatrie 688 Mo, et l'interface n'en disait rien — « Préparation en cours… »
+         et huit minutes de silence, indiscernables d'une application figée. */
+      if (isDownload(message)) {
+        publishDownload(message)
+        return
+      }
       const entry = pending.get(message.id)
       if (!entry) return
       pending.delete(message.id)
@@ -118,6 +126,40 @@ function spawn(): Promise<UtilityProcess> {
   })
   starting = attempt
   return attempt
+}
+
+/**
+ * Le téléchargement, dit au registre des tâches.
+ *
+ * Un seul fichier à la fois est rapporté par la bibliothèque, et il y en a des dizaines. On
+ * n'additionne donc pas : on montre celui en cours, qui est ce que l'utilisateur peut
+ * comprendre — « ce fichier-ci, à moitié ». Un total inventé sur des fichiers dont on ignore
+ * le nombre serait une barre qui recule.
+ */
+/* Un discriminant plutôt qu'un `id === 0` : les deux formes ont un `id` de type `number`,
+   donc le compilateur ne peut rien en déduire, et le cast qui rattrapait le coup masquait le
+   jour où les formes divergeraient. */
+function isDownload(message: InferenceReply | DownloadProgress): message is DownloadProgress {
+  return 'kind' in message && message.kind === 'download'
+}
+
+const DOWNLOAD_TASK = 'models:download'
+let downloadDone: NodeJS.Timeout | null = null
+
+function publishDownload(progress: DownloadProgress): void {
+  backgroundTasks.update(DOWNLOAD_TASK, {
+    kind: 'models',
+    scope: progress.file || null,
+    done: progress.loaded,
+    total: progress.total
+  })
+  /* La bibliothèque n'annonce pas la fin d'une série de téléchargements — seulement celle de
+     chaque fichier. La tâche disparaît donc après un silence : c'est le seul signal disponible,
+     et laisser la ligne affichée pour toujours serait pire que de la retirer une seconde trop
+     tôt. */
+  if (downloadDone) clearTimeout(downloadDone)
+  downloadDone = setTimeout(() => backgroundTasks.clear(DOWNLOAD_TASK), 3000)
+  downloadDone.unref?.()
 }
 
 async function ask(request: Ask<InferenceRequest>): Promise<InferenceReply> {

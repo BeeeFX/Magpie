@@ -206,6 +206,8 @@ const previewApi: MagpieApi = {
   hasAiKey: async () => true,
   setAiKey: async () => {},
   startAiTagging: async () => ({ done: 0, total: 0, tagged: 0, failed: 0, running: false }),
+  stopAnalysis: async () => {},
+  stopExport: async () => {},
   proposeAiCollections: async (): Promise<AiCollectionPlan> => {
     // Sans instantané sur disque — worktree neuf, `npm run dev` jamais lancé — l'aperçu doit
     // quand même montrer le parcours d'organisation, qui ne dépend pas des vrais posts.

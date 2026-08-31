@@ -331,7 +331,7 @@ function TaskRow({
      consulte ce drapeau — personne ne le lit pour elles — et rien ne serait gagné à leur en
      donner une : elles se terminent d'elles-mêmes en peu de temps, et une synchronisation
      suspendue à mi-course laisserait un curseur de pagination dans un état ambigu. */
-  const pausable = task.kind !== 'sync' && task.kind !== 'organizer'
+  const pausable = task.kind === 'thumbnails' || task.kind === 'clips' || task.kind === 'images' || task.kind === 'transcribe'
 
   return (
     <li className={`downloads__task ${halted ? 'is-paused' : ''}`}>

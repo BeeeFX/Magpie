@@ -268,6 +268,8 @@ const fr = {
   'organizer.embedding': 'Lecture du sens des posts : {done} / {total}',
   'organizer.visualProgress': 'Analyse locale des vignettes : {done} / {total}',
   'organizer.grouping': 'Regroupement des thèmes et préparation des catégories',
+  'organizer.stopAnalysis': 'Arrêter l’analyse',
+  'organizer.stopping': 'Arrêt en cours…',
   'organizer.unassigned': 'sans catégorie',
   'organizer.joinedExisting':
     'Ces collections existaient déjà et ont été complétées plutôt que créées : {names}.',
@@ -455,6 +457,7 @@ const fr = {
   'export.treeSheets': 'un fichier par post, ouvert au besoin',
   'export.run': 'Exporter',
   'export.running': 'Export en cours…',
+  'export.stop': 'Arrêter',
   'export.openFolder': 'Ouvrir le dossier',
   'export.copyPrompt': 'Copier le prompt',
   'export.copied': 'Copié',
@@ -499,6 +502,8 @@ const fr = {
   'downloads.thumbsCapped':
     'Les images des tuiles ne tiennent plus dans la place qui leur est réservée ({used} sur {limit}). Chaque nouvelle image en efface une ancienne : l’étape ne peut pas se terminer. Augmentez la limite du cache dans les réglages.',
   'downloads.queued': 'En attente · {count} à faire',
+  'downloads.kind.models': 'Téléchargement des modèles',
+  'downloads.kind.export': 'Export',
   'downloads.kind.sync': 'Synchronisation',
   'downloads.kind.thumbnails': 'Images des tuiles',
   'downloads.kind.images': 'Lecture des images',
@@ -970,6 +975,8 @@ const en: Record<TranslationKey, string> = {
   'organizer.embedding': 'Reading what posts are about: {done} / {total}',
   'organizer.visualProgress': 'Analysing thumbnails locally: {done} / {total}',
   'organizer.grouping': 'Grouping themes and preparing categories',
+  'organizer.stopAnalysis': 'Stop the analysis',
+  'organizer.stopping': 'Stopping…',
   'organizer.unassigned': 'uncategorised',
   'organizer.joinedExisting':
     'These collections already existed and were added to rather than created: {names}.',
@@ -1156,6 +1163,7 @@ const en: Record<TranslationKey, string> = {
   'export.treeSheets': 'one file per post, opened when needed',
   'export.run': 'Export',
   'export.running': 'Exporting…',
+  'export.stop': 'Stop',
   'export.openFolder': 'Open folder',
   'export.copyPrompt': 'Copy prompt',
   'export.copied': 'Copied',
@@ -1200,6 +1208,8 @@ const en: Record<TranslationKey, string> = {
   'downloads.thumbsCapped':
     'Tile images no longer fit in the space reserved for them ({used} of {limit}). Every new image evicts an older one, so the step cannot finish. Raise the cache limit in settings.',
   'downloads.queued': 'Queued · {count} to go',
+  'downloads.kind.models': 'Downloading the models',
+  'downloads.kind.export': 'Export',
   'downloads.kind.sync': 'Syncing',
   'downloads.kind.thumbnails': 'Tile images',
   'downloads.kind.images': 'Reading images',

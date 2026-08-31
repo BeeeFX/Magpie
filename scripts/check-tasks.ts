@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 /**
  * Un bouton qui prétend agir agit : `npm run check:tasks`
@@ -66,7 +66,12 @@ console.log('une pause montrée est une pause qui suspend')
   if (!guard) {
     fail('Downloads.tsx ne dit plus quelles tâches se suspendent')
   } else {
-    const excluded = [...guard[1].matchAll(/task\.kind !== '(\w+)'/g)].map((match) => match[1])
+    /* `pausable` **liste** ce qui se suspend, au lieu d'exclure ce qui ne se suspend pas.
+       Le sens compte : écrit en négatif, un genre de tâche ajouté héritait d'une pause que
+       personne ne tenait — c'est ainsi que « Téléchargement des modèles » et « Export » en ont
+       reçu une, chacun le jour de sa création. En positif, le défaut est l'absence de pause,
+       qui est le défaut honnête. */
+    const offered = [...guard[1].matchAll(/task\.kind === '(\w+)'/g)].map((match) => match[1])
     /* Les genres viennent de leur propre union, et **tous** sont examinés. Une première
        version filtrait ceux qu'aucun producteur ne déclarait, ce qui écartait exactement le
        cas à attraper : proposer une pause pour une tâche dont personne ne tient le drapeau
@@ -76,7 +81,7 @@ console.log('une pause montrée est une pause qui suspend')
     if (kinds.length === 0) fail('BackgroundTaskKind introuvable')
 
     for (const kind of kinds) {
-      if (excluded.includes(kind)) {
+      if (!offered.includes(kind)) {
         pass(`${kind} — pas de pause proposée, donc rien à tenir`)
         continue
       }
@@ -102,12 +107,19 @@ console.log('\ntoute commande d’arrêt du contrat est atteignable')
   const stops = [...types.matchAll(/^\s{2}(stop\w+)\(/gm)].map((match) => match[1])
   if (stops.length === 0) fail('aucune méthode stop* trouvée dans MagpieApi')
 
-  const renderer = ['Downloads.tsx', 'AiOrganizer.tsx', 'OrganizerSteps.tsx', 'Settings.tsx']
+  /* Tous les composants, et non une liste écrite à la main : celle-ci ignorait le panneau
+     d'export et signalait donc un bouton qui existait. Une liste à tenir à jour est une liste
+     qui sera en retard. */
+  const renderer = readdirSync('src/renderer/src/components')
+    .filter((name) => name.endsWith('.tsx'))
     .map((name) => code(readFileSync(`src/renderer/src/components/${name}`, 'utf8')))
     .join('\n')
 
   for (const stop of stops) {
-    if (new RegExp(`magpie\\.${stop}\\(`).test(renderer)) pass(`${stop} est appelée`)
+    /* Le motif tolère la coupure de ligne : `magpie` en bout de ligne et l'appel en
+       dessous est la mise en forme habituelle du dépôt, et l'exiger sur une seule ligne
+       faisait signaler un bouton bien présent. */
+    if (new RegExp(`magpie\\s*\\.\\s*${stop}\\(`).test(renderer)) pass(`${stop} est appelée`)
     else fail(`${stop} existe dans le contrat mais aucun bouton ne l’appelle`)
   }
 }

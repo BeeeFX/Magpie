@@ -947,7 +947,15 @@ async function buildVideoCollectionProposal(): Promise<AiCollectionPlan> {
     return { suggestions: [], routes: [], analysedVideos: 0, unassignedVideos: 0 }
   }
 
-  const breathe = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve))
+  /* L'annulation s'accroche ici, et nulle part ailleurs. `breathe` est déjà appelé tous les
+     quatre cents éléments par chaque boucle longue — c'est le seul endroit du calcul où l'on
+     sait qu'on est entre deux unités de travail cohérentes, donc le seul où s'arrêter ne
+     laisse rien à moitié écrit. Il n'y avait aucun moyen d'arrêter une analyse qui dure des
+     heures : l'écran qui la montrait se refermait en silence et elle continuait. */
+  const breathe = (): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      setImmediate(() => (proposalCancelled ? reject(new ProposalCancelled()) : resolve()))
+    })
 
   setProgress({ stage: 'preparing', done: 0, total: items.length, running: true })
   const visuals = await loadVisuals(items)
@@ -1200,8 +1208,30 @@ function withGroups(points: ProjectedPoint[], plan: AiCollectionPlan): Organizer
   })
 }
 
+/** Ce que lève une analyse interrompue. Distincte d'une panne : il n'y a rien à rapporter. */
+export class ProposalCancelled extends Error {
+  constructor() {
+    super('Analyse interrompue')
+    this.name = 'ProposalCancelled'
+  }
+}
+
+let proposalCancelled = false
+
+/**
+ * Demande l'arrêt de l'analyse en cours.
+ *
+ * Le drapeau se lève ; le calcul s'arrête à sa prochaine respiration, c'est-à-dire au plus
+ * tard quelques centaines d'éléments plus loin. Rien n'est écrit en base avant la fin, donc
+ * s'arrêter là ne laisse aucun état intermédiaire.
+ */
+export function stopProposal(): void {
+  if (currentProposal) proposalCancelled = true
+}
+
 export function proposeVideoCollections(): Promise<AiCollectionPlan> {
   if (currentProposal) return currentProposal
+  proposalCancelled = false
   currentProposal = buildVideoCollectionProposal().finally(() => {
     // Sans cela, une analyse qui échoue laisse la tâche « Organisation » affichée pour
     // toujours, et l'indicateur de téléchargement animé avec elle.

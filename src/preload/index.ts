@@ -100,6 +100,7 @@ const api: MagpieApi = {
     ipcRenderer.invoke('ai:setKey', provider, key),
   startAiTagging: (postIds?: string[]): Promise<AiTagProgress> =>
     ipcRenderer.invoke('ai:start', postIds),
+  stopAnalysis: (): Promise<void> => ipcRenderer.invoke('ai:stopProposal'),
   proposeAiCollections: (): Promise<AiCollectionPlan> =>
     ipcRenderer.invoke('ai:proposeCollections'),
   applyAiCollections: (
@@ -114,6 +115,7 @@ const api: MagpieApi = {
   setTaskPaused: (id: string, paused: boolean): Promise<BackgroundState> =>
     ipcRenderer.invoke('tasks:setTaskPaused', id, paused),
   exportLibrary: (): Promise<ExportSummary> => ipcRenderer.invoke('export:run'),
+  stopExport: (): Promise<void> => ipcRenderer.invoke('export:stop'),
   exportPrompt: (): Promise<string> => ipcRenderer.invoke('export:prompt'),
   openExportFolder: (): Promise<void> => ipcRenderer.invoke('export:open'),
   transcriptState: (): Promise<{ pending: number; running: boolean }> =>

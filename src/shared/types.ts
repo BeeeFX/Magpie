@@ -475,6 +475,10 @@ export interface MagpieApi {
   transcriptState(): Promise<{ pending: number; running: boolean }>
   imageReadingState(): Promise<{ pending: number; running: boolean; failure?: string | null }>
   startImageReading(): Promise<BackgroundState>
+  /** Interrompt l'analyse en cours. Elle s'arrête à sa prochaine respiration. */
+  stopAnalysis(): Promise<void>
+  /** Interrompt l'export. Il s'arrête entre deux fiches, jamais au milieu d'une. */
+  stopExport(): Promise<void>
   stopImageReading(): Promise<BackgroundState>
   startTranscription(): Promise<BackgroundState>
   stopTranscription(): Promise<BackgroundState>
@@ -727,6 +731,10 @@ export interface AiCollectionApplyResult {
  * permet de n'avoir qu'un indicateur à regarder — et de tout suspendre d'un geste.
  */
 export type BackgroundTaskKind =
+  /** Le rapatriement des modèles — 688 Mo au premier rangement, et rien ne le disait. */
+  | 'models'
+  /** L'export : une fiche par post, et il ne disait rien pendant neuf mille écritures. */
+  | 'export'
   | 'sync'
   | 'thumbnails'
   | 'clips'

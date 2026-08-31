@@ -74,7 +74,7 @@ import { aiTagger } from './tagging/ai'
 import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
 import { checkForUpdates, getUpdateState, installUpdate } from './updater'
-import { exportDir, exportLibrary, systemPrompt } from './export'
+import { exportDir, exportLibrary, stopExport, systemPrompt } from './export'
 import {
   addKeyword,
   contested,
@@ -93,7 +93,7 @@ import {
   setSize as setCollectionSize
 } from './tagging/collections'
 import {
-  forgetMapCache, buildOrganizerMap, proposeVideoCollections } from './tagging/organize'
+  forgetMapCache, buildOrganizerMap, proposeVideoCollections, stopProposal } from './tagging/organize'
 import { asMapLayout } from './tagging/vision'
 import {
   countPendingTranscripts,
@@ -315,6 +315,7 @@ export function registerIpc({
     return aiTagger.start(postIds?.map(String))
   })
   ipcMain.handle('ai:proposeCollections', () => proposeVideoCollections())
+  ipcMain.handle('ai:stopProposal', () => stopProposal())
   ipcMain.handle(
     'ai:applyCollections',
     (
@@ -423,6 +424,7 @@ export function registerIpc({
   })
 
   ipcMain.handle('export:run', () => exportLibrary(exportLanguage()))
+  ipcMain.handle('export:stop', () => stopExport())
   /* Le chemin part avec les instructions : c'est tout l'intérêt du bouton — on les colle dans
      un assistant, qui doit alors pouvoir ouvrir le dossier sans le demander. */
   ipcMain.handle('export:prompt', () => systemPrompt(exportLanguage(), exportDir()))

@@ -56,7 +56,10 @@ export function ExportPanel(): React.JSX.Element | null {
     try {
       setSummary(await magpie.exportLibrary())
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      /* Un arrêt demandé n'a rien à rapporter : l'afficher en rouge ferait passer un choix de
+         l'utilisateur pour un échec de l'application. */
+      const stopped = reason instanceof Error && /ExportCancelled|Export interrompu/.test(reason.message)
+      if (!stopped) setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
     }
@@ -139,6 +142,14 @@ export function ExportPanel(): React.JSX.Element | null {
           <button type="button" className="btn" onClick={() => void magpie.openExportFolder().catch(reportFailure('notice.openFailed'))}>
             {t('export.openFolder')}
           </button>
+          {/* Neuf mille huit cent cinquante fiches à écrire, et rien pour arrêter. Le
+              compteur vit dans le panneau des téléchargements, avec les autres travaux longs :
+              l'export n'a pas de raison d'inventer son propre affichage. */}
+          {busy ? (
+            <button type="button" className="btn" onClick={() => void magpie.stopExport().catch(reportFailure('notice.unexpected'))}>
+              {t('export.stop')}
+            </button>
+          ) : null}
           <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void run()}>
             <IconSend size={13} />
             {t(busy ? 'export.running' : 'export.run')}

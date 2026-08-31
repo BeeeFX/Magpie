@@ -46,6 +46,25 @@ export type InferenceReply =
   | { id: number; ok: true; kind: 'text'; text: string }
   | { id: number; ok: false; message: string }
 
+/**
+ * Le téléchargement des modèles, pendant qu'il se fait.
+ *
+ * Un premier rangement télécharge **688 Mo** — mesuré — et l'interface n'en disait rien :
+ * « Préparation en cours… », un rond qui tourne, et huit minutes de silence sur une connexion
+ * ordinaire. Rien ne distinguait ce cas d'une application figée.
+ *
+ * `id: 0` parce que ce message ne répond à aucune demande : c'est une diffusion. Les réponses
+ * portent l'identifiant de la demande qu'elles closent, et zéro n'en est jamais un.
+ */
+export interface DownloadProgress {
+  id: 0
+  kind: 'download'
+  /** Le fichier en cours, tel que la bibliothèque le nomme. */
+  file: string
+  loaded: number
+  total: number
+}
+
 /** Préfixe attendu par la famille e5, des deux côtés pour une comparaison symétrique. */
 const TEXT_PREFIX = 'query: '
 
@@ -97,9 +116,35 @@ type Extractor = (
   options: { pooling: 'mean'; normalize: boolean }
 ) => Promise<{ data: Float32Array; dims: number[] }>
 
+/**
+ * Ce que la bibliothèque rapporte pendant un téléchargement, réémis vers l'hôte.
+ *
+ * On ne garde que `status: 'progress'` : les autres étapes — `initiate`, `done`, `ready` —
+ * ne portent pas d'octets, et les relayer ferait clignoter la barre entre chaque fichier.
+ */
+function watchDownload(event: {
+  status?: string
+  file?: string
+  loaded?: number
+  total?: number
+}): void {
+  if (event.status !== 'progress' || !event.total) return
+  const message: DownloadProgress = {
+    id: 0,
+    kind: 'download',
+    file: event.file ?? '',
+    loaded: event.loaded ?? 0,
+    total: event.total
+  }
+  process.parentPort.postMessage(message)
+}
+
 const textEncoder = once(async (): Promise<Extractor> => {
   const { pipeline } = await library()
-  return (await pipeline('feature-extraction', TEXT_MODEL, { dtype: 'q8' })) as unknown as Extractor
+  return (await pipeline('feature-extraction', TEXT_MODEL, {
+    dtype: 'q8',
+    progress_callback: watchDownload
+  })) as unknown as Extractor
 })
 
 interface Encoders {
@@ -111,11 +156,16 @@ interface Encoders {
 const imageEncoders = once(async (): Promise<Encoders> => {
   const { AutoModel, AutoProcessor, SiglipVisionModel } = await library()
   const [structureProcessor, structureModel, meaningModel] = await Promise.all([
-    AutoProcessor.from_pretrained(STRUCTURE_MODEL),
-    AutoModel.from_pretrained(STRUCTURE_MODEL, { dtype: 'q8' }),
-    SiglipVisionModel.from_pretrained(MEANING_MODEL, { dtype: 'q8' })
+    AutoProcessor.from_pretrained(STRUCTURE_MODEL, { progress_callback: watchDownload }),
+    AutoModel.from_pretrained(STRUCTURE_MODEL, { dtype: 'q8', progress_callback: watchDownload }),
+    SiglipVisionModel.from_pretrained(MEANING_MODEL, {
+      dtype: 'q8',
+      progress_callback: watchDownload
+    })
   ])
-  const meaningProcessor = await AutoProcessor.from_pretrained(MEANING_MODEL)
+  const meaningProcessor = await AutoProcessor.from_pretrained(MEANING_MODEL, {
+    progress_callback: watchDownload
+  })
   return {
     process: async (image) => ({
       structure: await structureProcessor(image as never),
@@ -130,8 +180,13 @@ type Tower = (prompts: string[]) => Promise<{ flat: Float32Array; width: number 
 
 const promptEncoder = once(async (): Promise<Tower> => {
   const { AutoTokenizer, SiglipTextModel } = await library()
-  const tokenizer = await AutoTokenizer.from_pretrained(MEANING_MODEL)
-  const model = await SiglipTextModel.from_pretrained(MEANING_MODEL, { dtype: 'q8' })
+  const tokenizer = await AutoTokenizer.from_pretrained(MEANING_MODEL, {
+    progress_callback: watchDownload
+  })
+  const model = await SiglipTextModel.from_pretrained(MEANING_MODEL, {
+    dtype: 'q8',
+    progress_callback: watchDownload
+  })
   return async (prompts) => {
     /* SigLIP est entraîné avec un remplissage fixe à 64 jetons. Laisser le remplissage par
        défaut décale les positions et rend les vecteurs inutilisables : mesuré, la justesse
@@ -157,7 +212,8 @@ type Recogniser = (
 const speechRecogniser = once(async (): Promise<Recogniser> => {
   const { pipeline } = await library()
   return (await pipeline('automatic-speech-recognition', SPEECH_MODEL, {
-    dtype: 'q8'
+    dtype: 'q8',
+    progress_callback: watchDownload
   })) as unknown as Recogniser
 })
 

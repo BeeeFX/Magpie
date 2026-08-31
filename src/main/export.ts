@@ -1,6 +1,7 @@
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { dataDir, getDb } from './db'
+import { backgroundTasks } from './tasks'
 import type { ExportSummary } from '@shared/types'
 
 /**
@@ -166,7 +167,35 @@ it is silent.`
  * Écrit le dossier. Incrémental : une fiche dont le post n'a pas changé n'est pas réécrite,
  * ce qui rend un réexport quasi gratuit sur une grande bibliothèque.
  */
+/**
+ * L'export dit où il en est, et peut s'arrêter.
+ *
+ * Il écrit une fiche par post — neuf mille huit cent cinquante — plus les collections et les
+ * transcriptions, et le bouton se contentait de passer sur « Export… » puis d'attendre. Aucun
+ * compteur, aucune annulation, et si la fenêtre se refermait entre-temps, rien ne disait où le
+ * dossier en était resté.
+ *
+ * Le registre des tâches sert de canal : c'est déjà lui qui porte les autres travaux longs, il
+ * traverse jusqu'à l'icône de la barre système, et l'export n'avait aucune raison d'inventer le
+ * sien.
+ */
+const EXPORT_TASK = 'export'
+let exportCancelled = false
+
+/** Demande l'arrêt de l'export. Il s'arrête entre deux fiches, jamais au milieu d'une. */
+export function stopExport(): void {
+  exportCancelled = true
+}
+
+export class ExportCancelled extends Error {
+  constructor() {
+    super('Export interrompu')
+    this.name = 'ExportCancelled'
+  }
+}
+
 export async function exportLibrary(language: 'fr' | 'en'): Promise<ExportSummary> {
+  exportCancelled = false
   const root = exportDir()
   const sheets = join(root, 'fiches')
   const indexDir = join(root, 'index')
@@ -188,7 +217,21 @@ export async function exportLibrary(language: 'fr' | 'en'): Promise<ExportSummar
   let written = 0
   let transcripts = 0
 
+  backgroundTasks.update(EXPORT_TASK, { kind: 'export', done: 0, total: rows.length })
+  let index = 0
   for (const row of rows) {
+    /* Entre deux fiches : une fiche à moitié écrite serait un fichier corrompu, et le coût
+       d'attendre la fin de celle en cours est d'une écriture. */
+    if (exportCancelled) {
+      backgroundTasks.clear(EXPORT_TASK)
+      throw new ExportCancelled()
+    }
+    index += 1
+    /* Un rafraîchissement toutes les vingt-cinq fiches : le registre diffuse à chaque
+       changement, et neuf mille huit cents notifications coûteraient plus cher que l'export. */
+    if (index % 25 === 0 || index === rows.length) {
+      backgroundTasks.update(EXPORT_TASK, { kind: 'export', done: index, total: rows.length })
+    }
     const name = `${slug(row.id)}.md`
     wanted.add(name)
     const collections = row.collections?.split(' | ').filter(Boolean) ?? []
@@ -293,6 +336,7 @@ export async function exportLibrary(language: 'fr' | 'en'): Promise<ExportSummar
     }
   }
 
+  backgroundTasks.clear(EXPORT_TASK)
   return {
     path: root,
     posts: rows.length,
