@@ -1,5 +1,11 @@
 import { BULK_MAX, DEFAULT_QUERY, type PostQuery } from '../src/shared/types'
-import { activeFilterCount, clearedQuery, selectionSurvives } from '../src/renderer/src/query'
+import {
+  activeCategoryCount,
+  activeFilterCount,
+  clearedQuery,
+  emptyReason,
+  selectionSurvives
+} from '../src/renderer/src/query'
 import { chunk } from '../src/renderer/src/selection'
 
 /**
@@ -96,6 +102,57 @@ console.log('\nle découpage ne perd rien')
   assert(slices.every((slice) => slice.length <= BULK_MAX), 'aucune tranche ne dépasse le plafond')
   assert(slices.flat().join() === ids.join(), 'l’ordre est conservé')
   assert(chunk([]).length === 0, 'une sélection vide ne produit aucun envoi')
+}
+
+console.log('\nl’écran vide nomme ce qui l’a vidé')
+{
+  /* Le défaut, énoncé comme propriété : un écran vide sans aucun filtre posé ne doit **jamais**
+     proposer d'effacer les filtres, puisque `clearedQuery` garde la catégorie et qu'il n'y a
+     donc rien à effacer. Sur une installation neuve, cliquer sur « Favoris » avec zéro favori
+     donnait exactement cela — un message sur les filtres et un bouton incapable d'en sortir. */
+  assert(
+    emptyReason({ ...DEFAULT_QUERY, favoritesOnly: true }).kind === 'category',
+    'des favoris vides sont une catégorie, pas un filtre trop strict'
+  )
+  assert(
+    emptyReason({ ...DEFAULT_QUERY, collectionIds: [3] }).kind === 'category',
+    'une collection vide aussi'
+  )
+  assert(
+    emptyReason({ ...DEFAULT_QUERY, tags: ['blender'] }).kind === 'category',
+    'un tag sans post aussi'
+  )
+  assert(
+    emptyReason({ ...DEFAULT_QUERY, sources: ['liked'] }).kind === 'category',
+    'une provenance vide aussi'
+  )
+  assert(emptyReason(DEFAULT_QUERY).kind === 'library', 'sans rien de posé, c’est la bibliothèque')
+
+  /* La propriété qui lie les deux fonctions : là où l'écran parle de filtres, effacer les
+     filtres change vraiment quelque chose. */
+  const withFilters = { ...DEFAULT_QUERY, favoritesOnly: true, untaggedOnly: true, search: 'x' }
+  const reason = emptyReason(withFilters)
+  assert(reason.kind === 'filters', 'un filtre posé passe avant la catégorie : c’est le geste récent')
+  assert(
+    activeFilterCount(clearedQuery(withFilters)) === 0,
+    'et l’effacer mène bien à zéro filtre'
+  )
+  /* Puis, une fois les filtres levés, l'écran bascule sur la catégorie et propose l'autre
+     sortie. C'est la progression qui manquait : deux boutons morts au lieu d'un chemin. */
+  assert(
+    emptyReason(clearedQuery(withFilters)).kind === 'category',
+    'et l’écran nomme alors la catégorie, qui est la sortie suivante'
+  )
+
+  /* Une catégorie ne se compte pas comme un filtre : c'est ce qui garde le badge honnête. */
+  assert(
+    activeFilterCount({ ...DEFAULT_QUERY, favoritesOnly: true, collectionIds: [1] }) === 0,
+    'la catégorie ne gonfle pas le badge du menu Filtres'
+  )
+  assert(
+    activeCategoryCount({ ...DEFAULT_QUERY, favoritesOnly: true, collectionIds: [1] }) === 2,
+    'elle se compte à part'
+  )
 }
 
 console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} échec(s).`)

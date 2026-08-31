@@ -89,6 +89,11 @@ const fr = {
 
   'grid.noMatch': 'Aucun signet ne correspond à ces filtres.',
   'grid.clearFilters': 'Effacer les filtres',
+  'grid.emptyFavorites': 'Aucun favori pour l’instant.',
+  'grid.emptyCollection': 'Cette collection est vide.',
+  'grid.emptyTag': 'Aucun post ne porte ce tag.',
+  'grid.emptySource': 'Rien dans cette provenance.',
+  'grid.showAll': 'Voir toute la bibliothèque',
   'grid.emptyTitle': 'Rien à afficher pour l’instant',
   'grid.emptyText':
     'Connectez Instagram ou X : Magpie rassemblera vos signets, vos likes, ou les deux.',
@@ -769,6 +774,11 @@ const en: Record<TranslationKey, string> = {
 
   'grid.noMatch': 'No bookmarks match these filters.',
   'grid.clearFilters': 'Clear filters',
+  'grid.emptyFavorites': 'No favourites yet.',
+  'grid.emptyCollection': 'This collection is empty.',
+  'grid.emptyTag': 'Nothing carries this tag.',
+  'grid.emptySource': 'Nothing from this source.',
+  'grid.showAll': 'See the whole library',
   'grid.emptyTitle': 'Nothing here yet',
   'grid.emptyText':
     'Connect Instagram or X and Magpie will bring together your bookmarks, likes, or both.',

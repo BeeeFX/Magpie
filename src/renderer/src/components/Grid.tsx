@@ -3,7 +3,9 @@ import type { Post } from '@shared/types'
 import { magpie } from '../bridge'
 import { alignItemsToPosts, computeLayout, visibleItems } from '../layout'
 import { reportFailure } from '../notices'
+import type { TranslationKey } from '../i18n'
 import { shouldPrefetch } from '../paging'
+import { emptyReason } from '../query'
 import { useStore, useT } from '../store'
 import { Card } from './Card'
 
@@ -15,10 +17,20 @@ const GAP = 16
 const PREFETCH_MARGIN_MIN = 1200
 const PREFETCH_MARGIN_MAX = 40000
 
+/** Ce que l'écran vide dit, selon ce qui l'a vidé. */
+const EMPTY_TEXT = {
+  filters: 'grid.noMatch',
+  favorites: 'grid.emptyFavorites',
+  collection: 'grid.emptyCollection',
+  tag: 'grid.emptyTag',
+  source: 'grid.emptySource'
+} as const satisfies Record<string, TranslationKey>
+
 export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
   const clearFilters = useStore((s) => s.clearFilters)
+  const resetQuery = useStore((s) => s.resetQuery)
   const loadError = useStore((s) => s.loadError)
   const refresh = useStore((s) => s.refresh)
   const layoutRevision = useStore((s) => s.layoutRevision)
@@ -41,6 +53,8 @@ export function Grid(): React.JSX.Element {
   const toggleSelected = useStore((s) => s.toggleSelected)
 
   const query = useStore((s) => s.query)
+  /* Ce qui a vidé l'écran décide de la sortie qu'on propose. */
+  const empty = emptyReason(query)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState({ width: 0, height: 0 })
   const [layoutWidth, setLayoutWidth] = useState(0)
@@ -320,14 +334,23 @@ export function Grid(): React.JSX.Element {
                 {t('grid.retry')}
               </button>
             </div>
-          ) : accounts.some((a) => a.connected) ? (
-            /* Une phrase sans issue : on ne se souvient pas toujours de ce qu'on a coché,
-               et il fallait retrouver chaque filtre pour le décocher un par un. */
+          ) : accounts.some((a) => a.connected) && empty.kind !== 'library' ? (
+            /* La sortie doit correspondre à ce qui a vidé l'écran. Ce bouton était proposé
+               **sans condition**, et il appelle `clearFilters`, qui garde délibérément la
+               catégorie : sur une installation neuve, un clic sur « Favoris » — zéro favori —
+               donnait « Aucun signet ne correspond à ces filtres » et un bouton incapable
+               d'en sortir, puisqu'aucun filtre n'était posé. */
             <div className="empty-state empty-state--tight">
-              <p>{t('grid.noMatch')}</p>
-              <button type="button" className="btn" onClick={clearFilters}>
-                {t('grid.clearFilters')}
-              </button>
+              <p>{t(EMPTY_TEXT[empty.kind === 'filters' ? 'filters' : empty.axis])}</p>
+              {empty.kind === 'filters' ? (
+                <button type="button" className="btn" onClick={clearFilters}>
+                  {t('grid.clearFilters')}
+                </button>
+              ) : (
+                <button type="button" className="btn" onClick={resetQuery}>
+                  {t('grid.showAll')}
+                </button>
+              )}
             </div>
           ) : (
             <div className="empty-state">

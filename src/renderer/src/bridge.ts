@@ -8,6 +8,7 @@ import type {
   Platform,
   Post,
   PostPage,
+  PostQuery,
   Settings,
   SyncState,
   UpdateState
@@ -133,14 +134,47 @@ function previewSettings(): Settings {
   return { ...PREVIEW_DEFAULTS }
 }
 
+/**
+ * L'aperçu applique la requête, au moins pour ce qui peut vider l'écran.
+ *
+ * Il rendait la bibliothèque entière quoi qu'on demande, si bien qu'**aucun état vide n'y
+ * était atteignable** : cliquer sur « Favoris » sans favori affichait quand même le mur. Or les
+ * états vides sont exactement ce qu'on vient de corriger, et ce sont ceux qu'on ne voit jamais
+ * en développant — on a toujours des posts sous la main.
+ *
+ * Ce n'est pas le vrai SQL et ça n'a pas à l'être : ce qu'on relit ici, c'est quelle sortie
+ * l'écran propose quand il n'a rien à montrer.
+ */
+function previewFilter(posts: Post[], query: PostQuery): Post[] {
+  const needle = query.search.trim().toLowerCase()
+  return posts.filter((post) => {
+    if (query.favoritesOnly && !post.isFavorite) return false
+    if (query.platforms.length > 0 && !query.platforms.includes(post.platform)) return false
+    if (query.kinds.length > 0 && !query.kinds.includes(post.kind)) return false
+    if (query.untaggedOnly && post.tags.length > 0) return false
+    if (query.label && post.label !== query.label) return false
+    if (query.tags.length > 0 && !post.tags.some((tag) => query.tags.includes(tag.name))) {
+      return false
+    }
+    /* Les collections ne sont pas dans la fixture : une collection choisie est donc toujours
+       vide ici, ce qui est précisément l'état qu'on veut pouvoir regarder. */
+    if (query.collectionIds.length > 0) return false
+    if (needle) {
+      const hay = `${post.text ?? ''} ${post.authorName ?? ''}`
+      if (!hay.toLowerCase().includes(needle)) return false
+    }
+    return true
+  })
+}
+
 const previewApi: MagpieApi = {
   listPosts: () => previewPosts(),
-  listPostPage: async (_query, offset, limit): Promise<PostPage> => {
-    const posts = await previewPosts()
+  listPostPage: async (query, offset, limit): Promise<PostPage> => {
+    const posts = previewFilter(await previewPosts(), query)
     const page = posts.slice(offset, offset + limit)
     return { posts: page, total: posts.length, offset, hasMore: offset + page.length < posts.length }
   },
-  listPostIds: async () => (await previewPosts()).map((post) => post.id),
+  listPostIds: async (query) => previewFilter(await previewPosts(), query).map((post) => post.id),
   createCollectionFromPhrase: async () => 0,
   createManualCollection: async () => 0,
   deleteCollection: async () => {},
