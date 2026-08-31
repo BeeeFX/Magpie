@@ -40,12 +40,16 @@ export function imageReadingFailure(): string | null {
   return failure
 }
 
+/* L'identifiant de la tâche, nommé une fois : c'est lui que le registre range et que
+   l'interface suspend, et les deux boucles ci-dessous doivent lire exactement celui-là. */
+const TASK = 'read:images'
+
 export async function readAllImages(): Promise<void> {
   if (running) return
   running = true
   stopped = false
   failure = null
-  const task = 'read:images'
+  const task = TASK
   /* La tache est declaree avant toute lecture de la base : c'est elle qui dit a l'ecran de
      preparation que l'etape a demarre. Sans elle, l'ecran attend huit secondes puis conclut
      « terminee » — ce qui a fait passer un plantage immediat pour un succes. */
@@ -69,7 +73,8 @@ export async function readAllImages(): Promise<void> {
     const frames = await videoFrames({
       clips: cached,
       only: framesNeeded(cached),
-      shouldStop: () => stopped || backgroundTasks.isPaused(),
+      shouldStop: () =>
+        stopped || backgroundTasks.isPaused() || backgroundTasks.isTaskPaused(TASK),
       /* Le total grandit au premier rapport : le nombre de clips n'est connu qu'ici, et
          l'annoncer d'avance demanderait une requête de plus pour le même chiffre. */
       onProgress: (done, total) => {
@@ -80,7 +85,8 @@ export async function readAllImages(): Promise<void> {
     const result = await readImages({
       framesFor: (postId) => frames.get(postId) ?? null,
       clipOf: (postId) => clipOf.get(postId) ?? null,
-      shouldStop: () => stopped || backgroundTasks.isPaused(),
+      shouldStop: () =>
+        stopped || backgroundTasks.isPaused() || backgroundTasks.isTaskPaused(TASK),
       // Les clips sont derrière nous : l'encodage reprend le décompte là où ils l'ont laissé.
       onProgress: ({ done, total }) =>
         backgroundTasks.update(task, { kind: 'images', done: clips + done, total: clips + total })

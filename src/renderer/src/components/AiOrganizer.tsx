@@ -7,6 +7,7 @@ import type {
   OrganizerUndoResult
 } from '@shared/types'
 import { AFTER_SYNC_STEPS } from '@shared/types'
+import { STEP_ORDER, type StepId, type StepState } from '../steps'
 import { magpie, magpieEvents } from '../bridge'
 import { useClosing } from '../useClosing'
 import { useModalFocus } from '../useModalFocus'
@@ -70,13 +71,25 @@ export function AiOrganizer({ open, onClose: requestClose }: Props): React.JSX.E
   /** Coupe tout ce que la préparation a pu lancer, quelle qu'en soit l'étape. */
   const stopEverything = useCallback(async (): Promise<void> => {
     setStepsRunning(false)
-    setStepStates({ sync: 'todo', thumbnails: 'todo', clips: 'todo', transcribe: 'todo', group: 'todo' })
+    /* La liste vient de `STEP_ORDER` : écrite à la main, elle oubliait `images` — l'étape
+       repassait donc à « à faire » sans jamais avoir été remise à zéro, et les cinq autres
+       devaient être recopiées à chaque ajout d'étape. */
+    setStepStates(
+      Object.fromEntries(STEP_ORDER.map((step) => [step, 'todo' as StepState])) as Record<
+        StepId,
+        StepState
+      >
+    )
     /* `allSettled` ne rejette jamais : chaque arrêt qui échoue est simplement noté, et les
-       autres continuent. Couper une préparation ne doit pas dépendre du succès des quatre. */
+       autres continuent. Couper une préparation ne doit pas dépendre du succès des cinq.
+
+       La lecture d'images manquait : « Tout couper » coupait quatre étapes sur cinq et la
+       cinquième continuait à tourner, sans rien à l'écran pour le dire. */
     const stops = await Promise.allSettled([
       cancelSync(),
       magpie.stopPreload('thumbnails'),
       magpie.stopPreload('clips'),
+      magpie.stopImageReading(),
       magpie.stopTranscription()
     ])
     for (const stop of stops) {

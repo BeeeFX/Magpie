@@ -315,9 +315,23 @@ function TaskRow({
   const done = Math.min(task.done, task.total || task.done)
   const percent = task.total > 0 ? Math.min(100, (done / task.total) * 100) : null
   /* La transcription dure des heures : ne pas pouvoir l'arrêter était le pire cas. Le
-     regroupement et la synchronisation, eux, se terminent d'eux-mêmes en peu de temps. */
+     regroupement et la synchronisation, eux, se terminent d'eux-mêmes en peu de temps.
+
+     La lecture d'images manquait : `stopImageReading` existait dans le contrat, était
+     implémentée côté principal, et **n'était appelée nulle part**. Dix minutes de travail sur
+     une bibliothèque de neuf mille posts, dont la seule sortie était « Tout suspendre ». */
   const stoppable =
-    task.kind === 'thumbnails' || task.kind === 'clips' || task.kind === 'transcribe'
+    task.kind === 'thumbnails' ||
+    task.kind === 'clips' ||
+    task.kind === 'transcribe' ||
+    task.kind === 'images'
+
+  /* Une pause qui ne suspend rien vaut moins qu'une pause absente : elle fait croire que le
+     travail s'est arrêté. La synchronisation et le regroupement n'ont pas de boucle qui
+     consulte ce drapeau — personne ne le lit pour elles — et rien ne serait gagné à leur en
+     donner une : elles se terminent d'elles-mêmes en peu de temps, et une synchronisation
+     suspendue à mi-course laisserait un curseur de pagination dans un état ambigu. */
+  const pausable = task.kind !== 'sync' && task.kind !== 'organizer'
 
   return (
     <li className={`downloads__task ${halted ? 'is-paused' : ''}`}>
@@ -326,15 +340,17 @@ function TaskRow({
           {t(`downloads.kind.${task.kind}` as Parameters<typeof t>[0])}
           {task.scope ? <em>{task.scope}</em> : null}
         </span>
-        <button
-          type="button"
-          className="icon-btn-ghost"
-          title={t(task.paused ? 'downloads.resume' : 'downloads.pauseAll')}
-          aria-label={t(task.paused ? 'downloads.resume' : 'downloads.pauseAll')}
-          onClick={onToggle}
-        >
-          {task.paused ? <IconPlay size={12} /> : <IconPause size={12} />}
-        </button>
+        {pausable ? (
+          <button
+            type="button"
+            className="icon-btn-ghost"
+            title={t(task.paused ? 'downloads.resume' : 'downloads.pauseAll')}
+            aria-label={t(task.paused ? 'downloads.resume' : 'downloads.pauseAll')}
+            onClick={onToggle}
+          >
+            {task.paused ? <IconPlay size={12} /> : <IconPause size={12} />}
+          </button>
+        ) : null}
         {stoppable ? (
           <button
             type="button"
@@ -344,7 +360,9 @@ function TaskRow({
             onClick={() =>
               void (task.kind === 'transcribe'
                 ? magpie.stopTranscription()
-                : magpie.stopPreload(task.kind as 'thumbnails' | 'clips')
+                : task.kind === 'images'
+                  ? magpie.stopImageReading()
+                  : magpie.stopPreload(task.kind as 'thumbnails' | 'clips')
               )
                 .then(onStop)
                 .catch(reportFailure('notice.unexpected'))

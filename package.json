@@ -18,7 +18,7 @@
     "start": "electron-vite preview",
     "preview:web": "tsx --tsconfig tsconfig.node.json scripts/preview-renderer.ts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "verify": "npm run typecheck && npm run check:hooks && npm run check:notices && npm run check:a11y && npm run check:i18n && npm run check:messages && npm run check:query && npm run check:paging && npm run check:layout && npm run check:boundaries && npm run check:models && npm run check:search && npm run check:schema && npm run check:cache-budget && npm run check:library-guard && npm run check:organizer && npm run check:media && npm run check:embeddings && npm run check:islands && npm run check:map-density && npm run check:map-links && npm run check:map-pan && npm run check:map-levels && npm run build && npm run check:map",
+    "verify": "npm run typecheck && npm run check:hooks && npm run check:notices && npm run check:a11y && npm run check:i18n && npm run check:messages && npm run check:query && npm run check:paging && npm run check:layout && npm run check:boundaries && npm run check:tasks && npm run check:models && npm run check:search && npm run check:schema && npm run check:cache-budget && npm run check:library-guard && npm run check:organizer && npm run check:media && npm run check:embeddings && npm run check:islands && npm run check:map-density && npm run check:map-links && npm run check:map-pan && npm run check:map-levels && npm run build && npm run check:map",
     "fixture": "tsx scripts/make-fixture.ts",
     "check:layout": "tsx scripts/check-layout.ts",
     "check:i18n": "tsx --tsconfig tsconfig.node.json scripts/check-i18n.ts",
@@ -63,7 +63,8 @@
     "map:regions": "tsx --tsconfig tsconfig.node.json scripts/map-regions-preview.mts",
     "check:messages": "tsx scripts/check-messages.ts",
     "check:ci": "tsx scripts/check-ci.ts",
-    "check:models": "tsx --tsconfig tsconfig.node.json scripts/check-models.ts"
+    "check:models": "tsx --tsconfig tsconfig.node.json scripts/check-models.ts",
+    "check:tasks": "tsx --tsconfig tsconfig.node.json scripts/check-tasks.ts"
   },
   "dependencies": {
     "@fontsource-variable/plus-jakarta-sans": "^5.3.0",

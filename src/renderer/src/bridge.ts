@@ -114,7 +114,12 @@ const PREVIEW_TASKS = {
   cacheLimitBytes: 5 * 1024 ** 3,
   tasks: [
     { id: 'preload:thumbnails', kind: 'thumbnails' as const, scope: null, done: 412, total: 1240, etaMs: 260_000, paused: false, message: null },
-    { id: 'preload:clips', kind: 'clips' as const, scope: 'blender', done: 12, total: 318, etaMs: 1_500_000, paused: false, message: null }
+    { id: 'preload:clips', kind: 'clips' as const, scope: 'blender', done: 12, total: 318, etaMs: 1_500_000, paused: false, message: null },
+    /* Les cinq genres, pour que les commandes de chaque ligne se relisent ici : la pause n'a
+       de sens que là où une boucle la tient, et l'arrêt que là où une commande existe. */
+    { id: 'read:images', kind: 'images' as const, scope: null, done: 1840, total: 9850, etaMs: 505_000, paused: false, message: null },
+    { id: 'sync:instagram', kind: 'sync' as const, scope: 'Instagram', done: 3, total: 0, etaMs: null, paused: false, message: null },
+    { id: 'organizer', kind: 'organizer' as const, scope: null, done: 0, total: 0, etaMs: null, paused: false, message: null }
   ]
 }
 

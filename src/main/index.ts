@@ -617,7 +617,11 @@ function awaitPreload(kind: 'thumbnails' | 'clips'): Promise<void> {
   if (!preloads.has(id)) return Promise.resolve()
   return new Promise((resolve) => {
     const timer = setInterval(() => {
-      if (preloads.has(id) && !backgroundTasks.isPaused()) return
+      /* Suspendue seule, la tâche n'avancera pas davantage que suspendue globalement :
+         attendre ici serait attendre pour toujours. */
+      if (preloads.has(id) && !backgroundTasks.isPaused() && !backgroundTasks.isTaskPaused(id)) {
+        return
+      }
       clearInterval(timer)
       resolve()
     }, 1000)
@@ -715,8 +719,20 @@ async function drainMediaQueue(): Promise<void> {
 
       // Les cartes visibles passent toujours devant : pendant un préchargement, on ne veut
       // pas regarder un mur vide en attendant que la passe de fond arrive jusqu'à nous.
-      const thumbnailJob = preloads.get('preload:thumbnails')
-      const clipJob = preloads.get('preload:clips')
+      /* Une tâche suspendue n'est plus choisie pour la passe. C'est ce qui rend le bouton
+         pause de chaque ligne réel : il écrivait bien `entry.paused`, mais **personne ne le
+         lisait ici** — seule la transcription consultait son propre drapeau. Suspendre
+         « Images des tuiles » faisait donc basculer la ligne sur « En pause », arrêtait
+         l'animation de la barre, effaçait la durée restante — et le travail continuait, le
+         disque et le processeur avec.
+         Le suspendre ici plutôt qu'à l'entrée de la boucle laisse l'autre tâche avancer :
+         mettre les clips en pause ne doit pas arrêter les vignettes. */
+      const thumbnailJob = backgroundTasks.isTaskPaused('preload:thumbnails')
+        ? undefined
+        : preloads.get('preload:thumbnails')
+      const clipJob = backgroundTasks.isTaskPaused('preload:clips')
+        ? undefined
+        : preloads.get('preload:clips')
       // Les vignettes avant les clips : mille fois plus légères, et c'est ce qui se voit.
       const sweeping = requested.length === 0 ? (thumbnailJob ?? clipJob) : undefined
       const sweepingClips = sweeping !== undefined && sweeping === clipJob && !thumbnailJob
