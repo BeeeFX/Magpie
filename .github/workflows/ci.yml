@@ -34,61 +34,20 @@ jobs:
           }
           exit 1
 
-      - name: Type checking
-        run: npm run typecheck
+      # Les contrôles sont énumérés une seule fois, dans le script `verify` du package.json,
+      # et les deux workflows appellent celui-ci.
+      #
+      # Ils étaient énumérés ici, à la main. Sur vingt-six scripts `check:`, treize passaient
+      # dans ce fichier et **quatre** dans celui de la publication — c'est-à-dire qu'une
+      # release pouvait partir avec le schéma dérivé, des traductions manquantes et la carte
+      # cassée. Deux listes tenues à la main divergent ; celle-ci était en retard de sept
+      # contrôles, tous écrits pour rejouer un défaut déjà livré une fois.
+      #
+      # `check:ci` interdit désormais d'ajouter un contrôle sans le brancher : tout script
+      # `check:*` doit être dans `verify`, ou dans la liste d'exclusions motivée de
+      # `scripts/check-ci.ts`.
+      - name: Check wiring
+        run: npm run check:ci
 
-      - name: Layout checks
-        run: npm run check:layout
-
-      - name: Local organiser checks
-        run: npm run check:organizer
-
-      - name: Media streaming checks
-        run: npm run check:media
-
-      # Les contrôles ci-dessous ne demandaient aucune base et ne tournaient nulle part :
-      # sur douze scripts `check:`, quatre seulement passaient ici. Celui du schéma est le
-      # plus important — c’est lui qui aurait attrapé `map_labels`, absente de SCHEMA_SQL
-      # et donc de toute installation neuve pendant dix versions.
-      - name: Schema checks
-        run: npm run check:schema
-
-      - name: Cache budget checks
-        run: npm run check:cache-budget
-
-      - name: Library guard checks
-        run: npm run check:library-guard
-
-      - name: Embedding checks
-        run: npm run check:embeddings
-
-      - name: Map density checks
-        run: npm run check:map-density
-
-      - name: Boundary checks
-        run: npm run check:boundaries
-
-      # Les dictionnaires : un nettoyage a déjà emporté cinq clés assemblées à la volée, et les
-      # boutons se sont affichés vides. Le contrôle est une seconde de lecture de données.
-      - name: Dictionary checks
-        run: npm run check:i18n
-
-      # La carte : le voisinage de la toile doit relier exactement les mêmes points qu'avant
-      # sa réécriture, et un glissement continu ne doit pas relancer le tracé à chaque image.
-      # Deux calculs purs, donc rien n'empêche de les vérifier ici.
-      - name: Map web and pan checks
-        run: npm run check:map-links && npm run check:map-pan && npm run check:map-levels
-
-      # Régions du relief et rangement en damier : de la géométrie pure, sans base ni modèle,
-      # donc rien n'empêche de la vérifier ici — et c'est le seul endroit où la méthode
-      # hongroise et la fusion par persistance sont éprouvées sur des cas dont on connaît la
-      # réponse.
-      - name: Region and grid checks
-        run: npm run check:islands
-
-      - name: Production build
-        run: npm run build
-
-      # Après la compilation : il inspecte le fil de projection dans la sortie de build.
-      - name: Map checks
-        run: npm run check:map
+      - name: Verify
+        run: npm run verify

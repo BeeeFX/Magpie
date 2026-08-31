@@ -39,12 +39,17 @@ jobs:
           }
           exit 1
 
+      # Quatre contrôles sur vingt-six passaient ici — c'est-à-dire qu'une release pouvait
+      # partir avec le schéma dérivé, des traductions manquantes, la carte cassée et chacun
+      # des défauts que les autres contrôles existent pour rejouer. Le pipeline qui *publie*
+      # vérifiait moins que celui qui relit une pull request.
+      #
+      # La liste vit maintenant dans le script `verify` du package.json, une seule fois, et
+      # `check:ci` interdit d'y ajouter un contrôle sans le brancher.
       - name: Verify source
         run: |
-          npm run typecheck
-          npm run check:layout
-          npm run check:organizer
-          npm run check:media
+          npm run check:ci
+          npm run verify
 
       - name: Build installer and update manifest
         shell: pwsh
