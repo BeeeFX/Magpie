@@ -5,7 +5,7 @@ import type {
   OrganizerProgress
 } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
-import { reportFailure } from '../notices'
+import { notifyError, reportFailure } from '../notices'
 import { displayName } from '../format'
 import { useStore, useT } from '../store'
 import type { TranslationKey } from '../i18n'
@@ -176,7 +176,7 @@ export function LibraryMap(): React.JSX.Element {
     void magpie
       .collectionMembership()
       .then(setRooms)
-      .catch((error) => console.warn('[magpie] Collections illisibles', error))
+      .catch(reportFailure('notice.mapRoomsFailed'))
   }, [heat?.token])
 
   useEffect(() => {
@@ -185,7 +185,7 @@ export function LibraryMap(): React.JSX.Element {
       .then(setOwnLabels)
       // Une table absente ou illisible ne doit pas emporter l'écran, mais l'avaler en silence
       // faisait d'une fonction morte une fonction qu'on croyait vivante.
-      .catch((error) => console.warn('[magpie] Étiquettes de carte illisibles', error))
+      .catch(reportFailure('notice.mapLabelsFailed'))
   }, [])
 
   /**
@@ -204,8 +204,10 @@ export function LibraryMap(): React.JSX.Element {
       .then((ids) => {
         if (!cancelled) setVisibleIds(new Set(ids))
       })
-      .catch((error) => {
-        console.warn('[magpie] Filtre de carte indisponible', error)
+      .catch((error: unknown) => {
+        /* Le repli montre la bibliothèque entière : sans un mot, la carte a l'air d'ignorer
+           le filtre posé juste à côté, ce qui est indiscernable d'un bug de la projection. */
+        notifyError('notice.mapFilterFailed', error)
         if (!cancelled) setVisibleIds(null)
       })
     return () => {
@@ -485,10 +487,16 @@ export function LibraryMap(): React.JSX.Element {
         onOpen={(point) => setPanelPostId(point.id)}
         ownLabels={ownLabels}
         onRemoveLabel={(id) => {
+          /* Le retrait s'affiche d'abord, puis se défait si l'écriture échoue. C'est la règle
+             du store, qui manquait ici : le correctif optimiste ne doit pas rester posé sur
+             une écriture qui n'a pas eu lieu. On retirait l'étiquette de l'écran, la base la
+             gardait, et elle revenait à la réouverture sans que rien ne l'ait annoncé. */
+          const removed = ownLabels.find((label) => label.id === id)
           setOwnLabels((current) => current.filter((label) => label.id !== id))
-          void magpie
-            .deleteMapLabel(id)
-            .catch((error) => console.warn('[magpie] Étiquette non retirée', error))
+          void magpie.deleteMapLabel(id).catch((error: unknown) => {
+            if (removed) setOwnLabels((current) => [...current, removed])
+            notifyError('notice.mapLabelRemoveFailed', error)
+          })
         }}
         heat={heat}
         collections={mapRooms}
@@ -515,9 +523,12 @@ export function LibraryMap(): React.JSX.Element {
             }
             const id = `label-${Date.now()}`
             setOwnLabels((current) => [...current, { id, text, anchors: naming }])
-            void magpie
-              .saveMapLabel(id, text, naming)
-              .catch((error) => console.warn('[magpie] Étiquette non enregistrée', error))
+            /* Le seul contenu que l'utilisateur **écrit** sur la carte. Il s'affichait,
+               l'écriture échouait, et il avait disparu à la réouverture — sans un mot. */
+            void magpie.saveMapLabel(id, text, naming).catch((error: unknown) => {
+              setOwnLabels((current) => current.filter((label) => label.id !== id))
+              notifyError('notice.mapLabelSaveFailed', error)
+            })
             setNaming(null)
           }}
         >

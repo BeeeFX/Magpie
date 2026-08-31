@@ -37,6 +37,36 @@ function pass(message: string): void {
   console.log(`  ✓ ${message}`)
 }
 
+/** Le code sans ses commentaires, lignes conservées — et sans les retours chariot. */
+function code(text: string): string {
+  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/\/\/[^\n]*/g, blank)
+}
+
+/**
+ * Le corps d'un `.catch(…)`, des parenthèses ouvrantes à leur fermeture.
+ *
+ * Découper à un nombre de lignes fixe ne peut pas marcher : un `catch` d'une ligne déborde
+ * alors sur le gestionnaire suivant, et un `catch` de dix lignes se fait couper avant sa
+ * conclusion. Les deux erreurs se sont produites en écrivant cette règle.
+ */
+function catchBody(text: string, from: number): string {
+  const open = text.indexOf('(', from)
+  if (open < 0) return ''
+  let depth = 0
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++
+    else if (text[i] === ')') {
+      depth--
+      if (depth === 0) return text.slice(open, i + 1)
+    }
+  }
+  return text.slice(open)
+}
+
 function walk(dir: string): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -96,6 +126,94 @@ console.log('\nécritures rattrapées')
   }
   if (offenders.length === 0) pass(`${files.length} fichiers, aucune écriture sans filet`)
   else for (const offender of offenders) fail(offender)
+}
+
+console.log('\nun échec se dit à l’utilisateur, pas à la console')
+{
+  /**
+   * Un `catch` qui n'écrit que dans la console est un `catch` qui ment.
+   *
+   * La règle précédente exige un filet ; elle ne dit pas ce qu'il en fait. La carte en avait
+   * quatre, tous en `console.warn` : le contrôle passait au vert pendant que **le seul contenu
+   * que l'utilisateur écrit sur la carte** — le nom d'un endroit — disparaissait sans un mot.
+   * On le tapait, il s'affichait, l'écriture échouait, et il n'était plus là à la réouverture.
+   *
+   * `store.ts` est exempté : il journalise **en plus** de son état d'erreur, et `notices.ts`
+   * ne peut évidemment pas s'interdire d'écrire dans la console.
+   */
+  const EXEMPT = /notices\.ts$|ErrorBoundary\.tsx$|store\.ts$/
+
+  /**
+   * Les silences voulus, avec leur raison.
+   *
+   * Une exception sans motif écrit devient la case où l'on range ce qu'on n'a pas envie de
+   * traiter. Celle-ci en a un, et il tient à la nature du calque : il montre déjà l'erreur que
+   * l'utilisateur cherche à rapporter.
+   */
+  const DELIBERATE: Record<string, string> = {
+    'components/Notices.tsx':
+      'une copie qui échoue ne peut pas s’annoncer dans le calque qu’elle occupe déjà ; le bouton qui reste au repos dit déjà que rien ne s’est passé'
+  }
+
+  const offenders: string[] = []
+  for (const file of files) {
+    if (EXEMPT.test(file)) continue
+    const declared = Object.keys(DELIBERATE).find((suffix) =>
+      file.replace(/\\/g, '/').endsWith(suffix)
+    )
+    if (declared) continue
+    const text = code(readFileSync(file, 'utf8'))
+    const lines = text.split('\n')
+    for (const [index, line] of lines.entries()) {
+      const at = line.search(/\.catch\s*\(/)
+      if (at < 0) continue
+      /* Le corps du `catch`, et **lui seul**. Une fenêtre de seize lignes débordait sur le
+         gestionnaire suivant : un `.catch(console.warn(…))` d'une seule ligne passait au vert
+         parce que le `reportFailure` de l'effet d'après tombait dedans. Trop étroite, la
+         fenêtre rate ; trop large, elle se laisse rassurer par le voisin. On compte donc les
+         parenthèses jusqu'à la fermeture, ce qui donne exactement ce que ce `catch` fait. */
+      const from = text.indexOf('.catch', text.split('\n').slice(0, index).join('\n').length)
+      const body = catchBody(text, from)
+      if (!/console\.(warn|error|log)/.test(body)) continue
+      /* Journaliser est légitime tant que l'utilisateur est prévenu par ailleurs. */
+      const tells = /notifyError|reportFailure|notifyInfo|setFailure|setError|setCacheError/.test(body)
+      if (!tells) offenders.push(`${file.replace(/\\/g, '/')}:${index + 1} — ${line.trim().slice(0, 60)}`)
+    }
+  }
+  for (const [suffix, why] of Object.entries(DELIBERATE)) {
+    const exists = files.some((file) => file.replace(/\\/g, '/').endsWith(suffix))
+    if (exists) pass(`${suffix} — silence voulu : ${why}`)
+    else fail(`${suffix} est déclaré silencieux, mais ce fichier n’existe pas`)
+  }
+  if (offenders.length === 0) pass('aucun autre échec ne finit dans la seule console')
+  else for (const offender of offenders) fail(offender)
+}
+
+console.log('\nun correctif optimiste ne survit pas à son écriture')
+{
+  /**
+   * Poser l'effet avant la réponse est le bon geste — l'interface ne doit pas attendre un
+   * aller-retour pour bouger. Mais si l'écriture échoue, l'effet doit repartir.
+   *
+   * Les deux étiquettes de la carte faisaient exactement l'inverse : `setOwnLabels` d'abord,
+   * puis un `catch` qui ne défaisait rien. L'écran montrait donc un état que la base
+   * n'avait pas, jusqu'à la réouverture — c'est-à-dire jusqu'au moment où l'on ne fait plus le
+   * lien entre ce qu'on a perdu et le geste qui l'a perdu.
+   */
+  const map = readFileSync('src/renderer/src/components/LibraryMap.tsx', 'utf8').replace(/\r\n?/g, '\n')
+  for (const [call, undo] of [
+    ['saveMapLabel', /setOwnLabels\(\(current\) => current\.filter/],
+    ['deleteMapLabel', /setOwnLabels\(\(current\) => \[\.\.\.current, removed\]\)/]
+  ] as const) {
+    const at = map.indexOf(`.${call}(`)
+    if (at < 0) {
+      fail(`${call} introuvable dans LibraryMap`)
+      continue
+    }
+    const body = map.slice(at, at + 400)
+    if (undo.test(body)) pass(`${call} défait son correctif optimiste en cas d’échec`)
+    else fail(`${call} laisse son correctif optimiste posé sur une écriture qui a échoué`)
+  }
 }
 
 console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} manquement(s).`)

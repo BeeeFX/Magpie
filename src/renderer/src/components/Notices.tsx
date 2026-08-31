@@ -49,11 +49,20 @@ function NoticeRow({ notice }: { notice: Notice }): React.JSX.Element {
               type="button"
               className="notice__action"
               onClick={() => {
-                /* Sans notification en retour : une copie qui échoue ne peut pas s'annoncer dans le
-                   calque qu'elle occupe déjà. La console suffit. */
-                void magpie.copyToClipboard(notice.detail ?? '').catch(console.error)
-                setCopied(true)
-                setTimeout(() => setCopied(false), 1600)
+                /* « Copié » n'apparaît qu'une fois la copie faite. Il apparaissait **dans tous
+                   les cas** : la confirmation partait avant la promesse, donc un échec du
+                   presse-papier affichait « Copié » puis on collait le vide, sans jamais
+                   pouvoir relier les deux.
+                   Pas de notification en retour, en revanche : une copie qui échoue ne peut pas
+                   s'annoncer dans le calque qu'elle occupe déjà, et le bouton qui reste au repos
+                   dit déjà que rien ne s'est passé. */
+                void magpie
+                  .copyToClipboard(notice.detail ?? '')
+                  .then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1600)
+                  })
+                  .catch(console.error)
               }}
             >
               {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
