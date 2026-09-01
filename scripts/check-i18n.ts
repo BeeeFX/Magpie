@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { read } from './source'
+import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { translate, type TranslationKey } from '../src/renderer/src/i18n'
 import { STEP_ORDER, STEPS_WITH_LOSS } from '../src/renderer/src/steps'
@@ -145,7 +146,7 @@ function sources(dir: string, out: string[] = []): string[] {
 
 console.log('\nPhrases à variable, appelées sans leur variable\n')
 
-const dictionary = readFileSync('src/renderer/src/i18n.ts', 'utf8')
+const dictionary = read('src/renderer/src/i18n.ts')
 /* Les clés du dictionnaire dont la valeur porte une accolade. Le nom suffit : on ne cherche pas
    à savoir quelles variables, seulement qu'il en faut. */
 const templated = new Set<string>()
@@ -163,7 +164,7 @@ const bare: string[] = []
 for (const key of [...templated].sort()) {
   const naked = new RegExp(`\\bt\\(\\s*['\`"]${key.replace(/\./g, '\\.')}['\`"]\\s*\\)`)
   for (const file of files) {
-    if (naked.test(readFileSync(file, 'utf8'))) bare.push(`${key} — ${file.replace(/\\/g, '/')}`)
+    if (naked.test(read(file))) bare.push(`${key} — ${file.replace(/\\/g, '/')}`)
   }
 }
 

@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs'
-
+import { code, read } from './source'
 /**
  * Le processus principal parle la langue de l'interface : `npm run check:messages`
  *
@@ -30,9 +29,9 @@ function pass(message: string): void {
   console.log(`  ✓ ${message}`)
 }
 
-const messages = readFileSync('src/main/messages.ts', 'utf8')
-const engine = readFileSync('src/main/sync/engine.ts', 'utf8')
-const types = readFileSync('src/shared/types.ts', 'utf8')
+const messages = read('src/main/messages.ts')
+const engine = read('src/main/sync/engine.ts')
+const types = read('src/shared/types.ts')
 
 /**
  * Le code sans ses commentaires, lignes conservées — même raison que dans `check:a11y`.
@@ -43,13 +42,6 @@ const types = readFileSync('src/shared/types.ts', 'utf8')
  * phrase française réintroduite exprès. C'est le genre de contrôle qui ne protège de rien
  * tout en donnant l'impression du contraire.
  */
-function code(text: string): string {
-  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-}
 
 console.log('Vérification des messages du processus principal\n')
 
@@ -88,7 +80,7 @@ console.log('\nchaque état porte son code, pas seulement sa phrase')
   }
 
   /* Et personne ne doit retomber dans l'ancien réflexe : décider sur le texte. */
-  const renderer = readFileSync('src/renderer/src/components/Accounts.tsx', 'utf8')
+  const renderer = read('src/renderer/src/components/Accounts.tsx')
   if (/\.test\(\s*(?:message|err|result\.message)/.test(code(renderer))) {
     fail('src/renderer/src/components/Accounts.tsx — une décision se prend encore sur la phrase')
   } else {
@@ -124,7 +116,7 @@ console.log('\nce que l’utilisateur lit passe par le dictionnaire')
 
   const offenders: string[] = []
   for (const entry of USER_FACING) {
-    const lines = code(readFileSync(entry.file, 'utf8')).split('\n')
+    const lines = code(read(entry.file)).split('\n')
     for (const [index, line] of lines.entries()) {
       for (const sink of entry.sinks) {
         if (sink.test(line)) offenders.push(`${entry.file}:${index + 1} — ${line.trim().slice(0, 62)}`)

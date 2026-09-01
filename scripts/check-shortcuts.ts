@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { code, read } from './source'
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -29,21 +30,14 @@ function pass(message: string): void {
   console.log(`  ✓ ${message}`)
 }
 
-function code(text: string): string {
-  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-}
 
 const ROOT = 'src/renderer/src/components'
 const renderer = readdirSync(ROOT)
   .filter((name) => name.endsWith('.tsx'))
-  .map((name) => code(readFileSync(join(ROOT, name), 'utf8')))
+  .map((name) => code(read(join(ROOT, name))))
   .join('\n')
 
-const dictionary = readFileSync('src/renderer/src/i18n.ts', 'utf8').replace(/\r\n?/g, '\n')
+const dictionary = read('src/renderer/src/i18n.ts').replace(/\r\n?/g, '\n')
 
 console.log('Vérification des gestes annoncés\n')
 
@@ -83,7 +77,7 @@ console.log('\nla touche de commande porte son nom sur cette machine')
 {
   /* Une seule source, et personne ne réécrit « Ctrl » à la main. Trois écrans l'affichent ;
      deux se trompaient sur Mac. */
-  if (!/export const MODIFIER/.test(readFileSync('src/renderer/src/format.ts', 'utf8'))) {
+  if (!/export const MODIFIER/.test(read('src/renderer/src/format.ts'))) {
     fail('MODIFIER n’est plus déclaré dans format.ts')
   } else {
     pass('MODIFIER est déclaré une fois')
@@ -91,7 +85,7 @@ console.log('\nla touche de commande porte son nom sur cette machine')
 
   const offenders: string[] = []
   for (const name of readdirSync(ROOT).filter((entry) => entry.endsWith('.tsx'))) {
-    const text = code(readFileSync(join(ROOT, name), 'utf8'))
+    const text = code(read(join(ROOT, name)))
     /* « Ctrl » dans du JSX ou une chaîne affichée. On accepte `MODIFIER`, et on ignore les
        noms d'événements comme `ctrlKey`, qui ne s'affichent jamais. */
     for (const match of text.matchAll(/(<kbd>\s*Ctrl|['"`][^'"`]*\bCtrl[+ ][^'"`]*['"`])/g)) {

@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { read } from './source'
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -82,7 +83,7 @@ for (const root of ROOTS) {
 
 console.log('Vérification de l’ordre des crochets React\n')
 
-const all = files.flatMap((file) => scan(file, readFileSync(file, 'utf8')))
+const all = files.flatMap((file) => scan(file, read(file)))
 for (const finding of all) {
   console.log(
     `  ✗ ${finding.file}:${finding.line} — ${finding.hook}() est appelé après le retour ` +

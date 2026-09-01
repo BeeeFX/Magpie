@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { code, read } from './source'
 import { STRUCTURE_MODEL, MEANING_MODEL, TEXT_MODEL, SPEECH_MODEL, USED_MODELS } from '../src/main/tagging/models'
 
 /**
@@ -32,13 +32,6 @@ function pass(message: string): void {
 }
 
 /** Le code sans ses commentaires — un commentaire qui *cite* un nom de modèle n'en est pas un. */
-function code(text: string): string {
-  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-}
 
 console.log('Vérification des modèles\n')
 
@@ -64,7 +57,7 @@ console.log('la liste des modèles en service est dérivée, pas recopiée')
   ]
   const strays: string[] = []
   for (const file of sources) {
-    const text = code(readFileSync(file, 'utf8'))
+    const text = code(read(file))
     for (const model of declared) {
       if (text.includes(`'${model}'`) || text.includes(`"${model}"`)) {
         strays.push(`${file} — nomme ${model} en dur`)
@@ -77,7 +70,7 @@ console.log('la liste des modèles en service est dérivée, pas recopiée')
 
 console.log('\nla purge ne peut pas emporter un modèle en service')
 {
-  const store = code(readFileSync('src/main/models/store.ts', 'utf8'))
+  const store = code(read('src/main/models/store.ts'))
   if (!/USED_MODELS\.includes/.test(store)) {
     fail('store.ts ne compare pas à USED_MODELS pour décider ce qui sert')
   } else {
@@ -93,7 +86,7 @@ console.log('\nla purge ne peut pas emporter un modèle en service')
 
 console.log('\nle déplacement de bibliothèque emporte les modèles')
 {
-  const ipc = code(readFileSync('src/main/ipc.ts', 'utf8'))
+  const ipc = code(read('src/main/ipc.ts'))
   /* `indexOf` rend -1 quand il ne trouve pas, et `slice(-1)` rend alors le **dernier
      caractère** au lieu de rien : le contrôle signalait cinq manquements sur un fichier
      correct, ce qui est pire qu'un faux vert parce qu'on cherche le défaut au mauvais
@@ -127,22 +120,22 @@ console.log('\nle déplacement de bibliothèque emporte les modèles')
 
 console.log('\nl’écran de stockage montre ce que les modèles occupent')
 {
-  const types = readFileSync('src/shared/types.ts', 'utf8')
+  const types = read('src/shared/types.ts')
   if (!/modelBytes: number/.test(types)) fail('LibraryInfo ne porte pas modelBytes')
   else pass('LibraryInfo porte modelBytes')
 
   /* Ce qu'un contrôle statique peut prouver ici, c'est que le chiffre **traverse** — des types
      au processus principal, du pont au rendu. Qu'il s'affiche vraiment se vérifie dans
      l'aperçu, pas en lisant du JSX : `{false ? (…)}` garderait toutes les ancres. */
-  const ipcInfo = code(readFileSync('src/main/ipc.ts', 'utf8'))
+  const ipcInfo = code(read('src/main/ipc.ts'))
   if (!/modelBytes: usage\.total/.test(ipcInfo)) fail('library:info ne calcule pas modelBytes')
   else pass('library:info calcule modelBytes')
 
-  const preload = code(readFileSync('src/preload/index.ts', 'utf8'))
+  const preload = code(read('src/preload/index.ts'))
   if (!/models:prune/.test(preload)) fail('le pont n’expose pas la purge')
   else pass('le pont expose la purge')
 
-  const settings = code(readFileSync('src/renderer/src/components/Settings.tsx', 'utf8'))
+  const settings = code(read('src/renderer/src/components/Settings.tsx'))
   if (!/t\('settings\.models'/.test(settings)) fail('l’écran de stockage ne nomme pas les modèles')
   else pass('l’écran de stockage nomme les modèles')
 

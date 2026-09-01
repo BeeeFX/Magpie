@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { code, read } from './source'
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -38,13 +39,6 @@ function pass(message: string): void {
 }
 
 /** Le code sans ses commentaires, lignes conservées — et sans les retours chariot. */
-function code(text: string): string {
-  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-}
 
 /**
  * Le corps d'un `.catch(…)`, des parenthèses ouvrantes à leur fermeture.
@@ -86,7 +80,7 @@ console.log('boîtes natives')
   for (const file of files) {
     /* `bridge.ts` a le droit d'en parler : son repli navigateur documente précisément la
        différence entre le navigateur et Electron. On regarde donc les appels, pas les mots. */
-    for (const [index, line] of readFileSync(file, 'utf8').split('\n').entries()) {
+    for (const [index, line] of read(file).split('\n').entries()) {
       if (/\bwindow\.(prompt|confirm|alert)\s*\(/.test(line)) {
         offenders.push(`${file}:${index + 1} — ${line.trim().slice(0, 70)}`)
       }
@@ -98,7 +92,7 @@ console.log('boîtes natives')
 
 console.log('\nsens des dépendances')
 {
-  const notices = readFileSync(join(ROOT, 'notices.ts'), 'utf8')
+  const notices = read(join(ROOT, 'notices.ts'))
   if (/from '\.\/store'/.test(notices)) fail('notices.ts importe store.ts — le cycle est interdit')
   else pass('notices.ts n’importe pas store.ts')
 }
@@ -107,7 +101,7 @@ console.log('\nécritures rattrapées')
 {
   const offenders: string[] = []
   for (const file of files) {
-    const lines = readFileSync(file, 'utf8').split('\n')
+    const lines = read(file).split('\n')
     for (const [index, line] of lines.entries()) {
       if (!WRITES.test(line)) continue
       /* Trois formes acceptées, une seule suffit : un `.catch(` dans les lignes qui suivent —
@@ -162,7 +156,7 @@ console.log('\nun échec se dit à l’utilisateur, pas à la console')
       file.replace(/\\/g, '/').endsWith(suffix)
     )
     if (declared) continue
-    const text = code(readFileSync(file, 'utf8'))
+    const text = code(read(file))
     const lines = text.split('\n')
     for (const [index, line] of lines.entries()) {
       const at = line.search(/\.catch\s*\(/)
@@ -200,7 +194,7 @@ console.log('\nun correctif optimiste ne survit pas à son écriture')
    * n'avait pas, jusqu'à la réouverture — c'est-à-dire jusqu'au moment où l'on ne fait plus le
    * lien entre ce qu'on a perdu et le geste qui l'a perdu.
    */
-  const map = readFileSync('src/renderer/src/components/LibraryMap.tsx', 'utf8').replace(/\r\n?/g, '\n')
+  const map = read('src/renderer/src/components/LibraryMap.tsx').replace(/\r\n?/g, '\n')
   for (const [call, undo] of [
     ['saveMapLabel', /setOwnLabels\(\(current\) => current\.filter/],
     ['deleteMapLabel', /setOwnLabels\(\(current\) => \[\.\.\.current, removed\]\)/]

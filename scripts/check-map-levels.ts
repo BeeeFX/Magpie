@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { read } from './source'
 import { resolve } from 'node:path'
 import { findIslands, ISLAND_LEVELS } from '../src/main/tagging/islands'
 import type { ProjectedPoint } from '../src/main/tagging/projection-core'
@@ -27,7 +27,7 @@ function assert(condition: unknown, message: string): void {
   console.log(`  ✗ ${message}`)
 }
 
-const sandbox = JSON.parse(readFileSync(resolve('map-sandbox.json'), 'utf8')) as {
+const sandbox = JSON.parse(read(resolve('map-sandbox.json'))) as {
   points: { x: number; y: number; g: number }[]
 }
 const points: ProjectedPoint[] = sandbox.points.map((point, index) => ({

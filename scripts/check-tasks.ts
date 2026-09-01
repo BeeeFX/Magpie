@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { code, read } from './source'
+import { readdirSync } from 'node:fs'
 
 /**
  * Un bouton qui prétend agir agit : `npm run check:tasks`
@@ -37,16 +38,9 @@ function pass(message: string): void {
   console.log(`  ✓ ${message}`)
 }
 
-function code(text: string): string {
-  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-}
 
-const downloads = code(readFileSync('src/renderer/src/components/Downloads.tsx', 'utf8'))
-const types = readFileSync('src/shared/types.ts', 'utf8')
+const downloads = code(read('src/renderer/src/components/Downloads.tsx'))
+const types = read('src/shared/types.ts')
 
 console.log('Vérification des tâches de fond\n')
 
@@ -90,7 +84,7 @@ console.log('une pause montrée est une pause qui suspend')
         fail(`${kind} — l’interface propose une pause, mais aucun producteur n’est connu`)
         continue
       }
-      const source = code(readFileSync(producer.file, 'utf8'))
+      const source = code(read(producer.file))
       if (source.includes(`isTaskPaused('${producer.id}')`) || source.includes('isTaskPaused(TASK)')) {
         pass(`${kind} — ${producer.id} est consulté dans ${producer.file}`)
       } else {
@@ -112,7 +106,7 @@ console.log('\ntoute commande d’arrêt du contrat est atteignable')
      qui sera en retard. */
   const renderer = readdirSync('src/renderer/src/components')
     .filter((name) => name.endsWith('.tsx'))
-    .map((name) => code(readFileSync(`src/renderer/src/components/${name}`, 'utf8')))
+    .map((name) => code(read(`src/renderer/src/components/${name}`)))
     .join('\n')
 
   for (const stop of stops) {
@@ -128,7 +122,7 @@ console.log('\n« Tout couper » coupe tout')
 {
   /* Le geste qui promet le plus est celui qui doit le moins oublier : il en oubliait un
      cinquième, la lecture d'images, qui continuait sans rien à l'écran pour le dire. */
-  const organizer = code(readFileSync('src/renderer/src/components/AiOrganizer.tsx', 'utf8'))
+  const organizer = code(read('src/renderer/src/components/AiOrganizer.tsx'))
   const at = organizer.indexOf('const stopEverything')
   const body = at < 0 ? '' : organizer.slice(at, organizer.indexOf('}, [', at))
   if (body.length === 0) {

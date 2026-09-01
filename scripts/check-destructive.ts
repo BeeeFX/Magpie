@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { code, read } from './source'
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -40,13 +41,6 @@ function pass(message: string): void {
   console.log(`  ✓ ${message}`)
 }
 
-function code(text: string): string {
-  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-}
 
 /**
  * Les appels qui détruisent du travail ou coûtent des minutes.
@@ -142,7 +136,7 @@ const GUARDS: { file: string; call: string; guard: RegExp | null; why: string }[
 ]
 
 const files = readdirSync(ROOT).filter((name) => name.endsWith('.tsx'))
-const sources = new Map(files.map((name) => [name, code(readFileSync(join(ROOT, name), 'utf8'))]))
+const sources = new Map(files.map((name) => [name, code(read(join(ROOT, name)))]))
 
 console.log('Vérification des gestes destructeurs\n')
 
@@ -182,7 +176,7 @@ console.log('\nla suppression de collections est rattrapable')
 {
   /* La règle la plus concrète du lot : sans instantané pris **avant** les suppressions, rien
      au monde ne peut rendre un nom, une couleur, des mots-clés et une appartenance. */
-  const collections = code(readFileSync('src/main/tagging/collections.ts', 'utf8'))
+  const collections = code(read('src/main/tagging/collections.ts'))
   const at = collections.indexOf('export function keepOnly')
   const body = at < 0 ? '' : collections.slice(at, collections.indexOf('\n}', at))
   if (body.length === 0) {

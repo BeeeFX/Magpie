@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import { join } from 'node:path'
-import { readFileSync, existsSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { blend, BLEND, MEANING_DIMS, STRUCTURE_DIMS } from '../src/main/tagging/vision'
 import type { PostImageEmbedding } from '../src/main/db/queries'
 
@@ -39,6 +40,8 @@ const rows = all.filter((r) => r.thumb && r.author)
    gagné treize posts entre le banc et la vérification, tout se décalait d'un cran et le
    contrôle annonçait 0 % au lieu de dire que son cache était périmé. */
 const load = (name: string, dims: number): Float32Array[] => {
+  /* Lecture **binaire** : ce sont des vecteurs, pas du texte. `read` normalise les fins de
+     ligne, ce qui corromprait des octets qui se trouvent valoir 0x0D. */
   const buf = readFileSync(join(CACHE, `${name}.bin`))
   const flat = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
   const counted = flat.length / dims

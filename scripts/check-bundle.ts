@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { read } from './source'
+import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -78,7 +79,7 @@ if (files.length > 0) {
     /* Un `React.lazy` peut exister et ne rien découper si le composant est aussi importé
        statiquement ailleurs : le paquet le replie alors dans l'entrée, sans rien dire. On
        vérifie donc dans la sortie, pas dans la source. */
-    const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+    const app = read('src/renderer/src/App.tsx')
     for (const entry of DEFERRED) {
       if (new RegExp(`import\\('\\./components/${entry.chunk}'\\)`).test(app)) continue
       fail(`App.tsx n’importe pas ${entry.chunk} paresseusement`)

@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs'
-
+import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { read } from './source'
 /**
  * Chaque contrôle tourne quelque part : `npm run check:ci`
  *
@@ -44,7 +45,7 @@ function pass(message: string): void {
   console.log(`  ✓ ${message}`)
 }
 
-const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
+const pkg = JSON.parse(read('package.json')) as {
   scripts: Record<string, string>
 }
 const scripts = Object.keys(pkg.scripts)
@@ -83,8 +84,8 @@ console.log('chaque contrôle tourne, ou dit pourquoi il ne peut pas')
 
 console.log('\nles deux workflows appellent la même liste')
 {
-  const ci = readFileSync('.github/workflows/ci.yml', 'utf8')
-  const release = readFileSync('.github/workflows/release.yml', 'utf8')
+  const ci = read('.github/workflows/ci.yml')
+  const release = read('.github/workflows/release.yml')
 
   for (const [name, text] of [
     ['ci.yml', ci],
@@ -120,6 +121,41 @@ console.log('\nverify compile avant ce qui lit la compilation')
   else if (map >= 0 && map < build) fail('check:map tourne avant la compilation qu’il inspecte')
   else if (mapEnd < 0) fail('check:map ne tourne pas après la compilation')
   else pass('la compilation précède les contrôles qui la lisent')
+}
+
+console.log('\nun contrôle lit ses sources par la porte qui normalise')
+{
+  /**
+   * **La CI a refusé une release pour une fin de ligne.**
+   *
+   * `check:tasks` cherchait l'union `BackgroundTaskKind` avec un motif contenant `\n\n`. Il
+   * passait sur le poste de développement et échouait sur `windows-latest`, où
+   * `actions/checkout` convertit en CRLF : le fichier disait alors `\r\n\r\n`, l'union restait
+   * introuvable, et le contrôle concluait que le type n'existait pas — sur un fichier
+   * parfaitement correct.
+   *
+   * C'était la **troisième** fois que les fins de ligne piégeaient un contrôle de ce dépôt, et
+   * la première avait rendu une règle entière muette. Corriger le site ne suffit pas quand le
+   * piège se retend à chaque nouveau contrôle : `scripts/source.ts` normalise à la lecture, et
+   * cette règle interdit de le contourner.
+   */
+  /* Une seule exception, et elle ne lit pas une source : normaliser des vecteurs corromprait
+     tout octet qui se trouve valoir 0x0D. Déclarée avec sa raison, comme les exclusions
+     ci-dessus — sans quoi cette liste deviendrait la case où l'on range ce qu'on n'a pas
+     envie de traiter. */
+  const BINARY: Record<string, string> = {
+    'check-vision.ts': 'lit un cache de vecteurs en binaire, pas du texte'
+  }
+
+  const raw: string[] = []
+  for (const name of readdirSync('scripts')) {
+    if (!name.startsWith('check-') || !name.endsWith('.ts')) continue
+    if (!/\breadFileSync\s*\(/.test(read(join('scripts', name)))) continue
+    if (BINARY[name]) pass(`${name} — lecture brute assumée : ${BINARY[name]}`)
+    else raw.push(name)
+  }
+  if (raw.length === 0) pass('aucun autre contrôle n’appelle readFileSync directement')
+  else for (const name of raw) fail(`${name} lit une source sans la normaliser — voir scripts/source.ts`)
 }
 
 console.log(failures === 0 ? '\nTout est branché.' : `\n${failures} manquement(s).`)

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { read } from './source'
 import { resolve } from 'node:path'
 import { neighbourLinks, type Placed } from '../src/renderer/src/map-links'
 
@@ -72,7 +72,7 @@ function reference(points: Point[]): [Point, Point][] {
   return pairs
 }
 
-const sandbox = JSON.parse(readFileSync(resolve('map-sandbox.json'), 'utf8')) as {
+const sandbox = JSON.parse(read(resolve('map-sandbox.json'))) as {
   points: { x: number; y: number; g: number }[]
 }
 const points: Point[] = sandbox.points.map((point, index) => ({

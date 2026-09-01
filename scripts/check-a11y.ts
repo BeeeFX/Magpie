@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { code, read } from './source'
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -42,16 +43,6 @@ function pass(message: string): void {
  * carte cite `role="button"` pour dire précisément qu'il n'y en a plus. Les sauts de ligne sont
  * préservés pour que les numéros signalés restent ceux du fichier.
  */
-function code(text: string): string {
-  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  /* Les retours chariot partent d'abord : la copie de travail est en CRLF, et un `\r` resté en
-     fin de ligne empêche `.` — qui ne le traverse pas — d'atteindre une ancre `$`. Voir
-     `check:messages`, où une règle entière s'est révélée muette pour cette seule raison. */
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-}
 
 const files = readdirSync(ROOT)
   .filter((name) => name.endsWith('.tsx'))
@@ -63,7 +54,7 @@ console.log('un bouton ne contient pas de boutons')
 {
   const offenders: string[] = []
   for (const file of files) {
-    const lines = code(readFileSync(file, 'utf8')).split('\n')
+    const lines = code(read(file)).split('\n')
     for (const [index, line] of lines.entries()) {
       if (!/role="button"/.test(line)) continue
       /* On regarde le sous-arbre qui suit, jusqu'à la fermeture de l'élément : un contrôle
@@ -82,7 +73,7 @@ console.log('\nun curseur a un nom')
 {
   const offenders: string[] = []
   for (const file of files) {
-    const lines = code(readFileSync(file, 'utf8')).split('\n')
+    const lines = code(read(file)).split('\n')
     for (const [index, line] of lines.entries()) {
       if (!/type="range"/.test(line)) continue
       /* La fenêtre couvre l'élément entier : le lecteur vidéo pose son nom après une dizaine
@@ -101,7 +92,7 @@ console.log('\nune fenêtre modale piège le focus')
 {
   const offenders: string[] = []
   for (const file of files) {
-    const text = code(readFileSync(file, 'utf8'))
+    const text = code(read(file))
     if (!/aria-modal="true"/.test(text)) continue
     if (!/useModalFocus\s*\(/.test(text)) {
       offenders.push(`${file} — se déclare modale sans appeler useModalFocus`)
@@ -115,7 +106,7 @@ console.log('\nun label dit ce que le champ attend')
 {
   const offenders: string[] = []
   for (const file of files) {
-    const text = code(readFileSync(file, 'utf8'))
+    const text = code(read(file))
     /* Un `<label>` dont le seul contenu textuel est un `<kbd>` : le nom accessible calculé est
        alors le raccourci, et le `placeholder` est ignoré puisqu'un label existe. */
     for (const match of text.matchAll(/<label[^>]*>([\s\S]{0,900}?)<\/label>/g)) {
@@ -156,7 +147,7 @@ console.log('\nle petit texte se lit dans les deux thèmes')
    * seul message d'erreur du parcours de connexion était écrit en deux couleurs codées en dur,
    * sans variante claire — 1,6:1 sur blanc, c'est-à-dire illisible au moment où il compte.
    */
-  const css = readFileSync('src/renderer/src/styles.css', 'utf8')
+  const css = read('src/renderer/src/styles.css')
 
   /** Les jetons d'un bloc, lus tels que le navigateur les résoudra. */
   function tokens(selector: string): Map<string, string> {

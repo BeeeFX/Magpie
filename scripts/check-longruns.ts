@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs'
-
+import { code, read } from './source'
 /**
  * Ce qui dure se dit, et se coupe : `npm run check:longruns`
  *
@@ -33,13 +32,6 @@ function pass(message: string): void {
   console.log(`  ✓ ${message}`)
 }
 
-function code(text: string): string {
-  const blank = (chunk: string): string => chunk.replace(/[^\n]/g, ' ')
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/\/\/[^\n]*/g, blank)
-}
 
 /**
  * Les trois travaux qui dépassent la minute, et ce qui doit les couvrir.
@@ -88,12 +80,12 @@ console.log('ce qui dure se montre, et se coupe')
     if ('none' in entry.stop) {
       pass(`${entry.what} — sans sortie, à dessein : ${entry.stop.none}`)
     } else {
-      const stopSource = code(readFileSync(entry.stop.file, 'utf8'))
+      const stopSource = code(read(entry.stop.file))
       if (entry.stop.pattern.test(stopSource)) pass(`${entry.what} — une sortie existe`)
       else fail(`${entry.what} — aucune sortie dans ${entry.stop.file}`)
     }
 
-    const progressSource = code(readFileSync(entry.progress.file, 'utf8'))
+    const progressSource = code(read(entry.progress.file))
     if (entry.progress.pattern.test(progressSource)) pass(`${entry.what} — sa progression se dit`)
     else fail(`${entry.what} — aucune progression dans ${entry.progress.file}`)
   }
@@ -101,7 +93,7 @@ console.log('ce qui dure se montre, et se coupe')
 
 console.log('\nrefermer pendant que ça travaille demande d’abord')
 {
-  const organizer = code(readFileSync('src/renderer/src/components/AiOrganizer.tsx', 'utf8'))
+  const organizer = code(read('src/renderer/src/components/AiOrganizer.tsx'))
   const at = organizer.indexOf('const onClose')
   const body = at < 0 ? '' : organizer.slice(at, organizer.indexOf('}, [', at) + 40)
 
@@ -133,7 +125,7 @@ console.log('\nun arrêt demandé n’est pas une panne')
     ['src/renderer/src/components/AiOrganizer.tsx', 'ProposalCancelled'],
     ['src/renderer/src/components/ExportPanel.tsx', 'ExportCancelled']
   ] as const) {
-    const text = code(readFileSync(file, 'utf8'))
+    const text = code(read(file))
     if (new RegExp(cancelled).test(text)) pass(`${cancelled} se distingue d’une panne`)
     else fail(`${file} affiche un arrêt demandé comme une erreur`)
   }
