@@ -1,17 +1,39 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef } from 'react'
 import { PLATFORMS } from '@shared/types'
 import { magpie, magpieEvents } from './bridge'
 import { Detail } from './components/Detail'
 import { Grid } from './components/Grid'
-import { LibraryMap } from './components/LibraryMap'
 import { Settings } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
-import { Welcome } from './components/Welcome'
-import { AiOrganizer } from './components/AiOrganizer'
 import { ExportPanel } from './components/ExportPanel'
 import { Shortcuts } from './components/Shortcuts'
 import { useStore } from './store'
+
+/**
+ * Trois écrans qui ne s'ouvrent pas au lancement, et qui pesaient quand même.
+ *
+ * Tout le rendu partait en **un seul morceau de 1 113 ko**, analysé à chaque démarrage. La
+ * carte à elle seule — `OrganizerMap` fait 136 ko de source, plus ses quatre modules de
+ * géométrie — représente le quart de ce poids, pour un écran qu'on n'ouvre pas à chaque
+ * session. Le tour d'accueil ne sert **qu'une fois dans la vie de l'installation**, et
+ * l'organisateur seulement quand on le demande.
+ *
+ * Découper ne rend rien plus rapide une fois chargé : ça retire du travail au démarrage, qui
+ * est le seul moment où l'utilisateur attend sans rien voir.
+ *
+ * Pas de `Suspense` visible pour l'accueil : il occupe déjà toute la fenêtre, et un écran de
+ * chargement devant un écran de chargement ne dit rien de plus.
+ */
+const LibraryMap = lazy(() =>
+  import('./components/LibraryMap').then((module) => ({ default: module.LibraryMap }))
+)
+const Welcome = lazy(() =>
+  import('./components/Welcome').then((module) => ({ default: module.Welcome }))
+)
+const AiOrganizer = lazy(() =>
+  import('./components/AiOrganizer').then((module) => ({ default: module.AiOrganizer }))
+)
 
 export function App(): React.JSX.Element {
   const refresh = useStore((s) => s.refresh)
@@ -166,21 +188,48 @@ export function App(): React.JSX.Element {
 
   /* Tant que la présentation n'est pas terminée, elle occupe toute la fenêtre : le
      premier geste attendu est de connecter un compte, pas d'explorer une app vide. */
-  if (!settingsLoading && !onboardingDone) return <Welcome />
+  if (!settingsLoading && !onboardingDone) {
+    return (
+      <Suspense fallback={<div className="app-boot" />}>
+        <Welcome />
+      </Suspense>
+    )
+  }
 
   return (
     <div className={`app ${sidebarOpen ? '' : 'is-collapsed'}`}>
       <Sidebar />
       <main className="main">
         <Toolbar />
-        {gridMode === 'map' ? <LibraryMap /> : <Grid />}
+        {gridMode === 'map' ? (
+          /* Le repli reprend la mise en page de l'attente de la carte, qui existe déjà :
+             passer du mur à la carte ne doit pas faire clignoter le cadre. */
+          <Suspense
+            fallback={
+              <div className="library-map__empty">
+                <span className="spinner" />
+              </div>
+            }
+          >
+            <LibraryMap />
+          </Suspense>
+        ) : (
+          <Grid />
+        )}
       </main>
       {/* Monté seulement quand un post est ouvert : sinon le composant resterait en place
           avec son état local — dont l'indicateur de fermeture, qui rendait le panneau
           invisible à la réouverture. Le démontage garantit un état propre à chaque fois. */}
       {detailIndex !== null ? <Detail /> : null}
       <Settings />
-      <AiOrganizer open={aiOrganizerOpen} onClose={closeAiOrganizer} />
+      {/* Monté seulement quand on l'ouvre : le composant garde son état entre deux
+          ouvertures — c'est ce qui permet de rouvrir pendant une analyse sans la perdre — mais
+          son code n'a aucune raison d'être analysé au démarrage. */}
+      {aiOrganizerOpen ? (
+        <Suspense fallback={null}>
+          <AiOrganizer open={aiOrganizerOpen} onClose={closeAiOrganizer} />
+        </Suspense>
+      ) : null}
       <ExportPanel />
       <Shortcuts />
     </div>

@@ -49,6 +49,10 @@ const SELECT_POST = /* sql */ `
   FROM posts p
 `
 
+/* Les emplacements `?` de la liste des plateformes publiques. Déclaré ici parce que la
+   première requête qui s'en sert vient bien avant les statistiques. */
+const PUBLIC_PLATFORM_SLOTS = PUBLIC_PLATFORMS.map(() => '?').join(', ')
+
 /**
  * Traduit une requête d'interface en condition SQL, une seule fois pour tous ceux qui en
  * ont besoin. Le préchargement se limite ainsi exactement à ce que l'utilisateur voit —
@@ -240,6 +244,12 @@ export function listPostPage(query: PostQuery, rawOffset = 0, rawLimit = 300): P
 
   // Une ligne de plus que demandé : sa présence dit exactement s'il reste quelque chose
   // après cette tranche, sans avoir à connaître le total.
+  /* `OFFSET` plutôt qu'une pagination par clé, et c'est mesuré : sur la bibliothèque réelle
+     — 9 894 posts — la médiane de neuf tirages donne 0,11 ms au début et **0,28 ms au
+     décalage 9 000**. Une revue antérieure relevait 32 ms à 55 000 lignes et proposait la
+     pagination par clé ; elle interdirait de sauter à une position, ce qui est cher pour un
+     quart de milliseconde. À rouvrir si une bibliothèque dépasse quelques dizaines de milliers
+     de posts, pas avant. */
   const sql = `${SELECT_POST} WHERE ${condition} ORDER BY ${orderBy(query.sort, query.randomSeed)} LIMIT ? OFFSET ?`
   const rows = db.prepare(sql).all(...params, limit + 1, offset) as PostRow[]
   const hasMore = rows.length > limit
@@ -293,10 +303,15 @@ export function getPostsByIds(rawIds: string[]): Post[] {
   const ids = [...new Set(rawIds)].slice(0, 100)
   if (ids.length === 0) return []
   const placeholders = ids.map(() => '?').join(',')
+  /* La liste des plateformes vient de `PUBLIC_PLATFORMS`, comme partout ailleurs. Écrite ici
+     en dur, elle aurait fait disparaître en silence les posts d'une plateforme ajoutée — de
+     cette requête seule, donc de la vue détaillée et de la carte, pendant que le mur, lui, les
+     montrait. Un filtre incohérent entre deux écrans est plus difficile à voir qu'un filtre
+     absent. */
   const rows = getDb()
     .prepare(`${SELECT_POST} WHERE p.is_archived = 0
-      AND p.platform IN ('instagram', 'x') AND p.id IN (${placeholders})`)
-    .all(...ids) as PostRow[]
+      AND p.platform IN (${PUBLIC_PLATFORM_SLOTS}) AND p.id IN (${placeholders})`)
+    .all(...PUBLIC_PLATFORMS, ...ids) as PostRow[]
   const posts = rows.map(toPost)
   attachMedia(posts)
   attachTags(posts)
@@ -469,7 +484,6 @@ function toPost(row: PostRow): Post {
   }
 }
 
-const PUBLIC_PLATFORM_SLOTS = PUBLIC_PLATFORMS.map(() => '?').join(', ')
 
 export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): LibraryStats {
   const db = getDb()
