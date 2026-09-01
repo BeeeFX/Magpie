@@ -1,14 +1,13 @@
 import { findIslands, islandMembership, ISLAND_TUNING } from '../src/main/tagging/islands'
-import { arrangeGrid, GRID_TUNING, assign } from '../src/renderer/src/map-grid'
 import type { ProjectedPoint } from '../src/main/tagging/projection-core'
 
 /**
  * Ce que les bancs ne vérifient pas : que le calcul soit juste.
  *
- * `bench:map-regions` et `bench:map-grid` mesurent une qualité sur la vraie bibliothèque, ce qui
- * demande une base et une minute de projection. Ils ne disent rien des cas limites — une région
- * vide, deux amas qu'on sait séparés, un damier plus petit que ce qu'on lui donne — et ils ne
- * peuvent pas tourner en intégration. Ce contrôle-là s'exécute en une seconde sur des amas
+ * `bench:map-islands` mesure une qualité sur la vraie bibliothèque, ce qui demande une base et
+ * une minute de projection. Il ne dit rien des cas limites — une région vide, deux amas qu'on
+ * sait séparés — et il ne peut pas tourner en intégration. Ce contrôle-là s'exécute en une
+ * seconde sur des amas
  * fabriqués, dont on connaît la réponse.
  */
 
@@ -85,45 +84,5 @@ assertThat(
   findIslands(blob('minuscule', 0.5, 0.5, 0.02, ISLAND_TUNING.minimum - 1), () => ['x']).length === 0,
   'sous le minimum, pas de région'
 )
-
-console.log('\ndamier : l’affectation exacte')
-/* Une matrice dont la solution est connue : le coût est nul sur l’anti-diagonale. */
-const size = 4
-const cost = new Float64Array(size * size).fill(1)
-for (let i = 0; i < size; i += 1) cost[i * size + (size - 1 - i)] = 0
-const solved = assign(cost, size)
-assertThat(
-  Array.from(solved).every((column, row) => column === size - 1 - row),
-  'la méthode hongroise retrouve l’anti-diagonale'
-)
-
-console.log('\ndamier : le rangement')
-const items = blob('vignette', 0.5, 0.5, 0.4, 120)
-const side = 12
-const cells = arrangeGrid(items, side, side, GRID_TUNING)
-assertThat(cells.size === items.length, 'chaque vignette a une case')
-const taken = new Set([...cells.values()].map((cell) => `${cell.column}:${cell.row}`))
-assertThat(taken.size === items.length, 'aucune case n’est occupée deux fois')
-assertThat(
-  [...cells.values()].every(
-    (cell) => cell.column >= 0 && cell.column < side && cell.row >= 0 && cell.row < side
-  ),
-  'toutes les cases sont dans le damier'
-)
-const repeated = arrangeGrid(items, side, side, GRID_TUNING)
-assertThat(
-  [...cells].every(([id, cell]) => {
-    const other = repeated.get(id)
-    return other?.column === cell.column && other?.row === cell.row
-  }),
-  'deux rangements de la même sélection sont identiques'
-)
-let refused = false
-try {
-  arrangeGrid(items, 5, 5, GRID_TUNING)
-} catch {
-  refused = true
-}
-assertThat(refused, 'un damier trop petit est refusé plutôt que rempli à moitié')
 
 console.log('\nTout est vert.')

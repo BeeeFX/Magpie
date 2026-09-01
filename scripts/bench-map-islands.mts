@@ -131,13 +131,9 @@ interface Score {
   seconds: number
 }
 
-/** La dernière projection, gardée pour l'examen des régions qui suit. */
-let lastProjected: ProjectedPoint[] = []
-
 function score(tuning: ProjectionTuning): Score {
   const started = Date.now()
   const projected: ProjectedPoint[] = projectSync(vectors, undefined, tuning)
-  lastProjected = projected
   const seconds = (Date.now() - started) / 1000
   const points = new Map(projected.map((p) => [p.id, { x: p.x, y: p.y }]))
   const xs = projected.map((p) => p.x)
@@ -210,55 +206,5 @@ for (const candidate of candidates) {
   console.log(
     `${candidate.label.padEnd(36)} ${(result.compact * 100).toFixed(1).padStart(7)} %` +
       `${(result.tight * 100).toFixed(1).padStart(13)} %${String(result.spread).padStart(11)}${`${result.seconds.toFixed(0)} s`.padStart(9)}`
-  )
-}
-
-
-/* Les régions, sur les vraies données — l'examen qui manquait.
-   Un contour se juge à trois choses : qu'aucune case n'appartienne à deux collections, que
-   les régions couvrent une part utile de la carte, et qu'aucune n'avale les autres. Le premier
-   essai échouait sur les trois, et des amas de synthèse bien séparés ne l'avaient pas montré. */
-const { ownershipMasks, FIELD_SIZE } = await import('../src/renderer/src/map-boundaries')
-const places = new Map(lastProjected.map((p) => [p.id, { x: p.x, y: p.y }]))
-const forRegions = collections
-  .map(([name, ids]) => ({
-    group: name,
-    points: ids.map((id) => places.get(id)).filter(Boolean) as { x: number; y: number }[]
-  }))
-  .filter((entry) => entry.points.length >= 3)
-
-console.log('')
-console.log(`régions sur ${forRegions.length} collections réelles`)
-console.log('marge   rayon   chevauchement   attribué   collections vides   plus grosse')
-for (const [margin, radius] of [
-  [1.25, 12],
-  [1.1, 12],
-  [1.0, 12],
-  [1.1, 16],
-  [1.0, 16],
-  [1.0, 22]
-] as [number, number][]) {
-  const masks = ownershipMasks(forRegions, undefined, margin, FIELD_SIZE, radius)
-  const cells = FIELD_SIZE * FIELD_SIZE
-  let doubled = 0
-  let owned = 0
-  let empty = 0
-  let biggest = 0
-  for (let i = 0; i < cells; i += 1) {
-    let owners = 0
-    for (const mask of masks.values()) if ((mask[i >> 3] & (1 << (i & 7))) !== 0) owners += 1
-    if (owners > 1) doubled += 1
-    if (owners === 1) owned += 1
-  }
-  for (const mask of masks.values()) {
-    let count = 0
-    for (let i = 0; i < cells; i += 1) if ((mask[i >> 3] & (1 << (i & 7))) !== 0) count += 1
-    if (count === 0) empty += 1
-    if (count > biggest) biggest = count
-  }
-  console.log(
-    `${margin.toFixed(2).padStart(5)}${String(radius).padStart(8)}${String(doubled).padStart(16)}` +
-      `${`${((100 * owned) / cells).toFixed(1)} %`.padStart(11)}${String(empty).padStart(20)}` +
-      `${`${((100 * biggest) / cells).toFixed(1)} %`.padStart(13)}`
   )
 }
