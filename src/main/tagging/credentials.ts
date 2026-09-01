@@ -1,6 +1,7 @@
 import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { say } from '../messages'
 import type { AiProvider } from '@shared/types'
 
 type CredentialFile = Partial<Record<AiProvider, string>>
@@ -23,7 +24,7 @@ export function hasAiKey(provider: AiProvider): boolean {
 
 export function writeAiKey(provider: AiProvider, key: string): void {
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('Le coffre sécurisé du système n’est pas disponible sur cet ordinateur.')
+    throw new Error(say('vault.unavailable'))
   }
   const values = read()
   if (key.trim()) values[provider] = safeStorage.encryptString(key.trim()).toString('base64')
@@ -36,9 +37,9 @@ export function writeAiKey(provider: AiProvider, key: string): void {
 
 export function readAiKey(provider: AiProvider): string {
   const encoded = read()[provider]
-  if (!encoded) throw new Error('Aucune clé API enregistrée pour ce fournisseur.')
+  if (!encoded) throw new Error(say('vault.noKey'))
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('Le coffre sécurisé du système n’est pas disponible.')
+    throw new Error(say('vault.unavailable'))
   }
   return safeStorage.decryptString(Buffer.from(encoded, 'base64'))
 }

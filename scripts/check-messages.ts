@@ -96,6 +96,45 @@ console.log('\nchaque état porte son code, pas seulement sa phrase')
   }
 }
 
+console.log('\nce que l’utilisateur lit passe par le dictionnaire')
+{
+  /**
+   * Les phrases du processus principal qui **atteignent l'écran**.
+   *
+   * La distinction est le tout de cette règle. `throw new Error('Sélection invalide')` ne peut
+   * se déclencher que si le rendu envoie n'importe quoi — c'est-à-dire jamais en usage normal :
+   * c'est une garde contre un bug, pas un message. La traduire serait du travail pour une phrase
+   * que personne ne lira, et ferait grossir la liste sans rien protéger.
+   *
+   * Ce qui compte, ce sont les sorties par lesquelles une phrase arrive vraiment sous les yeux.
+   * On les nomme, et on exige qu'elles passent par `say()`.
+   */
+  const USER_FACING: { file: string; sinks: RegExp[] }[] = [
+    {
+      file: 'src/main/ipc.ts',
+      sinks: [
+        /title:\s*'[^']*[éèêàçôûù][^']*'/,
+        /throw new Error\('[^']*\.\s*'\)/,
+        /error:\s*'[^']*[éèêàçôûù][^']*'/
+      ]
+    },
+    { file: 'src/main/index.ts', sinks: [/showErrorBox\('[^']/] },
+    { file: 'src/main/tagging/credentials.ts', sinks: [/throw new Error\('[^']*[éèêàçôûù]/] }
+  ]
+
+  const offenders: string[] = []
+  for (const entry of USER_FACING) {
+    const lines = code(readFileSync(entry.file, 'utf8')).split('\n')
+    for (const [index, line] of lines.entries()) {
+      for (const sink of entry.sinks) {
+        if (sink.test(line)) offenders.push(`${entry.file}:${index + 1} — ${line.trim().slice(0, 62)}`)
+      }
+    }
+  }
+  if (offenders.length === 0) pass('aucune phrase visible écrite en dur hors du dictionnaire')
+  else for (const offender of offenders) fail(offender)
+}
+
 console.log('\nles deux langues disent les mêmes choses')
 {
   function keysOf(marker: string): string[] {

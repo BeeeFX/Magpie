@@ -35,7 +35,32 @@ const FR = {
   'connect.challenge':
     '{platform} demande une vérification de sécurité avant de laisser passer. Débloquez le compte sur le site, puis réessayez.',
   'connect.network': 'Impossible de joindre {platform}. Vérifiez votre connexion, puis réessayez.',
-  'connect.unknown': 'La connexion à {platform} a échoué.'
+  'connect.unknown': 'La connexion à {platform} a échoué.',
+
+  /*
+   * Ce qui reste du processus principal et qui atteint vraiment l'écran.
+   *
+   * Les gardes contre une entrée IPC malformée — « Sélection invalide » et sa parenté — ne sont
+   * volontairement pas ici : elles ne peuvent se déclencher que si le rendu envoie n'importe
+   * quoi, c'est-à-dire jamais en usage normal. Les traduire serait du travail pour des phrases
+   * que personne ne lira, et ferait croire que la liste est exhaustive alors qu'elle serait
+   * seulement plus longue.
+   */
+  'library.pickFolder': 'Choisir le dossier de la bibliothèque Magpie',
+  'library.folderNotEmpty':
+    'Le dossier choisi doit être vide afin de protéger les fichiers existants.',
+  'library.syncRunning':
+    'Attendez la fin de la synchronisation avant de déplacer la bibliothèque.',
+  'library.noSpace': 'Espace libre insuffisant dans le dossier choisi.',
+  'library.nested': 'Le nouveau dossier ne peut pas se trouver dans la bibliothèque actuelle.',
+  'library.unreachable': 'Bibliothèque Magpie inaccessible',
+
+  'media.linkExpired':
+    'La source en ligne de ce média a expiré. Synchronisez à nouveau le compte.',
+  'media.noSource': 'Aucune source en ligne enregistrée pour ce média.',
+
+  'vault.unavailable': 'Le coffre sécurisé du système n’est pas disponible sur cet ordinateur.',
+  'vault.noKey': 'Aucune clé API enregistrée pour ce fournisseur.'
 } as const
 
 export type MessageKey = keyof typeof FR
@@ -54,7 +79,21 @@ const EN: Record<MessageKey, string> = {
   'connect.challenge':
     '{platform} wants a security check before letting you through. Unlock the account on the site, then try again.',
   'connect.network': 'Could not reach {platform}. Check your connection, then try again.',
-  'connect.unknown': 'Connecting to {platform} failed.'
+  'connect.unknown': 'Connecting to {platform} failed.',
+
+  'library.pickFolder': 'Choose the folder for your Magpie library',
+  'library.folderNotEmpty':
+    'The chosen folder must be empty, so that existing files are left untouched.',
+  'library.syncRunning': 'Wait for the sync to finish before moving the library.',
+  'library.noSpace': 'Not enough free space in the chosen folder.',
+  'library.nested': 'The new folder cannot sit inside the current library.',
+  'library.unreachable': 'Magpie library unreachable',
+
+  'media.linkExpired': 'The online source for this media expired. Sync the account again.',
+  'media.noSource': 'No online source recorded for this media.',
+
+  'vault.unavailable': 'The system’s secure store is not available on this computer.',
+  'vault.noKey': 'No API key saved for this provider.'
 }
 
 const DICTIONARIES: Record<'fr' | 'en', Record<MessageKey, string>> = { fr: FR, en: EN }

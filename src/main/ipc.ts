@@ -65,7 +65,7 @@ import {
 import { seedIfEmpty } from './fixtures/seed'
 import { backgroundTasks } from './tasks'
 import { restoreRemovedCollections } from './tagging/collections'
-import { connectFailure } from './messages'
+import { connectFailure, say } from './messages'
 import { modelsUsage, pruneUnusedModels } from './models/store'
 import { readSettings, writeSettings } from './settings'
 import { ADAPTERS, syncEngine } from './sync/engine'
@@ -689,7 +689,7 @@ export function registerIpc({
   ipcMain.handle('library:chooseFolder', async (event) => {
     const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined
     const options = {
-      title: 'Choisir le dossier de la bibliothèque Magpie',
+      title: say('library.pickFolder'),
       properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'>
     }
     const choice = parent
@@ -701,17 +701,17 @@ export function registerIpc({
     const target = resolve(choice.filePaths[0])
     if (source.toLowerCase() === target.toLowerCase()) return { moved: false, path: source }
     if (target.toLowerCase().startsWith(`${source.toLowerCase()}${sep}`)) {
-      throw new Error('Le nouveau dossier ne peut pas se trouver dans la bibliothèque actuelle.')
+      throw new Error(say('library.nested'))
     }
 
     await mkdir(target, { recursive: true })
     const contents = await readdir(target)
     if (contents.length > 0) {
-      throw new Error('Le dossier choisi doit être vide afin de protéger les fichiers existants.')
+      throw new Error(say('library.folderNotEmpty'))
     }
 
     if (syncEngine.current().running) {
-      throw new Error('Attendez la fin de la synchronisation avant de déplacer la bibliothèque.')
+      throw new Error(say('library.syncRunning'))
     }
 
     const targetDb = join(target, 'magpie.db')
@@ -744,7 +744,7 @@ export function registerIpc({
       const disk = statfsSync(target)
       const available = disk.bavail * disk.bsize
       if (available < total * 1.05) {
-        throw new Error('Espace libre insuffisant dans le dossier choisi.')
+        throw new Error(say('library.noSpace'))
       }
 
       startedWriting = true
@@ -851,7 +851,7 @@ export function registerIpc({
         return `magpie://video/${media.cachePath}`
       }
       if (!media.source || !/^https?:\/\//i.test(media.source)) {
-        throw new Error('La source en ligne de ce média a expiré. Synchronisez à nouveau le compte.')
+        throw new Error(say('media.linkExpired'))
       }
 
       return createRemoteMediaUrl({ postId, mediaIndex: idx, kind, quality })
@@ -886,7 +886,7 @@ export function registerIpc({
         firstChunkBytes: null
       }
       if (typeof postId !== 'string' || postId.length > 300 || !Number.isInteger(idx) || idx < 0) {
-        return { ok: false, ...empty, elapsedMs: 0, error: 'Média invalide' }
+        return { ok: false, ...empty, elapsedMs: 0, error: 'invalid-media' }
       }
 
       const media = playbackMediaSource(postId, idx, kind, quality)
@@ -895,7 +895,7 @@ export function registerIpc({
           ok: false,
           ...empty,
           elapsedMs: Date.now() - started,
-          error: 'Aucune source en ligne enregistrée pour ce média.'
+          error: say('media.noSource')
         }
       }
 

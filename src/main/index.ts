@@ -32,6 +32,7 @@ import {
   VIDEO_NAME_PATTERN,
   resetCacheUsage
 } from './media/cache'
+import { say } from './messages'
 import { applyTheme, readSettings } from './settings'
 import { syncEngine } from './sync/engine'
 import { repairMissingCacheFiles, repairOversizedVideos } from './sync/repair'
@@ -1055,7 +1056,7 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 }).catch((error: unknown) => {
-  dialog.showErrorBox('Bibliothèque Magpie inaccessible', (error as Error).message)
+  dialog.showErrorBox(say('library.unreachable'), (error as Error).message)
   app.quit()
 })
 

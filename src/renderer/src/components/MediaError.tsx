@@ -47,13 +47,18 @@ export function MediaError({
       <span>{message}</span>
       {diagnostic ? (
         <code className="player__diagnostic">
+          {/* Un relevé, pas une phrase. Il était composé en français — « o reçus », « ranges
+              non annoncés », « longueur », « encodage » — dans les deux langues, ce qui le
+              rendait à la fois intraduit et inutilisable : ce texte sert à être recopié dans
+              un rapport, ou comparé à ce que rend `curl`. Les noms d'en-têtes HTTP le disent
+              mieux qu'une traduction, et de la même façon pour tout le monde. */}
           {diagnostic.status !== null
             ? `${diagnostic.host ?? '?'} · HTTP ${diagnostic.status} ${diagnostic.statusText ?? ''} · ` +
-              `${diagnostic.contentType ?? 'type ?'} · ${diagnostic.firstChunkBytes ?? 0} o reçus · ` +
-              `ranges ${diagnostic.acceptRanges ?? 'non annoncés'}` +
-              (diagnostic.contentRange ? ` · ${diagnostic.contentRange}` : '') +
-              (diagnostic.contentLength ? ` · longueur ${diagnostic.contentLength}` : '') +
-              (diagnostic.contentEncoding ? ` · encodage ${diagnostic.contentEncoding}` : '') +
+              `${diagnostic.contentType ?? 'content-type: ?'} · ${diagnostic.firstChunkBytes ?? 0} B · ` +
+              `accept-ranges: ${diagnostic.acceptRanges ?? 'none'}` +
+              (diagnostic.contentRange ? ` · content-range: ${diagnostic.contentRange}` : '') +
+              (diagnostic.contentLength ? ` · content-length: ${diagnostic.contentLength}` : '') +
+              (diagnostic.contentEncoding ? ` · content-encoding: ${diagnostic.contentEncoding}` : '') +
               ` · ${diagnostic.elapsedMs} ms`
             : `${diagnostic.host ?? '?'} · ${diagnostic.elapsedMs} ms`}
           {diagnostic.error ? `\n${diagnostic.error}` : ''}
