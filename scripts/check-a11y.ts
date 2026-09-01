@@ -205,5 +205,59 @@ console.log('\nle petit texte se lit dans les deux thèmes')
   }
 }
 
+console.log('\nce qui est cliquable dans une zone de glissement le dit')
+{
+  /**
+   * **Toute la barre du haut est devenue incliquable, et rien ne pouvait le voir.**
+   *
+   * La fenêtre est sans cadre : `.topbar` porte `-webkit-app-region: drag` pour qu'on puisse
+   * la déplacer. Sous Electron, un enfant d'une zone `drag` hérite de ce comportement — le clic
+   * va au gestionnaire de fenêtre, pas au bouton. Les cinq lignes qui rendaient les contrôles
+   * `no-drag` ont disparu dans un remaniement de la barre, et avec elles la synchronisation,
+   * les filtres, le tri, les dispositions et la recherche. Pendant une release entière.
+   *
+   * **L'aperçu navigateur ne pouvait pas le montrer** : `app-region` n'existe pas dans un
+   * navigateur, tout y reste cliquable. C'est précisément le genre de défaut qu'un contrôle de
+   * source doit attraper, puisque aucun essai à l'écran ne le rencontrera.
+   *
+   * La règle : toute zone déclarée `drag` doit déclarer, quelque part, ce qui reste cliquable
+   * dedans.
+   */
+  const css = read('src/renderer/src/styles.css')
+
+  /* Les sélecteurs qui se déclarent zone de glissement. On remonte au sélecteur qui précède
+     la déclaration, ce qui suffit ici : chaque règle en tient un seul. */
+  /* Les prises qui ne contiennent aucun contrôle, avec ce qu'elles portent. Déclarées plutôt
+     que devinées : le jour où l'une d'elles gagne un bouton, la règle doit le voir. */
+  const BARE_HANDLES: Record<string, string> = {
+    '.sidebar__head': 'ne porte que le logo',
+    '.welcome__drag': 'rectangle vide, posé sur l’accueil pour déplacer la fenêtre'
+  }
+
+  const dragging: string[] = []
+  for (const match of css.matchAll(/([.#\[][^{};]*?)\s*\{[^{}]*?-webkit-app-region:\s*drag/g)) {
+    dragging.push(match[1].trim().split('\n').pop()!.trim())
+  }
+
+  if (dragging.length === 0) {
+    fail('plus aucune zone de glissement — la fenêtre sans cadre ne se déplace plus')
+  }
+
+  for (const zone of dragging) {
+    /* Une zone qui ne contient aucun contrôle n'a rien à excepter : c'est le cas de la prise
+       posée sur l'accueil, qui est un rectangle vide par construction. */
+    const bare = zone.replace(/^[.#]/, '').replace(/__.*/, '')
+    const exempt = BARE_HANDLES[zone]
+    if (exempt) {
+      pass(`${zone} — ${exempt}`)
+      continue
+    }
+    const escaped = zone.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const frees = new RegExp(`${escaped}[^{}]*\\{[^{}]*?-webkit-app-region:\\s*no-drag`).test(css)
+    if (frees) pass(`${zone} — ses contrôles sont rendus cliquables`)
+    else fail(`${zone} est une zone de glissement dont rien ne libère les contrôles (${bare})`)
+  }
+}
+
 console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} manquement(s).`)
 process.exitCode = failures === 0 ? 0 : 1

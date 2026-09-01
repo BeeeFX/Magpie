@@ -574,6 +574,36 @@ h1, h2, h3 {
   container-name: topbar;
 }
 
+/*
+ * Ce qui est cliquable dans une zone de glissement doit le dire.
+ *
+ * La barre entière est une prise pour déplacer la fenêtre — elle est sans cadre. Sous Electron,
+ * un enfant d'une zone `drag` hérite de ce comportement : le clic va au gestionnaire de fenêtre,
+ * pas au bouton. **Ces cinq lignes avaient disparu**, et avec elles la possibilité de cliquer
+ * quoi que ce soit dans la barre du haut de l'application empaquetée — synchronisation, filtres,
+ * tri, dispositions, recherche. L'aperçu navigateur ne pouvait pas le montrer : `app-region`
+ * n'existe pas dans un navigateur, tout y restait cliquable.
+ */
+.topbar button,
+.topbar input,
+.topbar label,
+.topbar .popover-anchor,
+.topbar .segmented {
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * La place que l'OS prend en haut à droite.
+ *
+ * Windows et Linux dessinent leurs boutons système **par-dessus** notre barre, sans nous
+ * prévenir. Sans cette réserve, les derniers contrôles passent dessous : ils s'affichent, et
+ * le clic va à la fenêtre. Le compte vient de `titleBarOverlay`, qui réserve la même largeur.
+ */
+[data-platform='win32'] .topbar,
+[data-platform='linux'] .topbar {
+  padding-right: 148px;
+}
+
 /* Les paliers, et d'où viennent leurs chiffres.
    Mesurés sur le français, la langue la plus longue des deux : libellés entiers, la barre
    réclame 1 246 px de contenu ; sans les trois libellés secondaires, 972 ; sans la densité,
