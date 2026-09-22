@@ -71,6 +71,35 @@ function refreshStatsSoon(): void {
 }
 
 /**
+ * Ce qui change quand des posts déjà chargés quittent le résultat affiché.
+ *
+ * Les retirer de `posts` ne suffit pas : la mise en page n'est recalculée qu'au changement de
+ * `layoutRevision`, et `alignItemsToPosts` garde un élément dont le post a disparu. Sans ce
+ * saut de révision, un post retiré ou sorti des favoris restait au mur avec ses anciennes
+ * données, et un clic dessus ne trouvait plus rien à ouvrir. Le décalage de pagination recule
+ * d'autant : les lignes suivantes sont remontées dans SQLite, et `loadMore` écarte déjà les
+ * doublons si l'on recule un peu trop.
+ */
+function withoutPosts(
+  state: Pick<State, 'layoutRevision' | 'resultTotal' | 'nextOffset'>,
+  before: Post[],
+  gone: (post: Post) => boolean
+): Pick<State, 'posts' | 'layoutRevision' | 'resultTotal' | 'nextOffset'> {
+  const posts = before.filter((post) => !gone(post))
+  const removed = before.length - posts.length
+  if (removed === 0) {
+    const { layoutRevision, resultTotal, nextOffset } = state
+    return { posts, layoutRevision, resultTotal, nextOffset }
+  }
+  return {
+    posts,
+    layoutRevision: state.layoutRevision + 1,
+    resultTotal: Math.max(0, state.resultTotal - removed),
+    nextOffset: Math.max(0, state.nextOffset - removed)
+  }
+}
+
+/**
  * Zustand appelle le stockage après chaque mutation, même lorsque la partie persistée n'a
  * pas changé. Sur une grosse synchronisation cela faisait des milliers d'écritures
  * synchrones dans Chromium. On déduplique et on regroupe ces écritures hors du chemin de
@@ -617,7 +646,15 @@ export const useStore = create<State>()(
         try {
           const ids = get().selectedIds
           for (const slice of chunk(ids)) await magpie.archivePosts(slice, archived)
-          set({ selectedIds: [] })
+          /* `refresh` sans remise à zéro garde les cartes déjà à l'écran : les posts retirés
+             y restaient, alors que la notification les annonçait partis. On les ôte d'abord
+             de la liste — ils quittent la vue courante dès que leur état n'est plus le sien. */
+          const selected = new Set(ids)
+          const leaving = archived !== get().query.archived
+          set({
+            selectedIds: [],
+            ...withoutPosts(get(), get().posts, (post) => leaving && selected.has(post.id))
+          })
           await get().refresh()
           notifySuccess(archived ? 'bulk.archived' : 'bulk.restored', { count: ids.length }, {
             key: 'notice.undo',
@@ -643,7 +680,7 @@ export const useStore = create<State>()(
           await magpie.archivePosts([id], archived)
           /* Le post quitte la liste en place : recharger la page entière ferait sauter le mur
              sous les yeux pour un seul élément. */
-          set({ posts: get().posts.filter((post) => post.id !== id) })
+          set(withoutPosts(get(), get().posts, (post) => post.id === id))
           notifySuccess(archived ? 'bulk.archived' : 'bulk.restored', { count: 1 }, {
             key: 'notice.undo',
             run: () => {
@@ -1045,13 +1082,13 @@ export const useStore = create<State>()(
       toggleFavorite: async (id) => {
         try {
           const isFavorite = await magpie.toggleFavorite(id)
-          const before = get().posts
-          const posts = before
-            .map((p) => (p.id === id ? { ...p, isFavorite } : p))
-            .filter((post) => !(get().query.favoritesOnly && post.id === id && !isFavorite))
+          const posts = get().posts.map((p) => (p.id === id ? { ...p, isFavorite } : p))
           set({
-            posts,
-            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
+            ...withoutPosts(
+              get(),
+              posts,
+              (post) => get().query.favoritesOnly && post.id === id && !isFavorite
+            ),
             stats: get().stats
               ? {
                   ...get().stats!,
