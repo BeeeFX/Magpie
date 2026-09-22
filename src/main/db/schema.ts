@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 28
+export const SCHEMA_VERSION = 29
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -561,6 +561,36 @@ CREATE TABLE IF NOT EXISTS collection_snapshots (
 );
 `
 
+/**
+ * L'unicité des noms de collection, rendue aux installations neuves.
+ *
+ * En ajoutant `idx_collections_name` à SCHEMA_SQL, un point-virgule s'est posé au mauvais
+ * endroit : la condition `WHERE cover_post_id IS NOT NULL` de l'index voisin est passée sur
+ * celui-ci. Or rien ne pose jamais `cover_post_id` — l'index unique ne couvrait donc aucune
+ * ligne, et une installation neuve depuis 0.44.0 acceptait de nouveau deux « Musique », le
+ * défaut même que la migration 27 corrigeait. Les bases migrées, elles, avaient le bon index.
+ *
+ * `check:schema` ne comparait que les noms des objets : un index homonyme mais différent
+ * passait. Il compare désormais aussi leur définition.
+ *
+ * Le dédoublonnage reprend celui de la migration 27, avec l'identifiant pour suffixe plutôt
+ * qu'un rang : un rang peut retomber sur un nom existant — « musique » devenant « musique (1) »
+ * à côté d'une « Musique (1) » — et l'index échouerait alors à chaque démarrage. Rejouable sur
+ * une base vide, comme les autres.
+ */
+export const MIGRATION_29_SQL = /* sql */ `
+UPDATE collections SET name = name || ' (' || id || ')'
+WHERE EXISTS (
+  SELECT 1 FROM collections AS earlier
+   WHERE earlier.name = collections.name COLLATE NOCASE AND earlier.id < collections.id
+);
+DROP INDEX IF EXISTS idx_collections_name;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON collections(name COLLATE NOCASE);
+DROP INDEX IF EXISTS idx_collections_cover;
+CREATE INDEX IF NOT EXISTS idx_collections_cover ON collections(cover_post_id)
+  WHERE cover_post_id IS NOT NULL;
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -875,9 +905,9 @@ CREATE INDEX IF NOT EXISTS idx_collection_posts_post ON collection_posts(post_id
 CREATE INDEX IF NOT EXISTS idx_collection_removals_post ON collection_removals(post_id);
 CREATE INDEX IF NOT EXISTS idx_collection_feedback_post ON collection_feedback(post_id);
 CREATE INDEX IF NOT EXISTS idx_collections_cover ON collections(cover_post_id)
-;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON collections(name COLLATE NOCASE)
   WHERE cover_post_id IS NOT NULL;
+-- Voir MIGRATION_27_SQL et MIGRATION_29_SQL.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON collections(name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_post_positions_post ON post_positions(post_id);
 `
 
@@ -918,5 +948,6 @@ export const MIGRATIONS: Record<number, string> = {
   25: MIGRATION_25_SQL,
   26: MIGRATION_26_SQL,
   27: MIGRATION_27_SQL,
-  28: MIGRATION_28_SQL
+  28: MIGRATION_28_SQL,
+  29: MIGRATION_29_SQL
 }

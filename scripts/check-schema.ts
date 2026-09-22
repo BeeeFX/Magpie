@@ -211,6 +211,62 @@ console.log('l’échelle rejouée en entier')
   check('aucune migration ne lève', errors.length === 0, errors.join(' | '))
 }
 
+/* Le même nom ne suffit pas. Un index homonyme mais défini autrement passait le contrôle
+   précédent — c'est arrivé à `idx_collections_name`, posé par SCHEMA_SQL avec la condition de
+   l'index voisin : il ne couvrait aucune ligne, et une installation neuve acceptait deux
+   collections du même nom. La dernière définition que l'échelle donne d'un index doit donc
+   être, au texte près, celle d'une installation neuve. */
+console.log('')
+console.log('les index de l’échelle ont leur définition dans SCHEMA_SQL')
+{
+  const normalise = (sql: string): string =>
+    sql
+      .replace(/--[^\n]*/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\bIF\s+(NOT\s+)?EXISTS\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .replace(/\s*([(),])\s*/g, '$1')
+      .replace(/;\s*$/, '')
+      .trim()
+      .toLowerCase()
+
+  /* `null` : l'index a été retiré plus loin dans l'échelle. */
+  const last = new Map<string, { sql: string; version: number } | null>()
+  for (const version of versions) {
+    for (const statement of splitStatements(MIGRATIONS[version])) {
+      const text = normalise(statement)
+      const created = /^create (?:unique )?index (\w+)/.exec(text)
+      const dropped = /^drop index (\w+)/.exec(text)
+      if (created) last.set(created[1], { sql: text, version })
+      else if (dropped) last.set(dropped[1], null)
+    }
+  }
+
+  const conn = fresh()
+  const installed = new Map(
+    (
+      conn
+        .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL")
+        .all() as { name: string; sql: string }[]
+    ).map((row) => [row.name, normalise(row.sql)])
+  )
+  conn.close()
+
+  const differing: string[] = []
+  for (const [name, definition] of last) {
+    if (!definition) continue
+    const fresh = installed.get(name)
+    if (fresh !== undefined && fresh !== definition.sql) {
+      differing.push(`${name} (v${definition.version}) : « ${definition.sql} » ≠ « ${fresh} »`)
+    }
+  }
+  check(
+    'aucun index homonyme défini autrement',
+    differing.length === 0,
+    differing.length === 0 ? `${last.size} index comparés` : differing.join(' | ')
+  )
+}
+
 console.log('')
 console.log(
   failures === 0
