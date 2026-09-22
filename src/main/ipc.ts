@@ -21,7 +21,7 @@ import type {
   PreloadRequest,
   Settings
 } from '@shared/types'
-import { BULK_MAX, CONTENT_SOURCES, DEFAULT_QUERY, LABELS, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS, SORT_KEYS } from '@shared/types'
+import { BULK_MAX, CONTENT_SOURCES, DEFAULT_QUERY, LABELS, LOAD_PROFILES, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS, SORT_KEYS } from '@shared/types'
 import { dataDir, getDb, mediaDir, writeDataDirLocation } from './db'
 import {
   addTag,
@@ -427,6 +427,9 @@ export function registerIpc({
     return backgroundTasks.current()
   })
   ipcMain.handle('tasks:setLoadProfile', (_event, profile: LoadProfile) => {
+    // Un profil inconnu donnait `WORKERS[x] === undefined`, donc zéro travailleur média et
+    // une file qui attendait pour toujours.
+    if (!LOAD_PROFILES.includes(profile)) throw new Error('Profil de charge invalide')
     backgroundTasks.setLoadProfile(profile)
     return backgroundTasks.current()
   })
