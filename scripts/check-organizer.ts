@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import type { OrganizationItem } from '../src/main/db/queries'
 import { redistributeOrganizerRoutes } from '../src/shared/organizer'
@@ -42,7 +43,7 @@ const visual = await extractLocalVisualFeature('build/icon.png')
 assert(visual !== null && visual.length > 100, 'une vignette produit une signature visuelle locale')
 assert(
   resolveLocalThumbnailPath('thumbnail.webp', 'D:\\Magpie\\media') ===
-    'D:\\Magpie\\media\\thumbnail.webp',
+    join('D:\\Magpie\\media', 'thumbnail.webp'),
   'un nom de vignette stocké en base est résolu dans le dossier média'
 )
 
