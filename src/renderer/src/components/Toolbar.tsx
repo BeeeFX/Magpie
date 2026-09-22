@@ -4,6 +4,7 @@ import { SORT_KEYS } from '@shared/types'
 import type { TranslationKey } from '../i18n'
 import { notifyError, notifyInfo, notifySuccess, reportFailure } from '../notices'
 import { activeFilterCount } from '../query'
+import { chunk } from '../selection'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { MODIFIER } from '../format'
 import { ConfirmButton } from './ConfirmButton'
@@ -231,17 +232,16 @@ export function Toolbar(): React.JSX.Element {
   }
 
   const copySelection = (): void => {
-    /* Lu au clic, pas par abonnement. S'abonner à `posts` pour ce seul gestionnaire rendait
-       toute la barre — synchronisation, téléchargements, les deux menus, le curseur de
-       densité — à chaque reconstruction du tableau, soit plusieurs fois par seconde pendant
-       un import, pour une valeur qu'aucun rendu ne lit. */
-    const posts = useStore.getState().posts
-    const selected = new Set(selectedIds)
-    void magpie
-      .copyToClipboard(
-        posts.filter((post) => selected.has(post.id)).map((post) => post.url).join('\n')
-      )
-      .then(() => notifySuccess('bulk.copied', { count: selected.size }))
+    /* Les URL se demandent à la base, pas aux posts chargés. Filtrer `posts` ne voyait que la
+       page affichée — quelques centaines de posts : après « Tout » sur neuf mille résultats,
+       on copiait ces quelques centaines et on annonçait neuf mille. Découpé comme les autres
+       actions de masse, puisque le processus principal refuse au-delà de `BULK_MAX`. */
+    void Promise.all(chunk(selectedIds).map((slice) => magpie.postUrls(slice)))
+      .then(async (slices) => {
+        const urls = slices.flat()
+        await magpie.copyToClipboard(urls.join('\n'))
+        notifySuccess('bulk.copied', { count: urls.length })
+      })
       .catch(reportFailure('notice.copyFailed'))
   }
 
