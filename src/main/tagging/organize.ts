@@ -34,7 +34,7 @@ import { centreVectors, embedItems, embedTexts } from './embeddings'
 import { blend, encodeTopicPrompts, toVector, topicStandoff, MAP_LAYOUTS, type MapLayout } from './vision'
 import { buildMapLabels } from './map-labels'
 import { propagateByImage } from './propagate'
-import { project, TUNING, type ProjectedPoint } from './projection'
+import { placeAgainstFrozen, project, TUNING, type ProjectedPoint } from './projection'
 import { mediaDir } from '../db'
 import { readSettings } from '../settings'
 import { STOP_WORDS, normalizePhrase, words, postTerms } from './terms'
@@ -714,68 +714,6 @@ let lastSemanticVectors: Map<string, Float32Array> | null = null
  * d'autres poids : partir du mélange déjà fait ne permettrait pas de le refaire autrement.
  */
 let lastRawText: Map<string, Float32Array> | null = null
-/** Recette de la derniere analyse : en changer doit refaire la carte, pas la reprendre. */
-/**
- * Place les posts contre une carte déjà figée.
- *
- * Ceux qui y sont déjà gardent leur place, au pixel près. Les nouveaux se posent à la moyenne
- * pondérée de leurs plus proches voisins **dans l'espace des vecteurs**, ce qui est au fond ce
- * que fait `umap.transform` — sauf que celui-ci exige le modèle en mémoire, et umap-js ne sait
- * pas le sérialiser : il ne survivrait pas à la fermeture de l'application, alors que les
- * positions, elles, sont en base.
- *
- * Le poids décroît avec la distance, donc un post qui ressemble beaucoup à un voisin se pose
- * sur lui plutôt qu'au milieu d'un groupe hétéroclite.
- */
-function placeAgainstFrozen(
-  vectors: Map<string, Float32Array>,
-  frozen: Map<string, { x: number; y: number }>
-): ProjectedPoint[] {
-  const anchors: { id: string; vector: Float32Array; x: number; y: number }[] = []
-  for (const [id, place] of frozen) {
-    const vector = vectors.get(id)
-    if (vector) anchors.push({ id, vector, x: place.x, y: place.y })
-  }
-  const NEIGHBOURS = 12
-  const out: ProjectedPoint[] = []
-  for (const [id, vector] of vectors) {
-    const known = frozen.get(id)
-    if (known) {
-      out.push({ id, x: known.x, y: known.y })
-      continue
-    }
-    const best: { distance: number; x: number; y: number }[] = []
-    for (const anchor of anchors) {
-      let dot = 0
-      const width = Math.min(vector.length, anchor.vector.length)
-      for (let i = 0; i < width; i += 1) dot += vector[i] * anchor.vector[i]
-      const distance = 1 - dot
-      if (best.length < NEIGHBOURS) {
-        best.push({ distance, x: anchor.x, y: anchor.y })
-        best.sort((a, b) => a.distance - b.distance)
-      } else if (distance < best[NEIGHBOURS - 1].distance) {
-        best[NEIGHBOURS - 1] = { distance, x: anchor.x, y: anchor.y }
-        best.sort((a, b) => a.distance - b.distance)
-      }
-    }
-    if (best.length === 0) {
-      out.push({ id, x: 0.5, y: 0.5 })
-      continue
-    }
-    let weight = 0
-    let x = 0
-    let y = 0
-    for (const neighbour of best) {
-      const w = 1 / (neighbour.distance + 0.05)
-      weight += w
-      x += neighbour.x * w
-      y += neighbour.y * w
-    }
-    out.push({ id, x: x / weight, y: y / weight })
-  }
-  return out
-}
-
 /** Dernier plan produit. La carte le réutilise au lieu de relancer toute l'analyse. */
 let lastPlan: AiCollectionPlan | null = null
 
@@ -1101,7 +1039,14 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
       /* Une carte figée qui ne couvre presque plus la bibliothèque n'en est plus une : au
          delà d'un quart de posts nouveaux, l'interpolation placerait trop de monde à partir
          de trop peu, et mieux vaut reprojeter franchement. */
-      if (covered.length >= vectors.size * 0.75) projected = placeAgainstFrozen(vectors, frozen)
+      if (covered.length >= vectors.size * 0.75) {
+        /* Dans le fil de projection, et plus ici : comparer chaque nouveau à chaque ancre
+           figeait la fenêtre 1,9 s pour cinquante posts, une minute et demie à la limite. */
+        setProgress({ stage: 'projecting', done: 0, total: 100, running: true })
+        projected = await placeAgainstFrozen(vectors, frozen, (done, total) =>
+          setProgress({ stage: 'projecting', done, total, running: true })
+        )
+      }
     }
     if (!projected || projected.length !== vectors.size) {
       setProgress({ stage: 'projecting', done: 0, total: 100, running: true })

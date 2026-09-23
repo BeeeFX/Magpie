@@ -1,3 +1,5 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import type { OrganizationItem } from '../src/main/db/queries'
@@ -11,6 +13,7 @@ import {
 } from '../src/main/tagging/organize'
 import { propagateByImage } from '../src/main/tagging/propagate'
 import { embeddingText } from '../src/main/tagging/embeddings'
+import { placeAgainstFrozen } from '../src/main/tagging/projection'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Échec : ${message}`)
@@ -294,6 +297,178 @@ console.log('\npropagation par voisinage d’image')
   assert(
     longest < 250,
     `la propagation rend la main au fil de l'eau (plus long blocage : ${Math.round(longest)} ms)`
+  )
+}
+
+console.log('\nplacement contre la carte figée')
+{
+  /*
+   * Le placement comparait chaque post nouveau à chaque ancre, sur 1 536 dimensions, d'un seul
+   * tenant et sur le processus principal : 1,9 s de fenêtre figée pour cinquante posts contre
+   * 9 500 ancres, et une minute et demie à la limite du quart de posts nouveaux. Il tourne
+   * désormais dans le fil de projection ; ce contrôle mesure ce qui reste ici — la mise à plat
+   * de la bibliothèque entière — à la taille de la bibliothèque de référence.
+   *
+   * Et il vérifie que le résultat n'a pas bougé d'un bit : la version d'origine est recopiée
+   * ci-dessous telle qu'elle était, et rejouée sur un échantillon.
+   */
+  const WIDTH = 1536
+  const TEXT = 384
+  const TOTAL = 9_740
+  let seed = 20240923
+  const random = (): number => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+  const vectors = new Map<string, Float32Array>()
+  const fresh: string[] = []
+  const anchors: string[] = []
+  for (let index = 0; index < TOTAL; index += 1) {
+    const id = `map-${index}`
+    const cluster = index % 20
+    const vector = new Float32Array(WIDTH)
+    /* Un post sur cinq sans image : ses blocs d'image sont nuls, comme ceux que `blend` rend. */
+    const width = index % 5 === 0 ? TEXT : WIDTH
+    let norm = 0
+    for (let axis = 0; axis < width; axis += 1) {
+      vector[axis] = Math.sin((cluster + 1) * (axis + 1) * 0.05) + (random() - 0.5) * 0.5
+      norm += vector[axis] * vector[axis]
+    }
+    for (let axis = 0; axis < width; axis += 1) vector[axis] /= Math.sqrt(norm)
+    /* Des doublons exacts, pour que des distances soient égales et que l'ordre des ancres ait
+       à les départager. */
+    if (index % 50 === 1) vector.set(vectors.get(`map-${index - 1}`) as Float32Array)
+    vectors.set(id, vector)
+    if (index % 21 === 7) fresh.push(id)
+    else anchors.push(id)
+  }
+  /* Et deux ancres jumelles de chacun des trois premiers nouveaux : à distance nulle toutes les
+     deux, c'est l'ordre de la carte figée seul qui dit laquelle compte d'abord. */
+  for (const id of fresh.slice(0, 3)) {
+    for (const twin of ['a', 'b']) {
+      vectors.set(`${id}-${twin}`, Float32Array.from(vectors.get(id) as Float32Array))
+      anchors.push(`${id}-${twin}`)
+    }
+  }
+  /* La carte figée dans un autre ordre que les vecteurs : c'est le sien qui départage. */
+  const frozen = new Map(
+    [...anchors].reverse().map((id) => [id, { x: random(), y: random() }] as const)
+  )
+
+  /* La version d'origine, recopiée telle quelle. */
+  const original = (
+    all: Map<string, Float32Array>,
+    placed: Map<string, { x: number; y: number }>
+  ): { id: string; x: number; y: number }[] => {
+    const known: { id: string; vector: Float32Array; x: number; y: number }[] = []
+    for (const [id, place] of placed) {
+      const vector = all.get(id)
+      if (vector) known.push({ id, vector, x: place.x, y: place.y })
+    }
+    const NEIGHBOURS = 12
+    const out: { id: string; x: number; y: number }[] = []
+    for (const [id, vector] of all) {
+      const here = placed.get(id)
+      if (here) {
+        out.push({ id, x: here.x, y: here.y })
+        continue
+      }
+      const best: { distance: number; x: number; y: number }[] = []
+      for (const anchor of known) {
+        let dot = 0
+        const width = Math.min(vector.length, anchor.vector.length)
+        for (let i = 0; i < width; i += 1) dot += vector[i] * anchor.vector[i]
+        const distance = 1 - dot
+        if (best.length < NEIGHBOURS) {
+          best.push({ distance, x: anchor.x, y: anchor.y })
+          best.sort((a, b) => a.distance - b.distance)
+        } else if (distance < best[NEIGHBOURS - 1].distance) {
+          best[NEIGHBOURS - 1] = { distance, x: anchor.x, y: anchor.y }
+          best.sort((a, b) => a.distance - b.distance)
+        }
+      }
+      if (best.length === 0) {
+        out.push({ id, x: 0.5, y: 0.5 })
+        continue
+      }
+      let weight = 0
+      let x = 0
+      let y = 0
+      for (const neighbour of best) {
+        const w = 1 / (neighbour.distance + 0.05)
+        weight += w
+        x += neighbour.x * w
+        y += neighbour.y * w
+      }
+      out.push({ id, x: x / weight, y: y / weight })
+    }
+    return out
+  }
+
+  /* Le fil depuis ses sources, sans compilation : un amorçage qui charge tsx puis le script.
+     Lancé tel quel, le `.ts` se charge mais ses imports sans extension ne se résolvent pas. */
+  const script = join(mkdtempSync(join(tmpdir(), 'magpie-place-')), 'place.cjs')
+  writeFileSync(
+    script,
+    `require(${JSON.stringify(require.resolve('tsx/cjs'))})\n` +
+      `require(${JSON.stringify(join(process.cwd(), 'src', 'main', 'tagging', 'projection.worker.ts'))})\n`
+  )
+  let longest = 0
+  let tick = performance.now()
+  const beat = setInterval(() => {
+    longest = Math.max(longest, performance.now() - tick)
+    tick = performance.now()
+  }, 10)
+  const started = performance.now()
+  const points = await placeAgainstFrozen(vectors, frozen, undefined, script)
+  const elapsed = performance.now() - started
+  longest = Math.max(longest, performance.now() - tick)
+  clearInterval(beat)
+
+  assert(points.length === vectors.size, `un point par post (${points.length})`)
+  assert(
+    points.every((point) => point.id !== undefined && Number.isFinite(point.x) && Number.isFinite(point.y)),
+    'aucune coordonnée n’est NaN ou infinie'
+  )
+  assert(
+    anchors.every((id) => {
+      const point = points.find((entry) => entry.id === id)
+      const place = frozen.get(id)
+      return point && place && point.x === place.x && point.y === place.y
+    }),
+    'les posts déjà placés gardent leur place au bit près'
+  )
+
+  /* L'échantillon : les vingt-quatre premiers nouveaux, contre toutes les ancres. */
+  const sample = fresh.slice(0, 24)
+  const subset = new Map([...anchors, ...sample].map((id) => [id, vectors.get(id) as Float32Array]))
+  const referenceStarted = performance.now()
+  const reference = original(subset, frozen).filter((point) => sample.includes(point.id))
+  const referenceBlock = performance.now() - referenceStarted
+  const byId = new Map(points.map((point) => [point.id, point]))
+  const differing = reference.filter((point) => {
+    const now = byId.get(point.id)
+    return !now || now.x !== point.x || now.y !== point.y
+  })
+  assert(
+    differing.length === 0,
+    `le placement rend exactement les positions d’avant (${reference.length} posts comparés, ${differing.length} différents)`
+  )
+  console.log(
+    `  ${fresh.length} posts placés contre ${anchors.length} ancres en ${Math.round(elapsed)} ms ; ` +
+      `la version d'origine figeait la boucle ${Math.round(referenceBlock)} ms pour ${sample.length} d'entre eux`
+  )
+  assert(
+    longest < 250,
+    `le placement laisse la boucle d'événements libre (plus long blocage : ${Math.round(longest)} ms)`
+  )
+
+  const untouched = await placeAgainstFrozen(
+    new Map(anchors.slice(0, 10).map((id) => [id, vectors.get(id) as Float32Array])),
+    frozen,
+    undefined,
+    'fil-introuvable.js'
+  )
+  assert(
+    untouched.length === 10 && untouched.every((point) => point.x === frozen.get(point.id)?.x),
+    'sans post nouveau, aucun fil n’est lancé et les places rangées reviennent telles quelles'
   )
 }
 
