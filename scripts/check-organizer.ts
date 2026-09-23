@@ -247,6 +247,10 @@ console.log('\npropagation par voisinage d’image')
    * créneau sans respiration, pas sur la durée totale — et sur un échantillon réduit, qui
    * suffit : c'est la taille de la tranche qu'on mesure, et elle ne dépend pas du nombre de
    * posts.
+   *
+   * Elle en dépendait tant que la tranche se comptait en posts — trente-deux orphelins, chacun
+   * au prix du nombre de posts classés : 316 ms relevés dans une passe de ce contrôle. Elle se
+   * règle désormais sur l'horloge, lecture et centrage des vecteurs compris.
    */
   const DIMS = 768
   const vector = (seed: number): Buffer => {
