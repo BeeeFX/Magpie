@@ -378,7 +378,7 @@ function refreshBackgroundFeatures(): void {
     scheduleTimer = setInterval(() => {
       if (Date.now() - lastScheduledSync < interval || syncEngine.isRunning()) return
       lastScheduledSync = Date.now()
-      void syncEngine.syncAll()
+      void syncEngine.syncAll(undefined, { automatic: true })
     }, 60 * 1000)
   }
 }
@@ -1049,7 +1049,7 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
   const startupSettings = readSettings()
   if (startupSettings.onboardingDone && startupSettings.syncOnLaunch) {
     lastScheduledSync = Date.now()
-    void syncEngine.syncAll()
+    void syncEngine.syncAll(undefined, { automatic: true })
   }
 
   app.on('activate', () => {

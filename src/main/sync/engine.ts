@@ -141,7 +141,10 @@ class SyncEngine {
    * ont toutes fini ; une plateforme déjà en cours n'est pas relancée mais son achèvement
    * est bien attendu.
    */
-  async syncAll(platforms?: Platform[]): Promise<SyncState> {
+  async syncAll(
+    platforms?: Platform[],
+    { automatic = false }: { automatic?: boolean } = {}
+  ): Promise<SyncState> {
     const targets = platforms ?? [...PUBLIC_PLATFORMS]
     const started: Promise<void>[] = []
 
@@ -151,6 +154,11 @@ class SyncEngine {
         started.push(existing)
         continue
       }
+      // Une vérification de sécurité en attente ne se relance pas toute seule : la
+      // synchronisation planifiée et celle du démarrage retapaient le compte toutes les heures,
+      // ce qui est exactement ce qui transforme une vérification en blocage. Un geste de
+      // l'utilisateur — synchroniser à la main, reconnecter — passe toujours.
+      if (automatic && readAccount(platform)?.lastSyncStatus === 'challenge') continue
       if (!(await ADAPTERS[platform].isConnected())) continue
 
       const run = this.syncOne(platform).finally(() => {
