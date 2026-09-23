@@ -14,6 +14,7 @@ import {
   writeAccount,
   writeAccountSource
 } from '../db/queries'
+import { optimizeDb } from '../db'
 import { say, platformLabel } from '../messages'
 import { readSettings } from '../settings'
 import { applyRuleTags } from '../tagging/rules'
@@ -152,6 +153,9 @@ class SyncEngine {
     }
 
     await Promise.allSettled(started)
+    // Ce qui vient d'arriver change la base : c'est le moment de rafraîchir les statistiques
+    // du planificateur, pour quelques millisecondes. Voir `optimizeDb`.
+    if (started.length > 0) optimizeDb()
     return this.state
   }
 
