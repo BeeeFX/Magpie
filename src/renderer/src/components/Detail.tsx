@@ -32,6 +32,40 @@ import {
   IconStar
 } from './Icons'
 
+/** Au-delà de ce silence entre deux événements de molette, c'est un nouveau geste. L'inertie
+ *  d'un trackpad en émet toutes les 16 ms ; une molette qu'on tourne, toutes les 30 à 100 ms. */
+const WHEEL_GESTURE_GAP = 250
+
+/**
+ * Ce que la molette ferait au-dessus de `target` : faire défiler un bloc (`scrolls`), buter sur
+ * le bout d'un bloc qui défile (`at-edge`), ou rien du tout (`none`).
+ *
+ * On remonte de la cible jusqu'au calque : la transcription défile dans le panneau latéral, qui
+ * défile lui-même, et le navigateur passe de l'un à l'autre. Il suffit qu'un seul puisse encore
+ * avancer dans ce sens pour que la molette lui appartienne.
+ */
+function wheelScrollState(
+  target: EventTarget,
+  boundary: Element,
+  deltaY: number
+): 'scrolls' | 'at-edge' | 'none' {
+  let found = false
+  for (
+    let node = target instanceof Element ? target : null;
+    node && node !== boundary;
+    node = node.parentElement
+  ) {
+    if (node.scrollHeight <= node.clientHeight + 1) continue
+    const overflow = getComputedStyle(node).overflowY
+    if (overflow !== 'auto' && overflow !== 'scroll' && overflow !== 'overlay') continue
+    found = true
+    const room =
+      deltaY > 0 ? node.scrollHeight - node.clientHeight - node.scrollTop : node.scrollTop
+    if (room > 1) return 'scrolls'
+  }
+  return found ? 'at-edge' : 'none'
+}
+
 /**
  * Vue détaillée.
  *
@@ -87,6 +121,8 @@ export function Detail(): React.JSX.Element | null {
   const panelRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const lastWheel = useRef(0)
+  /** Dernier événement de molette, quel qu'il soit : c'est ce qui délimite un geste. */
+  const lastWheelEvent = useRef(0)
   const [entered, setEntered] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const [mediaIndex, setMediaIndex] = useState(0)
@@ -319,11 +355,25 @@ export function Detail(): React.JSX.Element | null {
    * Molette : un cran vers le bas passe au signet suivant, vers le haut au précédent.
    * Le verrou évite qu'un seul geste de trackpad, qui émet des dizaines d'événements,
    * ne fasse défiler vingt posts d'un coup.
+   *
+   * Sauf au-dessus d'un texte qui défile. Le gestionnaire est posé sur tout le calque, et une
+   * légende longue ou une transcription ne se lisaient plus : chaque cran changeait de post, à
+   * peu près toutes les 320 ms. `overscroll-behavior` n'y pouvait rien — il empêche le défilement
+   * de se propager, pas l'événement. Un bloc qui peut encore défiler dans ce sens garde donc la
+   * molette ; arrivé au bout, il ne la rend qu'à un **nouveau** geste, sans quoi l'inertie d'un
+   * trackpad sautait au post suivant à la dernière ligne lue.
    */
   const onWheel = useCallback(
     (event: React.WheelEvent) => {
+      /* L'heure de l'événement, pas celle du traitement : une fenêtre occupée livre les crans en
+         retard et par paquets, et un geste continu passerait alors pour deux. */
+      const now = event.timeStamp
+      const sameGesture = now - lastWheelEvent.current < WHEEL_GESTURE_GAP
+      lastWheelEvent.current = now
+      const scroll = wheelScrollState(event.target, event.currentTarget, event.deltaY)
+      if (scroll === 'scrolls') return
+      if (scroll === 'at-edge' && sameGesture) return
       if (Math.abs(event.deltaY) < 12) return
-      const now = Date.now()
       if (now - lastWheel.current < 320) return
       lastWheel.current = now
       step(event.deltaY > 0 ? 1 : -1)

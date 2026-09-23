@@ -579,6 +579,11 @@ Une vue modale par-dessus la grille : média plein, carrousel, lecteur vidéo av
 plein écran, texte complet, tags éditables, collections, favori, copie du lien, ouverture sur la
 plateforme. Flèches pour passer d'un post à l'autre, `Échap` pour sortir.
 
+La molette passe aussi d'un post à l'autre, **sauf au-dessus d'un texte qui défile encore** — une
+légende longue, une transcription : elle le fait défiler, et arrivée au bout ne rend la main
+qu'à un nouveau geste, pour que l'inertie d'un trackpad ne saute pas au post suivant à la
+dernière ligne lue.
+
 ### Copie — l'usage central
 
 - Un clic sur l'icône de copie d'une carte → URL canonique dans le presse-papier.
