@@ -12,6 +12,7 @@ import type {
 } from '@shared/types'
 import { CONTENT_SOURCES, LABELS, PLATFORMS, POST_KINDS } from '@shared/types'
 import { normalizeTagName, tagKey } from '@shared/tags'
+import { fold } from './db/functions'
 
 /**
  * La bibliothèque dans un seul fichier JSON, et le chemin du retour.
@@ -1419,11 +1420,13 @@ class ImportWriter {
       'SELECT is_favorite, label, transcript FROM posts WHERE id = ?'
     )
     const insertPost = this.statements(`
-      INSERT INTO posts (id, platform, native_id, url, author_handle, author_name, author_avatar,
+      INSERT INTO posts (id, platform, native_id, url, author_handle, author_name,
+                         author_name_folded, author_avatar,
                          text, transcript, kind, media_count, width, height, published_at,
                          saved_at, discovered_at, saved_rank, is_favorite, is_archived, is_demo,
                          label, tag_status, raw, updated_at)
-      VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name, @author_avatar,
+      VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name,
+              @author_name_folded, @author_avatar,
               @text, @transcript, @kind, @media_count, @width, @height, @published_at,
               @saved_at, @discovered_at, @saved_rank, @is_favorite, @is_archived, @is_demo,
               @label, 'rules_only', @raw, @updated_at)`)
@@ -1466,6 +1469,10 @@ class ImportWriter {
           url: post.url,
           author_handle: post.author.handle,
           author_name: post.author.name,
+          /* La recherche compare les noms d'auteur repliés d'avance (voir `searchClause`) : un
+             post importé sans eux resterait introuvable par son auteur jusqu'au prochain
+             démarrage, qui les rattrape. */
+          author_name_folded: post.author.name ? fold(post.author.name) : null,
           author_avatar: post.author.avatar,
           text: post.text,
           transcript: post.transcript,
