@@ -12,6 +12,7 @@ import type {
   VideoQuality
 } from '@shared/types'
 import { CONTENT_SOURCES, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
+import { fold } from './functions'
 import { MEDIA_UPSERT_SQL, THUMB_AWAITING_LINK } from './media-upsert'
 import { getDb } from './index'
 import { searchClause } from './search'
@@ -326,15 +327,17 @@ function orderBy(sort: PostQuery['sort'], randomSeed: number): string {
     case 'author':
       return 'p.author_handle COLLATE NOCASE ASC, COALESCE(p.published_at, 0) DESC, p.id'
     case 'platform':
-      return 'p.platform ASC, COALESCE(p.saved_at, p.discovered_at) DESC, p.id'
+      return 'p.platform ASC, COALESCE(p.saved_at, p.discovered_at) DESC, p.saved_rank ASC, p.id'
     case 'random':
       // Ordre pseudo-aléatoire déterministe et paginable : la première tranche apparaît
       // immédiatement sans charger toute la bibliothèque avant de la mélanger.
       return `((p.rowid * 1103515245 + ${Math.max(1, Math.floor(randomSeed))}) & 2147483647), p.id`
     case 'added':
       /* Ce que Magpie a vu en dernier, indépendamment de la date que la plateforme annonce :
-         après une synchronisation, c'est le seul ordre qui remonte les nouveautés. */
-      return 'p.discovered_at DESC, p.id'
+         après une synchronisation, c'est le seul ordre qui remonte les nouveautés. Toute une
+         tournée partage le même `discovered_at` : le rang l'ordonne à l'intérieur, sans quoi
+         l'identifiant — un ordre sans aucun sens — en décidait. */
+      return 'p.discovered_at DESC, p.saved_rank ASC, p.id'
     case 'saved':
     default:
       return 'COALESCE(p.saved_at, p.discovered_at) DESC, p.saved_rank ASC, p.id'
@@ -954,6 +957,9 @@ export function aiCandidates(postIds?: string[], limit = 500): AiCandidate[] {
     }))
 }
 
+/* À reprendre si l'étiquetage distant revient (`autoTagEnabled` est forcé à faux) :
+   `discovered_at` est l'horodatage d'une tournée, et la reprise d'un rattrapage garde celui du
+   début — ses posts tombent donc avant `since` et ne seraient pas proposés. */
 export function recentAiCandidateIds(platform: Platform, since: number): string[] {
   return (
     getDb()
@@ -1084,16 +1090,19 @@ export interface MediaInput {
 
 const upsertPostStmt = () =>
   getDb().prepare(/* sql */ `
-    INSERT INTO posts (id, platform, native_id, url, author_handle, author_name, text,
+    INSERT INTO posts (id, platform, native_id, url, author_handle, author_name,
+                       author_name_folded, text,
                        kind, media_count, published_at, saved_at, discovered_at,
                        saved_rank, raw, is_demo, updated_at)
-    VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name, @text,
+    VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name,
+            @author_name_folded, @text,
             @kind, @media_count, @published_at, @saved_at, @discovered_at,
             @saved_rank, @raw, @is_demo, @updated_at)
     ON CONFLICT(id) DO UPDATE SET
       url          = excluded.url,
       author_handle= excluded.author_handle,
       author_name  = excluded.author_name,
+      author_name_folded = excluded.author_name_folded,
       text         = excluded.text,
       kind         = excluded.kind,
       media_count  = excluded.media_count,
@@ -1104,10 +1113,19 @@ const upsertPostStmt = () =>
       updated_at   = excluded.updated_at
   `)
 
+/**
+ * `discoveredAt` est l'horodatage de la tournée, pas de l'appel.
+ *
+ * Il valait `Date.now()` à chaque appel, donc à chaque page d'une synchronisation : la page deux
+ * — des signets plus anciens — passait devant la page un sur le mur. Le moteur passe désormais le
+ * même pour toute une tournée, reprise comprise, et `saved_rank` ordonne l'intérieur. Il ne
+ * s'écrit qu'à la première rencontre : un post déjà connu garde le sien.
+ */
 export function upsertPosts(
   posts: PostInput[],
   media: MediaInput[],
-  source: ContentSource = 'saved'
+  source: ContentSource = 'saved',
+  discoveredAt: number = Date.now()
 ): void {
   const db = getDb()
   const post = upsertPostStmt()
@@ -1139,18 +1157,20 @@ export function upsertPosts(
         url: p.url,
         author_handle: p.authorHandle ?? null,
         author_name: p.authorName ?? null,
+        // Replié ici, une fois, plutôt qu'à chaque frappe de recherche : voir MIGRATION_31_SQL.
+        author_name_folded: p.authorName ? fold(p.authorName) : null,
         text: p.text ?? null,
         kind: p.kind,
         media_count: p.mediaCount ?? 0,
         published_at: p.publishedAt ?? null,
         saved_at: p.savedAt ?? null,
-        discovered_at: now,
+        discovered_at: discoveredAt,
         saved_rank: p.savedRank ?? null,
         raw: p.raw === undefined ? null : JSON.stringify(p.raw),
         is_demo: p.isDemo ? 1 : 0,
         updated_at: now
       })
-      sourceStmt.run(p.id, source, p.savedRank ?? null, p.savedAt ?? null, now)
+      sourceStmt.run(p.id, source, p.savedRank ?? null, p.savedAt ?? null, discoveredAt)
 
       // Une plateforme peut retirer un élément d'un carrousel ou remplacer une vidéo.
       // Les anciennes lignes ne doivent alors pas survivre au nouveau payload.
@@ -1267,6 +1287,31 @@ export function knownPostIds(platform: Platform, source: ContentSource = 'saved'
       WHERE p.platform = ? AND ps.source = ?`)
     .all(platform, source) as { id: string }[]
   return new Set(rows.map((row) => row.id))
+}
+
+/**
+ * L'horodatage de la tournée qu'un curseur de reprise interrompt, relu dans la base.
+ *
+ * Seulement pour les curseurs écrits avant qu'ils ne portent leur `epoch` : sans lui, la reprise
+ * aurait pris une date neuve et fait passer la suite de l'historique devant son début. La
+ * dernière ligne rangée avant le point de reprise appartient à la tournée interrompue — la
+ * migration 30 a déjà rendu à chaque tournée un horodatage unique.
+ */
+export function runEpochBefore(
+  platform: Platform,
+  source: ContentSource,
+  rank: number
+): number | null {
+  const row = getDb()
+    .prepare(
+      `SELECT ps.discovered_at AS at
+         FROM post_sources ps JOIN posts p ON p.id = ps.post_id
+        WHERE p.platform = ? AND ps.source = ? AND ps.source_rank < ?
+        ORDER BY ps.source_rank DESC, ps.discovered_at DESC
+        LIMIT 1`
+    )
+    .get(platform, source, rank) as { at: number } | undefined
+  return row?.at ?? null
 }
 
 export interface PlaybackMediaSource {

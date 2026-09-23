@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 29
+export const SCHEMA_VERSION = 31
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -591,6 +591,128 @@ CREATE INDEX IF NOT EXISTS idx_collections_cover ON collections(cover_post_id)
   WHERE cover_post_id IS NOT NULL;
 `
 
+/**
+ * Le mur rendu à son ordre : les signets les plus récents en haut, après un import complet.
+ *
+ * Ni Instagram ni X ne disent quand un post a été enregistré ; le tri « date de sauvegarde »
+ * retombe donc sur `discovered_at`, puis sur le rang. Or `upsertPosts` tamponnait
+ * `discovered_at` **une fois par appel, c'est-à-dire une fois par page**. La page deux — des
+ * signets plus anciens — recevait un horodatage plus récent que la page un et passait devant
+ * elle : au bout d'un rattrapage de dix mille posts, les plus anciens étaient en haut du mur.
+ * L'écriture tamponne désormais une fois par tournée de synchronisation (plateforme × origine),
+ * reprise comprise, et le rang ordonne l'intérieur de la tournée.
+ *
+ * Ce palier répare ce que l'ancienne écriture a laissé. Une tournée ne se lit pas dans la base,
+ * mais elle se reconnaît : par plateforme et par origine, dans l'ordre d'arrivée, **le rang ne
+ * fait que croître tant qu'on reste dans la même tournée** — le moteur le cumule de page en page,
+ * et d'une reprise à la suivante par le curseur. Il repart de zéro quand une tournée neuve
+ * commence : un sync incrémental numérote depuis le haut de la liste. Une ligne dont le rang
+ * retombe, ou n'en a pas, ouvre donc une tournée, et toutes les lignes d'une tournée prennent
+ * l'horodatage de sa première.
+ *
+ * Le post suit **l'origine qui l'a vu en premier**, et c'est une question de cohérence : son
+ * `saved_rank` vient déjà de celle-là (`COALESCE`, premier arrivé), et un horodatage pris à une
+ * autre origine rangerait ce rang dans la tournée d'à côté. Cette origine se reconnaît à son
+ * horodatage, écrit dans le même appel que celui du post — et non au plus petit des deux après
+ * réparation : une reprise garde l'horodatage du début de son rattrapage, qui peut précéder
+ * celui d'une tournée de likes pourtant passée avant elle.
+ *
+ * D'abord, le déclencheur de l'index plein texte ne se déclenche plus que sur ce qu'il indexe.
+ * Il réindexait jusqu'à quatre colonnes — transcriptions comprises — à **chaque** `UPDATE` de
+ * `posts` : un favori, un retrait, un compteur de vignette, et chaque upsert de synchronisation
+ * d'un post déjà connu. La réparation qui suit réécrit `discovered_at` sur toute la
+ * bibliothèque ; avec l'ancien déclencheur, elle aurait reconstruit l'index entier au passage.
+ *
+ * Du SQL pur, rejouable sur une base vide — la table de travail naît vide et repart aussitôt.
+ */
+export const MIGRATION_30_SQL = /* sql */ `
+DROP TRIGGER IF EXISTS posts_fts_au;
+CREATE TRIGGER posts_fts_au AFTER UPDATE OF text, ai_description, author_handle, transcript ON posts
+WHEN old.text IS NOT new.text
+  OR old.ai_description IS NOT new.ai_description
+  OR old.author_handle IS NOT new.author_handle
+  OR old.transcript IS NOT new.transcript
+BEGIN
+  INSERT INTO posts_fts(posts_fts, rowid, text, ai_description, author_handle, transcript)
+  VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle, old.transcript);
+  INSERT INTO posts_fts(rowid, text, ai_description, author_handle, transcript)
+  VALUES (new.rowid, new.text, new.ai_description, new.author_handle, new.transcript);
+END;
+
+DROP TABLE IF EXISTS temp.post_source_runs;
+CREATE TEMP TABLE post_source_runs AS
+WITH arrivals AS (
+  SELECT ps.post_id, ps.source, p.platform, p.is_demo,
+         p.discovered_at AS post_at, p.saved_rank AS post_rank,
+         ps.source_rank, ps.discovered_at AS seen_at,
+         CASE
+           WHEN ps.source_rank IS NULL THEN 1
+           WHEN LAG(ps.source_rank) OVER arrival IS NULL THEN 1
+           WHEN ps.source_rank <= LAG(ps.source_rank) OVER arrival THEN 1
+           ELSE 0
+         END AS opens_run
+    FROM post_sources ps JOIN posts p ON p.id = ps.post_id
+  WINDOW arrival AS (
+    PARTITION BY p.platform, ps.source, p.is_demo
+    ORDER BY ps.discovered_at, ps.source_rank, ps.post_id
+  )
+),
+runs AS (
+  SELECT *, SUM(opens_run) OVER (
+           PARTITION BY platform, source, is_demo
+           ORDER BY seen_at, source_rank, post_id
+           ROWS UNBOUNDED PRECEDING
+         ) AS run
+    FROM arrivals
+)
+SELECT post_id, source, post_at, post_rank, source_rank, seen_at,
+       MIN(seen_at) OVER (PARTITION BY platform, source, is_demo, run) AS epoch
+  FROM runs;
+
+UPDATE posts SET discovered_at = origin.epoch
+  FROM (
+    SELECT post_id, epoch FROM (
+      SELECT post_id, epoch, ROW_NUMBER() OVER (
+               PARTITION BY post_id
+               ORDER BY seen_at = post_at DESC, (source_rank IS post_rank) DESC, seen_at, source
+             ) AS nth
+        FROM temp.post_source_runs
+    ) WHERE nth = 1
+  ) AS origin
+ WHERE origin.post_id = posts.id AND posts.discovered_at <> origin.epoch;
+
+UPDATE post_sources SET discovered_at = runs.epoch
+  FROM temp.post_source_runs AS runs
+ WHERE runs.post_id = post_sources.post_id AND runs.source = post_sources.source
+   AND post_sources.discovered_at <> runs.epoch;
+
+DROP TABLE temp.post_source_runs;
+`
+
+/**
+ * Le nom d'auteur replié une fois pour toutes, à l'écriture.
+ *
+ * La recherche compare le nom affiché de l'auteur par sous-chaîne, accents et casse repliés —
+ * « hibli » trouve « Studio Ghibli », « beyonce » trouve « Beyoncé ». Le repli passait par
+ * `fold()`, une fonction JavaScript déclarée sur la connexion, **appelée sur chaque post à
+ * chaque frappe** : mesuré sur cent mille posts synthétiques, 321 ms par comptage contre 0,2 ms
+ * pour l'index plein texte seul, et `listPostPage` en fait deux — le processus principal gelait
+ * six dixièmes de seconde par touche.
+ *
+ * Replié à l'écriture, le nom se compare avec le `LIKE` natif, sur un index qui le couvre : la
+ * même règle, sans une seule ligne de JavaScript par post. Le remplissage des bases existantes
+ * ne peut pas se faire ici — le repli est du JavaScript, et une migration reste du SQL pur que
+ * `check:schema` rejoue sur une connexion nue. Il se fait à l'ouverture, juste après l'échelle :
+ * voir `backfillFoldedNames`.
+ *
+ * L'index est entier, et non partiel : c'est aussi lui qui trouve, à chaque ouverture, les
+ * lignes restées sans repli — et `IS NULL` ne se cherche pas dans un index qui l'exclut.
+ */
+export const MIGRATION_31_SQL = /* sql */ `
+ALTER TABLE posts ADD COLUMN author_name_folded TEXT;
+CREATE INDEX IF NOT EXISTS idx_posts_author_folded ON posts(author_name_folded);
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -599,6 +721,8 @@ CREATE TABLE IF NOT EXISTS posts (
   url             TEXT NOT NULL,
   author_handle   TEXT,
   author_name     TEXT,
+  -- Le même nom, replié comme la recherche le compare : voir MIGRATION_31_SQL.
+  author_name_folded TEXT,
   author_avatar   TEXT,
   text            TEXT,
   ai_description  TEXT,
@@ -635,6 +759,7 @@ CREATE INDEX IF NOT EXISTS idx_posts_label     ON posts(label) WHERE label IS NO
 CREATE INDEX IF NOT EXISTS idx_posts_feed      ON posts(
   is_archived, COALESCE(saved_at, discovered_at) DESC, saved_rank ASC, id
 );
+CREATE INDEX IF NOT EXISTS idx_posts_author_folded ON posts(author_name_folded);
 
 CREATE TABLE IF NOT EXISTS post_sources (
   post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -893,7 +1018,13 @@ CREATE TRIGGER IF NOT EXISTS posts_fts_ad AFTER DELETE ON posts BEGIN
   VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle, old.transcript);
 END;
 
-CREATE TRIGGER IF NOT EXISTS posts_fts_au AFTER UPDATE ON posts BEGIN
+-- Seulement quand une colonne indexée change vraiment : voir MIGRATION_30_SQL.
+CREATE TRIGGER IF NOT EXISTS posts_fts_au AFTER UPDATE OF text, ai_description, author_handle, transcript ON posts
+WHEN old.text IS NOT new.text
+  OR old.ai_description IS NOT new.ai_description
+  OR old.author_handle IS NOT new.author_handle
+  OR old.transcript IS NOT new.transcript
+BEGIN
   INSERT INTO posts_fts(posts_fts, rowid, text, ai_description, author_handle, transcript)
   VALUES ('delete', old.rowid, old.text, old.ai_description, old.author_handle, old.transcript);
   INSERT INTO posts_fts(rowid, text, ai_description, author_handle, transcript)
@@ -949,5 +1080,7 @@ export const MIGRATIONS: Record<number, string> = {
   26: MIGRATION_26_SQL,
   27: MIGRATION_27_SQL,
   28: MIGRATION_28_SQL,
-  29: MIGRATION_29_SQL
+  29: MIGRATION_29_SQL,
+  30: MIGRATION_30_SQL,
+  31: MIGRATION_31_SQL
 }

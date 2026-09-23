@@ -124,7 +124,7 @@ c'est une propriété qu'on peut vérifier mécaniquement, et pas seulement une 
 
 ## 4. Modèle de données
 
-SQLite, schéma en version **26**, une échelle de migrations dont l'invariant est tenu par
+SQLite, schéma en version **31**, une échelle de migrations dont l'invariant est tenu par
 `npm run check:schema` : une installation neuve exécute `SCHEMA_SQL` seul, donc `SCHEMA_SQL`
 doit déjà contenir tout ce que l'échelle produit. Le détail vit dans `src/main/db/schema.ts`,
 qui est commenté table par table ; ce qui suit dit **à quoi sert chaque groupe**.
@@ -142,7 +142,12 @@ qui est commenté table par table ; ce qui suit dit **à quoi sert chaque groupe
 - `media`, `media_variants` — un rang par média d'un carrousel ; les variantes portent les
   qualités de lecture disponibles et, le cas échéant, leur copie locale.
 - `posts_fts` — FTS5 sur légende, description, auteur **et transcription**, en
-  `unicode61 remove_diacritics 2` : « cafe » trouve « café ».
+  `unicode61 remove_diacritics 2` : « cafe » trouve « café ». Son déclencheur de mise à jour ne
+  réindexe que quand l'une de ces colonnes change — pas à chaque favori ni à chaque upsert d'un
+  post déjà connu.
+- `author_name_folded` — le nom affiché de l'auteur, replié à l'écriture comme la recherche le
+  compare (accents et casse retirés). Le replier à la lecture coûtait une fonction JavaScript
+  par post et par frappe.
 
 **Le rangement**
 
@@ -218,6 +223,13 @@ page regénère un lien à chaque affichage. On fait la même chose (§7).
   qui arrive après le premier backfill. Le tri « par date de sauvegarde » est donc exact pour ce
   qui est capté après l'installation, et seulement *ordonné* pour l'historique antérieur. C'est
   une limite de la plateforme, pas de l'implémentation.
+- **`discovered_at` est l'horodatage d'une tournée, pas d'une page** : un seul par
+  synchronisation (plateforme × origine), gardé par la reprise d'un rattrapage à travers son
+  curseur, et le rang ordonne l'intérieur. Horodatée page par page, la page deux — plus ancienne
+  — passait devant la page un, et un import complet finissait avec les plus vieux signets en
+  haut du mur. Deux plateformes importées ensemble se rangent donc en deux blocs, l'une après
+  l'autre : sans date, il n'y a rien pour les entrelacer honnêtement. La migration 30 a rendu
+  cet ordre aux bibliothèques existantes.
 - **La plateforme la plus sensible** : c'est ici que la temporisation compte le plus.
 
 ### 5.2 X
@@ -551,7 +563,9 @@ propre amas, donc viser le nom devenait un jeu d'adresse.
 - Filtres : plateforme, type de média, « sans tag », liens, tag(s), collection(s), étiquette.
 - Tri : date de sauvegarde (ou rang en repli), date de publication, auteur, plateforme, aléatoire.
 - Recherche plein texte instantanée via FTS5, sur la légende, l'auteur et la transcription,
-  insensible aux accents.
+  insensible aux accents. Le nom affiché de l'auteur et les tags répondent aussi, par
+  sous-chaîne (« hibli » trouve « Studio Ghibli »). Aucun des trois ne s'évalue post par post :
+  une frappe ne coûte pas au prorata de la bibliothèque.
 - L'état complet — recherche, filtres, tri, défilement — **est conservé entre les sessions**.
 
 ### Étiquettes de couleur

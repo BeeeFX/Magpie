@@ -215,9 +215,16 @@ console.log('l’échelle rejouée en entier')
    précédent — c'est arrivé à `idx_collections_name`, posé par SCHEMA_SQL avec la condition de
    l'index voisin : il ne couvrait aucune ligne, et une installation neuve acceptait deux
    collections du même nom. La dernière définition que l'échelle donne d'un index doit donc
-   être, au texte près, celle d'une installation neuve. */
+   être, au texte près, celle d'une installation neuve.
+
+   Les déclencheurs et les tables virtuelles suivent la même règle, pour la même raison : la
+   migration 30 redéfinit `posts_fts_au` pour ne plus réindexer à chaque `UPDATE`, et un
+   SCHEMA_SQL resté sur l'ancien texte aurait rendu aux installations neuves exactement le coût
+   qu'elle retire — sans qu'aucun nom ne manque. Les tables ordinaires restent hors du jeu :
+   `ALTER TABLE … ADD COLUMN` les fait grandir sans réécrire leur `CREATE`, et leurs colonnes
+   sont déjà comparées plus haut. */
 console.log('')
-console.log('les index de l’échelle ont leur définition dans SCHEMA_SQL')
+console.log('les index, déclencheurs et tables virtuelles de l’échelle ont leur définition dans SCHEMA_SQL')
 {
   const normalise = (sql: string): string =>
     sql
@@ -230,15 +237,23 @@ console.log('les index de l’échelle ont leur définition dans SCHEMA_SQL')
       .trim()
       .toLowerCase()
 
-  /* `null` : l'index a été retiré plus loin dans l'échelle. */
+  const KINDS = [
+    { kind: 'index', label: 'aucun index homonyme défini autrement', create: /^create (?:unique )?index (\w+)/, drop: /^drop index (\w+)/ },
+    { kind: 'trigger', label: 'aucun déclencheur homonyme défini autrement', create: /^create trigger (\w+)/, drop: /^drop trigger (\w+)/ },
+    { kind: 'virtual', label: 'aucune table virtuelle homonyme définie autrement', create: /^create virtual table (\w+)/, drop: /^drop table (\w+)/ }
+  ] as const
+
+  /* Clé `genre:nom` ; `null` : l'objet a été retiré plus loin dans l'échelle. */
   const last = new Map<string, { sql: string; version: number } | null>()
   for (const version of versions) {
     for (const statement of splitStatements(MIGRATIONS[version])) {
       const text = normalise(statement)
-      const created = /^create (?:unique )?index (\w+)/.exec(text)
-      const dropped = /^drop index (\w+)/.exec(text)
-      if (created) last.set(created[1], { sql: text, version })
-      else if (dropped) last.set(dropped[1], null)
+      for (const { kind, create, drop } of KINDS) {
+        const created = create.exec(text)
+        const dropped = drop.exec(text)
+        if (created) last.set(`${kind}:${created[1]}`, { sql: text, version })
+        else if (dropped) last.set(`${kind}:${dropped[1]}`, null)
+      }
     }
   }
 
@@ -246,25 +261,34 @@ console.log('les index de l’échelle ont leur définition dans SCHEMA_SQL')
   const installed = new Map(
     (
       conn
-        .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL")
-        .all() as { name: string; sql: string }[]
-    ).map((row) => [row.name, normalise(row.sql)])
+        .prepare(
+          `SELECT type, name, sql FROM sqlite_master
+            WHERE sql IS NOT NULL
+              AND (type IN ('index', 'trigger') OR (type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'))`
+        )
+        .all() as { type: string; name: string; sql: string }[]
+    ).map((row) => [`${row.type === 'table' ? 'virtual' : row.type}:${row.name}`, normalise(row.sql)])
   )
   conn.close()
 
-  const differing: string[] = []
-  for (const [name, definition] of last) {
-    if (!definition) continue
-    const fresh = installed.get(name)
-    if (fresh !== undefined && fresh !== definition.sql) {
-      differing.push(`${name} (v${definition.version}) : « ${definition.sql} » ≠ « ${fresh} »`)
+  for (const { kind, label } of KINDS) {
+    const differing: string[] = []
+    let compared = 0
+    for (const [key, definition] of last) {
+      if (!definition || !key.startsWith(`${kind}:`)) continue
+      compared += 1
+      const name = key.slice(kind.length + 1)
+      const fresh = installed.get(key)
+      if (fresh !== undefined && fresh !== definition.sql) {
+        differing.push(`${name} (v${definition.version}) : « ${definition.sql} » ≠ « ${fresh} »`)
+      }
     }
+    check(
+      label,
+      differing.length === 0,
+      differing.length === 0 ? `${compared} comparé(s)` : differing.join(' | ')
+    )
   }
-  check(
-    'aucun index homonyme défini autrement',
-    differing.length === 0,
-    differing.length === 0 ? `${last.size} index comparés` : differing.join(' | ')
-  )
 }
 
 console.log('')
