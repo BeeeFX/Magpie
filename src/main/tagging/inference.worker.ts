@@ -65,6 +65,24 @@ export interface DownloadProgress {
   total: number
 }
 
+/**
+ * Un signe de vie, pendant qu'une demande est en cours.
+ *
+ * L'hôte n'avait aucune borne : une demande sans réponse attendait pour toujours, et avec elle
+ * la transcription, puis chaque synchronisation d'après. Mais une borne sur la demande elle-même
+ * serait fausse deux fois — un premier rangement télécharge 688 Mo, une vidéo de dix minutes se
+ * transcrit en plusieurs minutes. Ce qui distingue un travail long d'un processus figé, c'est que
+ * le premier laisse tourner sa boucle d'événements : ORT rend la main entre deux jetons, entre
+ * deux tranches de trente secondes, entre deux paquets téléchargés. Ce battement passe donc par
+ * là, et c'est son silence que l'hôte surveille.
+ */
+export interface Heartbeat {
+  id: 0
+  kind: 'alive'
+}
+
+const HEARTBEAT_MS = 5_000
+
 /** Préfixe attendu par la famille e5, des deux côtés pour une comparaison symétrique. */
 const TEXT_PREFIX = 'query: '
 
@@ -317,8 +335,15 @@ async function answer(request: InferenceRequest): Promise<InferenceReply> {
   return { id, ok: true, kind: 'text', text: String(output.text ?? '') }
 }
 
+let busy = 0
+let beating: NodeJS.Timeout | null = null
+
 process.parentPort.on('message', (event) => {
   const request = event.data as InferenceRequest
+  busy += 1
+  beating ??= setInterval(() => {
+    process.parentPort.postMessage({ id: 0, kind: 'alive' } satisfies Heartbeat)
+  }, HEARTBEAT_MS)
   void answer(request)
     .then((reply) => process.parentPort.postMessage(reply))
     .catch((error: unknown) => {
@@ -327,5 +352,12 @@ process.parentPort.on('message', (event) => {
         ok: false,
         message: error instanceof Error ? error.message : String(error)
       } satisfies InferenceReply)
+    })
+    .finally(() => {
+      busy -= 1
+      if (busy === 0 && beating) {
+        clearInterval(beating)
+        beating = null
+      }
     })
 })
