@@ -49,7 +49,7 @@ export function App(): React.JSX.Element {
   const accent = useStore((s) => s.accent)
   const isDark = useStore((s) => s.isDark)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const detailIndex = useStore((s) => s.detailIndex)
+  const detailId = useStore((s) => s.detailId)
   const onboardingDone = useStore((s) => s.onboardingDone)
   const settingsLoading = useStore((s) => s.settingsLoading)
   const lastRefresh = useRef(0)
@@ -220,7 +220,7 @@ export function App(): React.JSX.Element {
       {/* Monté seulement quand un post est ouvert : sinon le composant resterait en place
           avec son état local — dont l'indicateur de fermeture, qui rendait le panneau
           invisible à la réouverture. Le démontage garantit un état propre à chaque fois. */}
-      {detailIndex !== null ? <Detail /> : null}
+      {detailId !== null ? <Detail /> : null}
       <Settings />
       {/* Monté seulement quand on l'ouvre : le composant garde son état entre deux
           ouvertures — c'est ce qui permet de rouvrir pendant une analyse sans la perdre — mais

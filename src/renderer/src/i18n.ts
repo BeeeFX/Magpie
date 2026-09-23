@@ -680,6 +680,7 @@ const fr = {
   'shortcuts.fullscreen': 'Plein écran',
   'shortcuts.closePost': 'Fermer, ou quitter le plein écran',
   'shortcuts.openPost': 'Ouvrir le post sélectionné',
+  'notice.collectionsReadFailed': 'Les collections n’ont pas pu être lues.',
 
   'welcome.tagline':
     'Vos signets et likes Instagram et X, enfin réunis au même endroit.',
@@ -1415,6 +1416,7 @@ const en: Record<TranslationKey, string> = {
   'shortcuts.fullscreen': 'Full screen',
   'shortcuts.closePost': 'Close, or leave full screen',
   'shortcuts.openPost': 'Open the selected post',
+  'notice.collectionsReadFailed': 'The collections could not be read.',
 
   'welcome.tagline':
     'Your Instagram and X bookmarks and likes, finally together in one place.',

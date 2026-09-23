@@ -322,13 +322,11 @@ export function Grid(): React.JSX.Element {
   }, [])
 
   /* Ouvre la vue détaillée depuis la position exacte de la carte, pour qu'elle paraisse
-     s'agrandir plutôt que de surgir au centre. */
+     s'agrandir plutôt que de surgir au centre. Par identifiant : ne plus chercher la position
+     rend aussi ce rappel stable, et `memo(Card)` n'est plus déjoué à chaque lot de posts. */
   const onOpen = useCallback(
-    (post: Post, element: HTMLElement) => {
-      const index = posts.findIndex((p) => p.id === post.id)
-      if (index >= 0) openDetail(index, element.getBoundingClientRect())
-    },
-    [posts, openDetail]
+    (post: Post, element: HTMLElement) => openDetail(post.id, element.getBoundingClientRect()),
+    [openDetail]
   )
 
   const onSendToNitrate = useCallback((post: Post) => {

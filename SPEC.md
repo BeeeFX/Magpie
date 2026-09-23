@@ -584,6 +584,11 @@ légende longue, une transcription : elle le fait défiler, et arrivée au bout 
 qu'à un nouveau geste, pour que l'inertie d'un trackpad ne saute pas au post suivant à la
 dernière ligne lue.
 
+La vue suit **le post**, pas une position dans la liste. Quand le post quitte la liste sous elle —
+favori retiré dans « Favoris », tag posé dans « Sans tag », autre étiquette sous un filtre
+d'étiquette —, elle se referme plutôt que de passer au voisin : le champ de tag garde le focus,
+et le deuxième tag tapé pour ce post partirait sur un post qu'on n'a pas encore regardé.
+
 ### Copie — l'usage central
 
 - Un clic sur l'icône de copie d'une carte → URL canonique dans le presse-papier.
