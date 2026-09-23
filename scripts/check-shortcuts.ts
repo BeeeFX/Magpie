@@ -103,8 +103,8 @@ console.log('\nla fiche du mur ne promet que ce que le mur fait')
    *
    * La fiche est tenue à la main, et son en-tête le dit : c'est un engagement. Pendant des
    * versions, elle n'annonçait sur le mur que l'Entrée, tandis que la spécification (§14)
-   * déclarait absents `Ctrl+A` et la plage — vrai, mais rien ne tenait les deux ensemble.
-   * Livrer ces gestes sans le dire aurait été aussi faux que l'inverse.
+   * déclarait absents les flèches, l'aperçu, `Ctrl+A` et la plage — vrai, mais rien ne tenait
+   * les deux ensemble. Livrer ces gestes sans le dire aurait été aussi faux que l'inverse.
    *
    * D'où deux règles. Une ligne de la fiche sans preuve dans cette table, ou dont la preuve ne se
    * retrouve plus dans le code du mur, échoue. Et §14 ne dit plus absent ce que la fiche annonce.
@@ -112,6 +112,8 @@ console.log('\nla fiche du mur ne promet que ce que le mur fait')
    * finit par crier au loup.
    */
   const WALL: Record<string, { proof: RegExp; missing?: RegExp }> = {
+    'shortcuts.wallMove': { proof: /ARROWS\[event\.key\][\s\S]{0,300}move\(direction\)/, missing: /Les flèches/ },
+    'shortcuts.wallPreview': { proof: /event\.key === ' '[\s\S]{0,600}setPreviewId\(/, missing: /`Espace`/ },
     /* L'Entrée est celle du navigateur : l'ouverture est un vrai bouton, qui la reçoit seul. */
     'shortcuts.openPost': { proof: /<button[^>]*\n[^>]*className="card__open"/ },
     'shortcuts.selectAll': {
@@ -119,7 +121,8 @@ console.log('\nla fiche du mur ne promet que ce que le mur fait')
       missing: /`Ctrl\+A`/
     },
     'shortcuts.selectRange': { proof: /event\.shiftKey\) onSelect\(post\.id, 'range'\)/, missing: /`Maj`\+clic/ },
-    'shortcuts.selectOne': { proof: /event\.ctrlKey \|\| event\.metaKey \|\| selectionMode\) onSelect\(post\.id, 'toggle'\)/ }
+    'shortcuts.selectOne': { proof: /event\.ctrlKey \|\| event\.metaKey \|\| selectionMode\) onSelect\(post\.id, 'toggle'\)/ },
+    'shortcuts.wallEscape': { proof: /event\.key === 'Escape'[\s\S]{0,300}setPreviewId\(null\)/ }
   }
 
   const sheet = code(read(join(ROOT, 'Shortcuts.tsx')))

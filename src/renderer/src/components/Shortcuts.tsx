@@ -52,10 +52,13 @@ const GROUPS: { title: TranslationKey; rows: Row[] }[] = [
     ]
   },
   {
-    /* La sélection gagne les deux gestes qu'on attend de n'importe quelle liste : tout, et une
-       plage. */
+    /* Le mur n'avait que l'Entrée. Les flèches suivent la géométrie du mur plutôt qu'un
+       index — voir `neighbourItem` —, et la sélection gagne les deux gestes qu'on attend de
+       n'importe quelle liste : tout, et une plage. */
     title: 'shortcuts.groupWall',
     rows: [
+      { keys: ['←', '→', '↑', '↓'], label: 'shortcuts.wallMove' },
+      { keys: ['shortcuts.space'], translateKeys: true, label: 'shortcuts.wallPreview' },
       { keys: ['shortcuts.enter'], translateKeys: true, label: 'shortcuts.openPost' },
       { keys: ['mod', 'A'], label: 'shortcuts.selectAll' },
       {
@@ -63,7 +66,8 @@ const GROUPS: { title: TranslationKey; rows: Row[] }[] = [
         translateKeys: true,
         label: 'shortcuts.selectRange'
       },
-      { keys: ['mod', 'shortcuts.click'], translateKeys: true, label: 'shortcuts.selectOne' }
+      { keys: ['mod', 'shortcuts.click'], translateKeys: true, label: 'shortcuts.selectOne' },
+      { keys: ['shortcuts.esc'], translateKeys: true, label: 'shortcuts.wallEscape' }
     ]
   },
   {

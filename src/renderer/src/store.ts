@@ -321,6 +321,20 @@ interface State {
   openDetail: (id: string, origin?: DOMRect) => void
   closeDetail: () => void
   stepDetail: (delta: number) => void
+
+  /**
+   * La carte active du mur, au clavier.
+   *
+   * Dans le store plutôt que dans le DOM : le mur est virtualisé, la carte active sort donc du
+   * document dès qu'on la fait défiler hors de vue. L'identifiant survit, et la carte reprend le
+   * focus en revenant. Chaque carte n'écoute que « est-ce moi ? » : déplacer le focus ne
+   * redessine que les deux cartes concernées.
+   */
+  focusedId: string | null
+  setFocusedId: (id: string | null) => void
+  /** La carte dont l'aperçu tourne sans la souris — `Espace`, l'équivalent clavier du survol. */
+  previewId: string | null
+  setPreviewId: (id: string | null) => void
   /** Ajoute des posts à la sélection, et passe en mode sélection : `Maj`+clic, `Ctrl`+clic. */
   selectIds: (ids: string[]) => void
   addTag: (postId: string, name: string) => Promise<void>
@@ -380,6 +394,8 @@ export const useStore = create<State>()(
       selectedIds: [],
       selecting: false,
       detailOrigin: null,
+      focusedId: null,
+      previewId: null,
       scrollTop: 0,
 
       accounts: [],
@@ -937,6 +953,12 @@ export const useStore = create<State>()(
 
       closeDetail: () => set({ detailId: null, detailOrigin: null }),
 
+      setFocusedId: (focusedId) => {
+        if (get().focusedId !== focusedId) set({ focusedId })
+      },
+      setPreviewId: (previewId) => {
+        if (get().previewId !== previewId) set({ previewId })
+      },
       selectIds: (ids) => {
         const selected = new Set(get().selectedIds)
         for (const id of ids) selected.add(id)

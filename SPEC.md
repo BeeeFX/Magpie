@@ -524,6 +524,17 @@ troisième dessine sur un canevas.
 - Un **carrousel défile** ses vues en fondu, avec des points de position, et revient à la première
   image quand la souris sort. Les vues suivantes ne sont chargées qu'au survol.
 
+**Le mur se parcourt aussi au clavier.** Les flèches passent d'une carte à sa voisine. Un mur en
+colonnes n'a pas de rangées, donc la voisine se cherche dans la géométrie de la mise en page :
+`↑` et `↓` suivent la colonne, `←` et `→` passent à la colonne d'à côté, jamais plus loin, sur la
+carte la mieux alignée. La carte active est tenue par son identifiant et non par le DOM — le mur
+est virtualisé, elle en sort dès qu'on la fait défiler hors de vue — et reprend le focus en
+revenant ; au bas de ce qui est chargé, `↓` charge la suite. `Espace` lance l'**aperçu**, c'est-à-
+dire ce que fait le survol : la vidéo se lit, le carrousel défile, et l'aperçu suit ensuite le
+focus comme il suit la souris. `Entrée` ouvre le post, `Échap` arrête l'aperçu, puis quitte la
+sélection. Le focus clavier montre les actions de la carte, que la souris seule faisait
+apparaître.
+
 ### La carte, gestes compris
 
 Survoler un point le lit ; cliquer l'ouvre dans un **panneau redimensionnable à côté de la carte**,
@@ -735,10 +746,10 @@ sélection, comme promis.
 **§9 — « Voir en vrai ».** Aucune webview, et le renderer tourne en bac à sable. Le bouton ouvre
 la page dans le navigateur du système. C'est la position la plus sûre, et elle est assumée.
 
-**§9 — Raccourcis de la grille.** Les flèches, `Espace` pour l'aperçu, et `F`, `T` et `C` sur la
-carte active — favori, tag, copie du lien — n'existent pas, ni `Ctrl+C` pour copier les liens de
-la sélection : il faut passer par la barre de sélection. Ce que la fiche des raccourcis annonce
-pour le mur est tenu par `check:shortcuts`, qui refuse une ligne dont il ne trouve pas le câblage.
+**§9 — Raccourcis de la grille.** `F`, `T` et `C` sur la carte active — favori, tag, copie du
+lien — n'existent pas, ni `Ctrl+C` pour copier les liens de la sélection : il faut passer par la
+barre de sélection. Ce que la fiche des raccourcis annonce pour le mur est tenu par
+`check:shortcuts`, qui refuse une ligne dont il ne trouve pas le câblage.
 
 **§9 — Doublons.** L'avertissement est une boîte système avec un décompte, sans « voir lesquels »
 ni « ajouter les autres » séparément.
