@@ -7,7 +7,6 @@ import {
   nativeTheme,
   net,
   protocol,
-  shell,
   Tray
 } from 'electron'
 import { join } from 'node:path'
@@ -56,6 +55,13 @@ import { parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
 import { streamMedia } from './adapters/http'
 import { installLogFile } from './log'
 import { installCrashLogging, watchRenderer } from './recovery'
+import { guardWebContents, hardenSessions } from './security'
+import {
+  migrateUiStorage,
+  registerRendererProtocol,
+  RENDERER_ENTRY,
+  RENDERER_SCHEME_PRIVILEGES
+} from './renderer-protocol'
 
 const isDev = !app.isPackaged
 const APP_ID = 'tv.electrictheatre.magpie'
@@ -100,15 +106,18 @@ if (isDev && process.env['MAGPIE_DEV_DATA_DIR']) {
 if (isPrimaryInstance) {
   installLogFile()
   installCrashLogging()
+  guardWebContents()
 }
 
 // Doit être déclaré avant `app.whenReady()`. `magpie://` sert les médias en cache au
-// renderer sans avoir à ouvrir `file://`, ce qui permet de garder une CSP stricte.
+// renderer sans avoir à ouvrir `file://`, ce qui permet de garder une CSP stricte ; `app://`
+// sert le renderer lui-même (voir `renderer-protocol.ts`).
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'magpie',
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
-  }
+  },
+  RENDERER_SCHEME_PRIVILEGES
 ])
 
 let mainWindow: BrowserWindow | null = null
@@ -212,27 +221,15 @@ function createWindow(): void {
     mainWindow?.webContents.send('window:fullscreen', false)
   })
 
-  // Un lien cliqué dans le renderer part dans le navigateur, jamais dans une fenêtre
-  // Electron sans garde-fou.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http:') || url.startsWith('https:')) void shell.openExternal(url)
-    return { action: 'deny' }
-  })
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    const rendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).toString()
-    const allowed = isDev
-      ? url.startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'http://localhost')
-      : url.startsWith(rendererUrl)
-    if (!allowed) event.preventDefault()
-  })
-  // Un renderer qui meurt : `recovery.ts`.
+  /* Liens et navigations : la garde de `security.ts`, posée sur chaque contenu web à sa
+     création — celle-ci comprise. Un renderer qui meurt : `recovery.ts`. */
   watchRenderer(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
     void mainWindow.loadURL(devUrl)
   } else {
-    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    void mainWindow.loadURL(RENDERER_ENTRY)
   }
 }
 
@@ -913,7 +910,9 @@ async function bootstrap(): Promise<void> {
 }
 
 if (isPrimaryInstance) void app.whenReady().then(async () => {
+  hardenSessions()
   registerMediaProtocol()
+  registerRendererProtocol()
   registerIpc({
     onThemeChange: syncTheme,
     drainMedia: () => void drainMediaQueue(),
@@ -936,6 +935,9 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
       void drainMediaQueue()
     }
   })
+  /* Une fois par profil, avant que la fenêtre ne relise ses préférences : elles vivaient
+     dans le stockage de `file://`. Inutile quand Vite sert la page. */
+  if (!(isDev && process.env['ELECTRON_RENDERER_URL'])) await migrateUiStorage()
   createWindow()
   refreshBackgroundFeatures()
   initializeUpdater({

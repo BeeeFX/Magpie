@@ -1,5 +1,6 @@
 import { BrowserWindow, session, type Session } from 'electron'
 import type { Platform } from '@shared/types'
+import { PLATFORMS } from '@shared/types'
 
 /**
  * Sessions par plateforme. Voir SPEC.md §5 et §10.
@@ -7,6 +8,9 @@ import type { Platform } from '@shared/types'
  * Chaque plateforme vit dans une partition Electron isolée : ses cookies ne fuient pas
  * vers les autres, et « Déconnecter » purge réellement quelque chose. Le stockage est
  * celui, chiffré, de Chromium.
+ *
+ * Ce que ces fenêtres ont le droit d'ouvrir, de demander et de visiter se décide dans
+ * `security.ts`, pour elles comme pour toutes les autres.
  */
 
 const PARTITION: Record<Platform, string> = {
@@ -48,6 +52,11 @@ export function userAgent(): string {
       ? 'Macintosh; Intel Mac OS X 10_15_7'
       : 'Windows NT 10.0; Win64; x64'
   return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`
+}
+
+/** Les trois partitions, pour leur poser la même politique (`security.ts`). */
+export function platformSessions(): Session[] {
+  return PLATFORMS.map((platform) => session.fromPartition(PARTITION[platform]))
 }
 
 export function sessionFor(platform: Platform): Session {
@@ -104,24 +113,10 @@ export function openLogin(platform: Platform, parent?: BrowserWindow): Promise<v
       webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true }
     })
 
-    win.webContents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith('https://') || url.startsWith('http://')) {
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            parent: win,
-            autoHideMenuBar: true,
-            webPreferences: {
-              session: ses,
-              contextIsolation: true,
-              nodeIntegration: false,
-              sandbox: true
-            }
-          }
-        }
-      }
-      return { action: 'deny' }
-    })
+    /* Les popups — la connexion Facebook d'Instagram, Google et Apple pour X — et les
+       navigations de cette fenêtre sont gardés par `security.ts` : `https:` seulement, dans
+       cette même partition, sans aucune permission. Ce gestionnaire-ci acceptait aussi le
+       `http:` en clair, et ne regardait pas où la fenêtre elle-même partait. */
 
     let settled = false
     const finish = (fn: () => void): void => {
