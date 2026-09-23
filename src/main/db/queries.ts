@@ -12,6 +12,7 @@ import type {
   VideoQuality
 } from '@shared/types'
 import { CONTENT_SOURCES, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
+import { fold } from './functions'
 import { MEDIA_UPSERT_SQL } from './media-upsert'
 import { getDb } from './index'
 import { searchClause } from './search'
@@ -1086,16 +1087,19 @@ export interface MediaInput {
 
 const upsertPostStmt = () =>
   getDb().prepare(/* sql */ `
-    INSERT INTO posts (id, platform, native_id, url, author_handle, author_name, text,
+    INSERT INTO posts (id, platform, native_id, url, author_handle, author_name,
+                       author_name_folded, text,
                        kind, media_count, published_at, saved_at, discovered_at,
                        saved_rank, raw, is_demo, updated_at)
-    VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name, @text,
+    VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name,
+            @author_name_folded, @text,
             @kind, @media_count, @published_at, @saved_at, @discovered_at,
             @saved_rank, @raw, @is_demo, @updated_at)
     ON CONFLICT(id) DO UPDATE SET
       url          = excluded.url,
       author_handle= excluded.author_handle,
       author_name  = excluded.author_name,
+      author_name_folded = excluded.author_name_folded,
       text         = excluded.text,
       kind         = excluded.kind,
       media_count  = excluded.media_count,
@@ -1150,6 +1154,8 @@ export function upsertPosts(
         url: p.url,
         author_handle: p.authorHandle ?? null,
         author_name: p.authorName ?? null,
+        // Replié ici, une fois, plutôt qu'à chaque frappe de recherche : voir MIGRATION_31_SQL.
+        author_name_folded: p.authorName ? fold(p.authorName) : null,
         text: p.text ?? null,
         kind: p.kind,
         media_count: p.mediaCount ?? 0,

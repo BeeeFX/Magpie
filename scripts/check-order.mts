@@ -99,7 +99,7 @@ function play(stamp: (step: Step) => number): void {
       platform: step.platform,
       nativeId: item,
       url: `https://example.com/${step.platform}/${item}`,
-      authorName: `Auteur ${item}`,
+      authorName: `Élodie ${item}`,
       text: `légende ${item}`,
       kind: 'image' as const,
       mediaCount: 0,
@@ -110,8 +110,8 @@ function play(stamp: (step: Step) => number): void {
   }
 }
 
-function order(sort: PostQuery['sort'] = 'saved'): string[] {
-  const page = listPostPage({ ...DEFAULT_QUERY, sort }, 0, 500)
+function order(sort: PostQuery['sort'] = 'saved', search = ''): string[] {
+  const page = listPostPage({ ...DEFAULT_QUERY, sort, search }, 0, 500)
   return page.posts.map((post) => post.id.slice(post.id.indexOf(':') + 1))
 }
 
@@ -155,6 +155,10 @@ assert(
   'la page deux et la reprise restent sous la page un'
 )
 assert(same(order('added'), EXPECTED), '« ajoutés récemment » range une tournée par son rang, lui aussi')
+assert(
+  same(order('saved', 'lodie s12'), ['s12']),
+  'le nom d’auteur s’écrit replié : « lodie s12 » trouve « Élodie s12 »'
+)
 const reference = snapshot()
 closeDb()
 
@@ -177,7 +181,7 @@ console.log('\nles curseurs de reprise')
   )
 }
 
-console.log('\nune bibliothèque écrite page par page, rouverte après la migration 30')
+console.log('\nune bibliothèque écrite page par page, rouverte après les migrations 30 et 31')
 process.env['MAGPIE_DATA_DIR'] = dirLegacy
 play((step) => step.at)
 const broken = order()
@@ -187,18 +191,23 @@ assert(
 )
 {
   /* Ramenée en v29 : l'ancien déclencheur plein texte — MIGRATION_14_SQL est la dernière à
-     l'avoir posé, sa colonne mise à part —, et le numéro de version. L'empreinte de bibliothèque se retire aussi, sans
+     l'avoir posé, sa colonne mise à part —, sans le nom replié, et le numéro de version. L'empreinte de bibliothèque se retire aussi, sans
      quoi la réouverture refuserait à raison une base « plus ancienne » que la dernière vue. */
   const db = getDb()
   db.exec(MIGRATION_14_SQL.slice(MIGRATION_14_SQL.indexOf('DROP TRIGGER')))
+  db.exec('DROP INDEX idx_posts_author_folded; ALTER TABLE posts DROP COLUMN author_name_folded')
   db.pragma('user_version = 29')
   closeDb()
   rmSync(join(dirLegacy, 'library-state.json'), { force: true })
 }
 const migrated = getDb()
-assert(migrated.pragma('user_version', { simple: true }) === 30, 'l’échelle a porté la base en v30')
+assert(migrated.pragma('user_version', { simple: true }) === 31, 'l’échelle a porté la base en v31')
 assert(snapshot() === reference, 'la réparation rend, ligne pour ligne, ce que la nouvelle écriture produit')
 assert(same(order(), EXPECTED), 'et le mur retrouve l’ordre attendu', `reçu : ${order().join(' ')}`)
+assert(
+  same(order('saved', 'lodie s12'), ['s12']),
+  'et ses noms d’auteur ont été repliés à l’ouverture, la recherche les retrouve'
+)
 assert(
   runEpochBefore('instagram', 'saved', 10) === 1000,
   'un curseur sans horodatage retrouve celui de la tournée qu’il interrompt'

@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 30
+export const SCHEMA_VERSION = 31
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -689,6 +689,30 @@ UPDATE post_sources SET discovered_at = runs.epoch
 DROP TABLE temp.post_source_runs;
 `
 
+/**
+ * Le nom d'auteur replié une fois pour toutes, à l'écriture.
+ *
+ * La recherche compare le nom affiché de l'auteur par sous-chaîne, accents et casse repliés —
+ * « hibli » trouve « Studio Ghibli », « beyonce » trouve « Beyoncé ». Le repli passait par
+ * `fold()`, une fonction JavaScript déclarée sur la connexion, **appelée sur chaque post à
+ * chaque frappe** : mesuré sur cent mille posts synthétiques, 321 ms par comptage contre 0,2 ms
+ * pour l'index plein texte seul, et `listPostPage` en fait deux — le processus principal gelait
+ * six dixièmes de seconde par touche.
+ *
+ * Replié à l'écriture, le nom se compare avec le `LIKE` natif, sur un index qui le couvre : la
+ * même règle, sans une seule ligne de JavaScript par post. Le remplissage des bases existantes
+ * ne peut pas se faire ici — le repli est du JavaScript, et une migration reste du SQL pur que
+ * `check:schema` rejoue sur une connexion nue. Il se fait à l'ouverture, juste après l'échelle :
+ * voir `backfillFoldedNames`.
+ *
+ * L'index est entier, et non partiel : c'est aussi lui qui trouve, à chaque ouverture, les
+ * lignes restées sans repli — et `IS NULL` ne se cherche pas dans un index qui l'exclut.
+ */
+export const MIGRATION_31_SQL = /* sql */ `
+ALTER TABLE posts ADD COLUMN author_name_folded TEXT;
+CREATE INDEX IF NOT EXISTS idx_posts_author_folded ON posts(author_name_folded);
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -697,6 +721,8 @@ CREATE TABLE IF NOT EXISTS posts (
   url             TEXT NOT NULL,
   author_handle   TEXT,
   author_name     TEXT,
+  -- Le même nom, replié comme la recherche le compare : voir MIGRATION_31_SQL.
+  author_name_folded TEXT,
   author_avatar   TEXT,
   text            TEXT,
   ai_description  TEXT,
@@ -733,6 +759,7 @@ CREATE INDEX IF NOT EXISTS idx_posts_label     ON posts(label) WHERE label IS NO
 CREATE INDEX IF NOT EXISTS idx_posts_feed      ON posts(
   is_archived, COALESCE(saved_at, discovered_at) DESC, saved_rank ASC, id
 );
+CREATE INDEX IF NOT EXISTS idx_posts_author_folded ON posts(author_name_folded);
 
 CREATE TABLE IF NOT EXISTS post_sources (
   post_id       TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -1054,5 +1081,6 @@ export const MIGRATIONS: Record<number, string> = {
   27: MIGRATION_27_SQL,
   28: MIGRATION_28_SQL,
   29: MIGRATION_29_SQL,
-  30: MIGRATION_30_SQL
+  30: MIGRATION_30_SQL,
+  31: MIGRATION_31_SQL
 }

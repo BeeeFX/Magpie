@@ -12,7 +12,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { registerFunctions } from './functions'
+import { backfillFoldedNames, registerFunctions } from './functions'
 import { MIGRATIONS, SCHEMA_SQL, SCHEMA_VERSION } from './schema'
 
 let db: Database.Database | null = null
@@ -259,6 +259,15 @@ function prepareConnection(
       `La migration du schéma a échoué : ${error instanceof Error ? error.message : String(error)}. ` +
         `Votre bibliothèque n’a pas été modifiée.`
     )
+  }
+  /* Ce que l'échelle ne peut pas faire en SQL pur : le repli des noms d'auteur, voir
+     `backfillFoldedNames`. Un échec ne ferme pas la bibliothèque — la recherche perd seulement
+     les noms pas encore repliés, et le prochain démarrage reprend où celui-ci s'est arrêté. */
+  try {
+    const folded = backfillFoldedNames(conn)
+    if (folded > 0) console.log(`[magpie] Noms d’auteur repliés pour la recherche : ${folded}.`)
+  } catch (error) {
+    console.warn('[magpie] Repli des noms d’auteur impossible', error)
   }
   rememberLibraryState(conn)
   /* Le ménage se fait à chaque ouverture réussie, et c’est le changement qui compte.

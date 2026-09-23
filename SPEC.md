@@ -124,7 +124,7 @@ c'est une propriété qu'on peut vérifier mécaniquement, et pas seulement une 
 
 ## 4. Modèle de données
 
-SQLite, schéma en version **30**, une échelle de migrations dont l'invariant est tenu par
+SQLite, schéma en version **31**, une échelle de migrations dont l'invariant est tenu par
 `npm run check:schema` : une installation neuve exécute `SCHEMA_SQL` seul, donc `SCHEMA_SQL`
 doit déjà contenir tout ce que l'échelle produit. Le détail vit dans `src/main/db/schema.ts`,
 qui est commenté table par table ; ce qui suit dit **à quoi sert chaque groupe**.
@@ -142,7 +142,12 @@ qui est commenté table par table ; ce qui suit dit **à quoi sert chaque groupe
 - `media`, `media_variants` — un rang par média d'un carrousel ; les variantes portent les
   qualités de lecture disponibles et, le cas échéant, leur copie locale.
 - `posts_fts` — FTS5 sur légende, description, auteur **et transcription**, en
-  `unicode61 remove_diacritics 2` : « cafe » trouve « café ».
+  `unicode61 remove_diacritics 2` : « cafe » trouve « café ». Son déclencheur de mise à jour ne
+  réindexe que quand l'une de ces colonnes change — pas à chaque favori ni à chaque upsert d'un
+  post déjà connu.
+- `author_name_folded` — le nom affiché de l'auteur, replié à l'écriture comme la recherche le
+  compare (accents et casse retirés). Le replier à la lecture coûtait une fonction JavaScript
+  par post et par frappe.
 
 **Le rangement**
 
@@ -551,7 +556,9 @@ propre amas, donc viser le nom devenait un jeu d'adresse.
 - Filtres : plateforme, type de média, « sans tag », liens, tag(s), collection(s), étiquette.
 - Tri : date de sauvegarde (ou rang en repli), date de publication, auteur, plateforme, aléatoire.
 - Recherche plein texte instantanée via FTS5, sur la légende, l'auteur et la transcription,
-  insensible aux accents.
+  insensible aux accents. Le nom affiché de l'auteur et les tags répondent aussi, par
+  sous-chaîne (« hibli » trouve « Studio Ghibli »). Aucun des trois ne s'évalue post par post :
+  une frappe ne coûte pas au prorata de la bibliothèque.
 - L'état complet — recherche, filtres, tri, défilement — **est conservé entre les sessions**.
 
 ### Étiquettes de couleur
