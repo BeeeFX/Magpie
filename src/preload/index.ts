@@ -36,7 +36,12 @@ import type {
   Settings,
   SyncState,
   UpdateState,
-  TagTally
+  TagTally,
+  LibraryExportOptions,
+  LibraryExportResult,
+  LibraryImportPreview,
+  LibraryImportReport,
+  LibraryImportUndo
 } from '@shared/types'
 
 /**
@@ -224,6 +229,16 @@ const api: MagpieApi = {
   removeDemoData: (): Promise<number> => ipcRenderer.invoke('library:removeDemo'),
 
   listTags: (): Promise<TagTally[]> => ipcRenderer.invoke('tags:list'),
+  exportLibraryJson: (options: LibraryExportOptions): Promise<LibraryExportResult | null> =>
+    ipcRenderer.invoke('library:exportJson', options),
+  previewLibraryImport: (): Promise<LibraryImportPreview | null> =>
+    ipcRenderer.invoke('library:importPreview'),
+  importLibrary: (token: string): Promise<LibraryImportReport> =>
+    ipcRenderer.invoke('library:import', token),
+  lastLibraryImport: (): Promise<LibraryImportReport | null> =>
+    ipcRenderer.invoke('library:lastImport'),
+  undoLibraryImport: (): Promise<LibraryImportUndo> => ipcRenderer.invoke('library:undoImport'),
+  stopLibraryTransfer: (): Promise<void> => ipcRenderer.invoke('library:stopTransfer'),
 
   platform: process.platform
 }

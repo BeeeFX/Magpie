@@ -471,6 +471,11 @@ demande de fouiller par motif de texte avant de lire quoi que ce soit.
 
 Découplé du reste : utilisable sans avoir jamais créé une collection ni transcrit une vidéo.
 
+À ne pas confondre avec l'**export JSON** du §10 : celui-ci est fait pour être lu par un
+assistant, l'autre pour être repris par Magpie. Le premier distille — un résumé par ligne, une
+fiche par post, rien de ce qui ne se lit pas — ; le second transporte tout ce que l'utilisateur a
+posé, dans un format qui se réimporte sans perte.
+
 **Ce que l'export ne transporte pas, et c'est sa limite structurelle.** Les fiches contiennent la
 légende, la transcription, l'auteur, les tags et les collections — c'est-à-dire du **texte**. Or ce
 que Magpie sait de mieux sur un post sans légende est un **vecteur**, et un vecteur n'a pas de
@@ -638,8 +643,36 @@ déclencher un schéma applicatif arbitraire.
   CSP stricte, schéma `magpie://` privilégié plutôt que `file://`.
 - Aucune page distante n'est chargée dans une fenêtre de Magpie en dehors des fenêtres de
   connexion : « voir en vrai » ouvre le navigateur du système.
-- La bibliothèque entière est un dossier déplaçable : base, médias, réglages. Rien n'est captif —
-  sous la réserve du §14 sur l'import.
+- La bibliothèque entière est un dossier déplaçable : base, médias, réglages.
+- **Rien n'est captif.** Réglages → « Exporter ou importer la bibliothèque » écrit un fichier JSON
+  unique, `magpie-library` en version 1 (`src/main/library-file.ts`) : par post, identifiant,
+  plateforme, adresse, auteur, texte, transcription, type, dates, origines et leurs rangs, médias
+  (type, dimensions, **adresses web seulement**), tags et leur origine, favori, étiquette, retrait ;
+  par collection, nom, couleur, genre, phrase, mots-clés et poids, ampleur, membres — calculés et
+  signalés comme tels pour une collection à mots-clés — et retraits faits à la main ; plus les
+  étiquettes posées sur la carte. N'en sortent jamais : les chemins locaux, les vecteurs, les
+  sessions, les clés, les réglages. La réponse brute des plateformes (`raw`) est une case à cocher.
+  Le fichier s'écrit par tranches de cinq cents posts, un post par ligne, jamais en une chaîne.
+- **L'import traite ce fichier comme une entrée non fiable** : plateformes connues seulement,
+  identifiant égal à `<plateforme>:<id natif>`, adresses en `http(s)` uniquement, longueurs et
+  nombres bornés, n'importe quelle mise en page JSON lue par morceaux. Le rendu ne donne jamais de
+  chemin : la boîte de dialogue s'ouvre dans le processus principal, et seul le jeton de l'aperçu
+  déclenche l'écriture — sur le fichier même qu'on a vu, taille et date comprises.
+- **Il montre avant d'écrire** — N posts nouveaux, M déjà présents, K collections, dont combien
+  rejointes par leur nom — puis **fusionne sans rien détruire** : un post nouveau entre avec ses
+  origines, ses médias et ses tags, et ses vignettes suivent la file ordinaire ; un post présent
+  garde sa légende, ses médias et son état, et ne reçoit que ce qui lui manque — tags réunis,
+  favori s'il l'était d'un côté, étiquette ou transcription absentes comblées. Une collection
+  homonyme à la casse près garde sa définition ; une liste y reçoit les membres de la liste du
+  fichier. Une collection à mots-clés créée par l'import arrive **sans vecteurs** : elle garde les
+  membres du fichier, `recompute` refuse de la vider tant qu'aucun mot ne sait noter, et ses mots
+  sont encodés au prochain rejeu d'après synchronisation ou au prochain mot ajouté. Réimporter le
+  même fichier ne change rien.
+- **Il est annulable.** Chaque paquet écrit son journal (`last-import.jsonl`, à côté de la base)
+  après sa transaction ; l'annulation défait exactement ce qui y est listé, et seulement si la
+  valeur est encore celle que l'import avait posée. Un import arrêté en route, ou interrompu par
+  une fermeture, s'annule pareil. `npm run check:library-file` tient l'aller-retour, l'idempotence,
+  la fusion, l'annulation et le refus des fichiers hostiles.
 
 ---
 
@@ -658,11 +691,11 @@ personne. Au 2026-08-26, en version 0.42.0 :
 | Compréhension locale : texte, images, parole | livré |
 | Collections-requêtes, carte sémantique, régions | livré |
 | Export pour assistant | livré |
+| Export JSON et import de bibliothèque, annulable | livré |
 | Tray, sync planifiée, réglages, mise à jour automatique | livré |
 | Build Windows NSIS + mises à jour différentielles | livré, **non signé** |
 | Reddit | en sommeil (§5.3) |
 | macOS, Linux | ni testés ni signés |
-| Import de bibliothèque | absent (§14) |
 
 Deux outils non prévus par la spec initiale, tous deux justifiés :
 
@@ -742,9 +775,12 @@ ni « ajouter les autres » séparément.
 
 **§9 — Couverture de collection.** `collections.cover_post_id` existe en base, et rien ne le pose.
 
-**§10 — Import.** L'export Markdown pour assistant existe ; il n'y a **aucun import**, et aucun
-export JSON structuré. C'est la seule absence qui contredise un principe énoncé — « rien n'est
-captif » — et donc la première à reprendre si la liste doit se raccourcir.
+**§10 — Ce que l'export JSON laisse derrière lui.** Les vecteurs, les positions de la carte, les
+règles apprises par l'organisateur et les réglages ne voyagent pas : les premiers se recalculent,
+les règles désignent des collections par leur identifiant local, et les réglages portent des
+choix propres à une machine. Une bibliothèque importée demande donc une analyse pour retrouver sa
+carte. L'import ne fusionne pas non plus deux collections à mots-clés homonymes : celle qui est
+déjà là garde sa définition.
 
 **§8.7 — La richesse de l'export.** Voir le point ouvert n° 1 : le dossier ne transporte que du
 texte, alors que l'essentiel de ce que Magpie a compris d'une image est un vecteur. Ce n'est pas

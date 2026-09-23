@@ -63,6 +63,14 @@ import {
   writeAccount,
   listTags
 } from './db/queries'
+import {
+  exportLibraryJson,
+  importLibrary,
+  lastLibraryImport,
+  previewLibraryImport,
+  stopLibraryTransfer,
+  undoLibraryImport
+} from './library-transfer'
 import { seedIfEmpty } from './fixtures/seed'
 import { backgroundTasks } from './tasks'
 import { restoreRemovedCollections } from './tagging/collections'
@@ -1060,6 +1068,29 @@ export function registerIpc({
   /* Tous les tags, pour la complétion et pour « voir tout » dans la barre latérale. */
   ipcMain.handle('tags:list', () => listTags(readSettings().contentSources))
 
+  /* La bibliothèque dans un fichier, et le chemin du retour — voir `library-transfer`. Aucun de
+     ces canaux ne reçoit de chemin : les boîtes de dialogue s'ouvrent dans ce processus-ci. */
+  ipcMain.handle('library:exportJson', (event, options?: { includeRaw?: unknown }) =>
+    exportLibraryJson(BrowserWindow.fromWebContents(event.sender), {
+      includeRaw: options?.includeRaw === true
+    })
+  )
+  ipcMain.handle('library:importPreview', (event) =>
+    previewLibraryImport(BrowserWindow.fromWebContents(event.sender))
+  )
+  ipcMain.handle('library:import', async (_event, token: string) => {
+    if (typeof token !== 'string' || token.length > 100) throw new Error('Jeton invalide')
+    try {
+      return await importLibrary(token)
+    } finally {
+      /* Les posts arrivés n'ont aucune vignette : la file ordinaire s'en charge, comme après
+         une synchronisation — y compris pour ce qui précède un arrêt demandé. */
+      drainMedia()
+    }
+  })
+  ipcMain.handle('library:lastImport', () => lastLibraryImport())
+  ipcMain.handle('library:undoImport', () => undoLibraryImport())
+  ipcMain.handle('library:stopTransfer', () => stopLibraryTransfer())
 }
 
 interface LibraryFile {

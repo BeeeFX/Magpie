@@ -60,7 +60,22 @@ const FR = {
   'media.noSource': 'Aucune source en ligne enregistrée pour ce média.',
 
   'vault.unavailable': 'Le coffre sécurisé du système n’est pas disponible sur cet ordinateur.',
-  'vault.noKey': 'Aucune clé API enregistrée pour ce fournisseur.'
+  'vault.noKey': 'Aucune clé API enregistrée pour ce fournisseur.',
+
+  /* L'export JSON et l'import : les boîtes du système, et ce qu'un fichier refusé dit de lui. */
+  'transfer.exportTitle': 'Exporter la bibliothèque',
+  'transfer.importTitle': 'Importer une bibliothèque Magpie',
+  'transfer.fileFilter': 'Bibliothèque Magpie',
+  'transfer.notMagpie': 'Ce fichier n’est pas un export de bibliothèque Magpie.',
+  'transfer.newerVersion':
+    'Ce fichier vient d’une version plus récente de Magpie (format {version}). Mettez l’application à jour pour l’importer.',
+  'transfer.invalidJson':
+    'Ce fichier est abîmé ou tronqué : sa lecture échoue vers le caractère {at}.',
+  'transfer.tooLarge': 'Ce fichier dépasse ce que Magpie accepte d’importer.',
+  'transfer.unreadable': 'Ce fichier ne peut pas être lu.',
+  'transfer.busy': 'Un export ou un import est déjà en cours.',
+  'transfer.changed': 'Le fichier a changé depuis son aperçu. Choisissez-le de nouveau.',
+  'transfer.noUndo': 'Il n’y a pas d’import à annuler.'
 } as const
 
 export type MessageKey = keyof typeof FR
@@ -93,7 +108,20 @@ const EN: Record<MessageKey, string> = {
   'media.noSource': 'No online source recorded for this media.',
 
   'vault.unavailable': 'The system’s secure store is not available on this computer.',
-  'vault.noKey': 'No API key saved for this provider.'
+  'vault.noKey': 'No API key saved for this provider.',
+
+  'transfer.exportTitle': 'Export the library',
+  'transfer.importTitle': 'Import a Magpie library',
+  'transfer.fileFilter': 'Magpie library',
+  'transfer.notMagpie': 'This file is not a Magpie library export.',
+  'transfer.newerVersion':
+    'This file comes from a newer version of Magpie (format {version}). Update the app to import it.',
+  'transfer.invalidJson': 'This file is damaged or truncated: reading fails around character {at}.',
+  'transfer.tooLarge': 'This file is larger than Magpie accepts to import.',
+  'transfer.unreadable': 'This file cannot be read.',
+  'transfer.busy': 'An export or an import is already running.',
+  'transfer.changed': 'The file changed since its preview. Choose it again.',
+  'transfer.noUndo': 'There is no import to undo.'
 }
 
 const DICTIONARIES: Record<'fr' | 'en', Record<MessageKey, string>> = { fr: FR, en: EN }

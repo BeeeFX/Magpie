@@ -61,6 +61,23 @@ const LONG: {
     }
   },
   {
+    what: 'l’export JSON de la bibliothèque',
+    stop: { file: 'src/main/library-transfer.ts', pattern: /export function stopLibraryTransfer/ },
+    progress: {
+      file: 'src/main/library-transfer.ts',
+      pattern: /backgroundTasks\.update\(EXPORT_TASK/
+    }
+  },
+  {
+    /* Soixante mille posts versés dans la base, et son annulation : même registre, même sortie. */
+    what: 'l’import d’une bibliothèque',
+    stop: { file: 'src/main/library-file.ts', pattern: /hooks\.shouldStop\?\.\(\)/ },
+    progress: {
+      file: 'src/main/library-transfer.ts',
+      pattern: /backgroundTasks\.update\(IMPORT_TASK/
+    }
+  },
+  {
     what: 'le téléchargement des modèles',
     stop: {
       none: 'la requête vit dans la bibliothèque ; l’interrompre laisserait un fichier de modèle tronqué que rien ne saurait reprendre. Il doit donc, au minimum, se montrer — c’est ce qui manquait'
@@ -123,7 +140,8 @@ console.log('\nun arrêt demandé n’est pas une panne')
      l'application — et l'inviterait à recommencer ce qu'il vient d'interrompre. */
   for (const [file, cancelled] of [
     ['src/renderer/src/components/AiOrganizer.tsx', 'ProposalCancelled'],
-    ['src/renderer/src/components/ExportPanel.tsx', 'ExportCancelled']
+    ['src/renderer/src/components/ExportPanel.tsx', 'ExportCancelled'],
+    ['src/renderer/src/components/LibraryTransfer.tsx', 'LibraryTransferCancelled']
   ] as const) {
     const text = code(read(file))
     if (new RegExp(cancelled).test(text)) pass(`${cancelled} se distingue d’une panne`)

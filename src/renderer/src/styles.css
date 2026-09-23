@@ -465,6 +465,57 @@ h1, h2, h3 {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--hairline));
 }
 
+/* L'aperçu et le compte rendu d'un import : un fait sur le disque, dans la même boîte que
+   l'emplacement de la bibliothèque. */
+.transfer-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 13px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--field);
+  font-size: 11.5px;
+}
+
+.transfer-card strong {
+  color: var(--text);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.transfer-card ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.transfer-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Un bouton de même fond que la boîte qui le porte ne se voit plus comme un bouton. */
+.transfer-card .btn:not(.btn--primary):not(.btn--danger) {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.transfer-raw {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.transfer-raw input {
+  margin-top: 2px;
+}
+
 .sidebar__foot {
   display: flex;
   flex-direction: column;

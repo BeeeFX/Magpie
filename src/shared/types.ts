@@ -643,6 +643,16 @@ export interface MagpieApi {
 
   /** Tous les tags, du plus porté au moins porté : la complétion et « voir tout ». */
   listTags(): Promise<TagTally[]>
+  /** Écrit la bibliothèque dans un fichier JSON choisi par l'utilisateur. `null` : abandon. */
+  exportLibraryJson(options: LibraryExportOptions): Promise<LibraryExportResult | null>
+  /** Fait choisir un fichier et dit ce que son import ferait, sans rien écrire. */
+  previewLibraryImport(): Promise<LibraryImportPreview | null>
+  /** Importe le fichier d'un aperçu. Le jeton empêche d'importer autre chose que ce qu'on a vu. */
+  importLibrary(token: string): Promise<LibraryImportReport>
+  lastLibraryImport(): Promise<LibraryImportReport | null>
+  undoLibraryImport(): Promise<LibraryImportUndo>
+  /** Arrête l'export JSON ou l'import en cours, entre deux paquets. */
+  stopLibraryTransfer(): Promise<void>
 
   platform: NodeJS.Platform
 }
@@ -652,6 +662,65 @@ export interface TagTally {
   name: string
   count: number
   source: TagSource
+}
+
+/**
+ * La bibliothèque dans un fichier, et le chemin du retour — voir `main/library-file.ts`.
+ *
+ * SPEC §10 promettait que rien n'est captif ; sans import ni export structuré, c'était faux.
+ */
+export interface LibraryExportOptions {
+  /** La réponse brute des plateformes : ce qui permet de re-normaliser, et ce qui pèse. */
+  includeRaw: boolean
+}
+
+export interface LibraryExportResult {
+  path: string
+  posts: number
+  collections: number
+  tags: number
+  bytes: number
+  at: number
+}
+
+export interface LibraryImportPreview {
+  token: string
+  fileName: string
+  bytes: number
+  exportedAt: number | null
+  appVersion: string | null
+  posts: { total: number; fresh: number; existing: number; invalid: number }
+  collections: { total: number; fresh: number; matched: number }
+  tags: number
+  mapLabels: number
+}
+
+/** Ce qu'un import a réellement changé. Tiré de son journal : ce qui est dit est ce qui est écrit. */
+export interface LibraryImportReport {
+  at: number
+  fileName: string
+  /** Arrêté à la demande : ce qui précède est importé, et s'annule pareil. */
+  stopped: boolean
+  postsAdded: number
+  /** Posts déjà présents qui ont reçu quelque chose : un tag, un favori, une transcription… */
+  postsMerged: number
+  postsUnchanged: number
+  invalid: number
+  tagsLinked: number
+  favourites: number
+  labels: number
+  transcripts: number
+  sources: number
+  collectionsCreated: number
+  collectionsCompleted: number
+  memberships: number
+  mapLabels: number
+}
+
+export interface LibraryImportUndo {
+  postsRemoved: number
+  collectionsRemoved: number
+  reverted: number
 }
 
 export interface CacheProgress {
@@ -808,6 +877,8 @@ export type BackgroundTaskKind =
   | 'models'
   /** L'export : une fiche par post, et il ne disait rien pendant neuf mille écritures. */
   | 'export'
+  /** L'import d'une bibliothèque, son aperçu et son annulation : des milliers de posts. */
+  | 'import'
   | 'sync'
   | 'thumbnails'
   | 'clips'

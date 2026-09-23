@@ -493,6 +493,49 @@ const previewApi: MagpieApi = {
 
   listTags: async () => previewTags(await previewPosts().catch(() => [])),
 
+  /* L'export et l'import n'ont pas de disque derrière eux en aperçu : ils rendent des nombres
+     vraisemblables, pour que l'aperçu, le compte rendu et l'annulation se relisent. */
+  exportLibraryJson: async () => ({
+    path: 'C:\\Users\\vous\\Documents\\magpie-library.json',
+    posts: 9738,
+    collections: 12,
+    tags: 4852,
+    bytes: 38 * 1024 * 1024,
+    at: Date.now()
+  }),
+  previewLibraryImport: async () => ({
+    token: 'apercu',
+    fileName: 'magpie-library-2026-09-01.json',
+    bytes: 38 * 1024 * 1024,
+    exportedAt: Date.now() - 22 * 86_400_000,
+    appVersion: '0.44.1',
+    posts: { total: 9738, fresh: 1204, existing: 8534, invalid: 3 },
+    collections: { total: 12, fresh: 2, matched: 10 },
+    tags: 4852,
+    mapLabels: 4
+  }),
+  importLibrary: async () => ({
+    at: Date.now(),
+    fileName: 'magpie-library-2026-09-01.json',
+    stopped: false,
+    postsAdded: 1204,
+    postsMerged: 312,
+    postsUnchanged: 8222,
+    invalid: 3,
+    tagsLinked: 418,
+    favourites: 27,
+    labels: 9,
+    transcripts: 144,
+    sources: 12,
+    collectionsCreated: 2,
+    collectionsCompleted: 3,
+    memberships: 86,
+    mapLabels: 4
+  }),
+  lastLibraryImport: async () => null,
+  undoLibraryImport: async () => ({ postsRemoved: 1204, collectionsRemoved: 2, reverted: 699 }),
+  stopLibraryTransfer: async () => {},
+
   platform: 'browser-preview' as NodeJS.Platform
 }
 
