@@ -44,6 +44,23 @@ interface Props {
 const CAROUSEL_INTERVAL = 1400
 /** Laisse le temps de franchir le petit espace entre l'icône et le curseur. */
 const VOLUME_CLOSE_DELAY = 420
+/** Assez pour reconnaître un post, assez peu pour qu'un lecteur d'écran passe à la suite. */
+const OPEN_LABEL_CHARS = 80
+
+/**
+ * Le début d'une légende, coupé à un mot.
+ *
+ * Le bouton d'ouverture prenait la légende **entière** pour nom — jusqu'à deux mille caractères
+ * sur Instagram : un lecteur d'écran la lisait avant chaque carte, passer à la suivante la
+ * coupait au milieu d'un mot, et rien ne disait de qui était le post.
+ */
+function excerpt(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  if (flat.length <= max) return flat
+  const cut = flat.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.–—-]+$/, '')}…`
+}
 
 function CardImpl({
   item,
@@ -344,6 +361,10 @@ function CardImpl({
     </div>
   ) : null
 
+  const openLabel = post.text?.trim()
+    ? t('card.openLabel', { who: displayName(post), excerpt: excerpt(post.text, OPEN_LABEL_CHARS) })
+    : t('card.openLabelBare', { who: displayName(post) })
+
   return (
     <article
       ref={rootRef as React.RefObject<HTMLElement>}
@@ -381,7 +402,8 @@ function CardImpl({
       <button
         type="button"
         className="card__open"
-        aria-label={post.text ?? post.authorName ?? post.authorHandle ?? post.url}
+        /* L'auteur et le début du texte, pas la légende entière : voir `excerpt`. */
+        aria-label={openLabel}
         {...(selectionMode ? { 'aria-pressed': selected } : {})}
         onClick={(event) => {
           event.stopPropagation()

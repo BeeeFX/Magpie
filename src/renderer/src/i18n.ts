@@ -680,6 +680,8 @@ const fr = {
   'shortcuts.fullscreen': 'Plein écran',
   'shortcuts.closePost': 'Fermer, ou quitter le plein écran',
   'shortcuts.openPost': 'Ouvrir le post sélectionné',
+  'card.openLabel': 'Post de {who} : {excerpt}',
+  'card.openLabelBare': 'Post de {who}',
   'notice.collectionsReadFailed': 'Les collections n’ont pas pu être lues.',
 
   'welcome.tagline':
@@ -1416,6 +1418,8 @@ const en: Record<TranslationKey, string> = {
   'shortcuts.fullscreen': 'Full screen',
   'shortcuts.closePost': 'Close, or leave full screen',
   'shortcuts.openPost': 'Open the selected post',
+  'card.openLabel': 'Post by {who}: {excerpt}',
+  'card.openLabelBare': 'Post by {who}',
   'notice.collectionsReadFailed': 'The collections could not be read.',
 
   'welcome.tagline':
