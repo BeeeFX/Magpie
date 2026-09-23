@@ -510,6 +510,14 @@ export interface LibraryStats {
   /** Nombre de posts par étiquette de couleur ; les teintes inutilisées sont absentes. */
   byLabel: Partial<Record<LabelColor, number>>
   topTags: { name: string; count: number; source: TagSource }[]
+  /**
+   * Combien de tags distincts existent, au-delà des quarante de `topTags`.
+   *
+   * Sans lui, « Voir les 40 tags » était tout ce que la barre latérale pouvait dire — alors
+   * qu'une vraie bibliothèque en porte des milliers, et que le quarante et unième n'était
+   * joignable nulle part.
+   */
+  tagCount: number
 }
 
 /** Surface IPC exposée au renderer via contextBridge. */
@@ -524,7 +532,8 @@ export interface MagpieApi {
   setFavoriteMany(ids: string[], value: boolean): Promise<void>
   removeTagMany(ids: string[], name: string): Promise<void>
   postUrls(ids: string[]): Promise<string[]>
-  addTagMany(ids: string[], name: string): Promise<void>
+  /** Rend le nom tel que la base le garde — sans dièse, et dans la casse d'un tag déjà connu. */
+  addTagMany(ids: string[], name: string): Promise<string | null>
   hasAiKey(provider: AiProvider): Promise<boolean>
   setAiKey(provider: AiProvider, key: string): Promise<void>
   startAiTagging(postIds?: string[]): Promise<AiTagProgress>
@@ -613,7 +622,7 @@ export interface MagpieApi {
 
   setLabel(postId: string, label: LabelColor | null): Promise<void>
   setCollectionColor(collectionId: number, color: LabelColor | null): Promise<void>
-  addTag(postId: string, name: string): Promise<void>
+  addTag(postId: string, name: string): Promise<string | null>
   removeTag(postId: string, name: string): Promise<void>
   listCollections(): Promise<CollectionInfo[]>
   createCollection(name: string): Promise<CollectionInfo>
@@ -662,7 +671,86 @@ export interface MagpieApi {
   loadDemoData(): Promise<number>
   removeDemoData(): Promise<number>
 
+  /** Tous les tags, du plus porté au moins porté : la complétion et « voir tout ». */
+  listTags(): Promise<TagTally[]>
+  /** Écrit la bibliothèque dans un fichier JSON choisi par l'utilisateur. `null` : abandon. */
+  exportLibraryJson(options: LibraryExportOptions): Promise<LibraryExportResult | null>
+  /** Fait choisir un fichier et dit ce que son import ferait, sans rien écrire. */
+  previewLibraryImport(): Promise<LibraryImportPreview | null>
+  /** Importe le fichier d'un aperçu. Le jeton empêche d'importer autre chose que ce qu'on a vu. */
+  importLibrary(token: string): Promise<LibraryImportReport>
+  lastLibraryImport(): Promise<LibraryImportReport | null>
+  undoLibraryImport(): Promise<LibraryImportUndo>
+  /** Arrête l'export JSON ou l'import en cours, entre deux paquets. */
+  stopLibraryTransfer(): Promise<void>
+
   platform: NodeJS.Platform
+}
+
+/** Un tag et le nombre de posts visibles qui le portent. */
+export interface TagTally {
+  name: string
+  count: number
+  source: TagSource
+}
+
+/**
+ * La bibliothèque dans un fichier, et le chemin du retour — voir `main/library-file.ts`.
+ *
+ * SPEC §10 promettait que rien n'est captif ; sans import ni export structuré, c'était faux.
+ */
+export interface LibraryExportOptions {
+  /** La réponse brute des plateformes : ce qui permet de re-normaliser, et ce qui pèse. */
+  includeRaw: boolean
+}
+
+export interface LibraryExportResult {
+  path: string
+  posts: number
+  collections: number
+  tags: number
+  bytes: number
+  at: number
+}
+
+export interface LibraryImportPreview {
+  token: string
+  fileName: string
+  bytes: number
+  exportedAt: number | null
+  appVersion: string | null
+  posts: { total: number; fresh: number; existing: number; invalid: number }
+  collections: { total: number; fresh: number; matched: number }
+  tags: number
+  mapLabels: number
+}
+
+/** Ce qu'un import a réellement changé. Tiré de son journal : ce qui est dit est ce qui est écrit. */
+export interface LibraryImportReport {
+  at: number
+  fileName: string
+  /** Arrêté à la demande : ce qui précède est importé, et s'annule pareil. */
+  stopped: boolean
+  postsAdded: number
+  /** Posts déjà présents qui ont reçu quelque chose : un tag, un favori, une transcription… */
+  postsMerged: number
+  postsUnchanged: number
+  invalid: number
+  tagsLinked: number
+  favourites: number
+  labels: number
+  transcripts: number
+  sources: number
+  collectionsCreated: number
+  collectionsCompleted: number
+  memberships: number
+  mapLabels: number
+}
+
+export interface LibraryImportUndo {
+  postsRemoved: number
+  collectionsRemoved: number
+  reverted: number
 }
 
 export interface CacheProgress {
@@ -819,6 +907,8 @@ export type BackgroundTaskKind =
   | 'models'
   /** L'export : une fiche par post, et il ne disait rien pendant neuf mille écritures. */
   | 'export'
+  /** L'import d'une bibliothèque, son aperçu et son annulation : des milliers de posts. */
+  | 'import'
   | 'sync'
   | 'thumbnails'
   | 'clips'

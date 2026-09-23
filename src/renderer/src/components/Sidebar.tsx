@@ -6,6 +6,7 @@ import { MODIFIER, PLATFORM_LABEL } from '../format'
 import type { TranslationKey } from '../i18n'
 import { notifyError } from '../notices'
 import { useStore, useT } from '../store'
+import { useAllTags } from '../tag-suggestions'
 import { useClosing } from '../useClosing'
 import { CollectionsManager } from './CollectionsManager'
 import { LabelPicker } from './LabelPicker'
@@ -29,6 +30,16 @@ import {
 
 /** Nombre de tags visibles au repos. Au-delà, la liste devient du bruit plus qu'un repère. */
 const TAGS_COLLAPSED = 8
+/** Au-delà, la liste dépliée demande un filtre : on ne cherche pas un mot parmi cent à l'œil. */
+const TAGS_FILTERED = 30
+/**
+ * Lignes dessinées au plus, filtre ou non.
+ *
+ * Une vraie bibliothèque porte des milliers de tags — 4 852 relevés sur celle de référence —
+ * et autant de boutons redessinés à chaque changement de requête figeraient le panneau. Chaque
+ * tag reste joignable : le filtre les atteint tous, et la ligne du bas dit combien il en reste.
+ */
+const TAGS_DRAWN = 300
 
 const KIND_FILTERS: { kind: PostKind; label: TranslationKey; icon: React.JSX.Element }[] = [
   { kind: 'link', label: 'sidebar.links', icon: <IconLink /> },
@@ -46,6 +57,11 @@ export function Sidebar(): React.JSX.Element {
   const contentSources = useStore((s) => s.contentSources)
 
   const [showAllTags, setShowAllTags] = useState(false)
+  const [tagFilter, setTagFilter] = useState('')
+  /* « Voir tout » voyait tout ce que les statistiques portaient, c'est-à-dire quarante : le
+     quarante et unième tag n'était joignable nulle part. La liste complète se demande à part,
+     et seulement quand on la déplie. */
+  const everyTag = useAllTags(showAllTags)
   const [collections, setCollections] = useState<CollectionInfo[]>([])
   const [creatingCollection, setCreatingCollection] = useState(false)
   const [collectionDraft, setCollectionDraft] = useState('')
@@ -112,7 +128,12 @@ export function Sidebar(): React.JSX.Element {
   }
 
   const tags = stats?.topTags ?? []
-  const shown = showAllTags ? tags : tags.slice(0, TAGS_COLLAPSED)
+  const tagTotal = Math.max(stats?.tagCount ?? 0, tags.length)
+  const needle = tagFilter.trim().replace(/^#+/, '').toLocaleLowerCase()
+  const matching = showAllTags
+    ? (everyTag ?? tags).filter((tag) => !needle || tag.name.toLocaleLowerCase().includes(needle))
+    : tags.slice(0, TAGS_COLLAPSED)
+  const shown = matching.slice(0, TAGS_DRAWN)
   const allTagsSelected =
     tags.length > 0 && tags.every((tag) => query.tags.includes(tag.name))
   const allCollectionsSelected =
@@ -472,6 +493,19 @@ export function Sidebar(): React.JSX.Element {
               {t('sidebar.tags')}
             </button>
           </h2>
+          {showAllTags && tagTotal > TAGS_FILTERED ? (
+            <input
+              type="search"
+              className="tag-filter"
+              value={tagFilter}
+              placeholder={t('sidebar.filterTags')}
+              aria-label={t('sidebar.filterTags')}
+              onChange={(event) => setTagFilter(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setTagFilter('')
+              }}
+            />
+          ) : null}
           <div className="tag-list">
             {shown.map((tag) => (
               <button
@@ -487,10 +521,25 @@ export function Sidebar(): React.JSX.Element {
               </button>
             ))}
             {tags.length === 0 ? <p className="sidebar__empty">{t('sidebar.noTagsYet')}</p> : null}
+            {showAllTags && tags.length > 0 && matching.length === 0 ? (
+              <p className="sidebar__empty">{t('sidebar.noTagMatch')}</p>
+            ) : null}
+            {matching.length > shown.length ? (
+              <p className="sidebar__empty">
+                {t('sidebar.moreTags', { count: matching.length - shown.length })}
+              </p>
+            ) : null}
           </div>
-          {tags.length > TAGS_COLLAPSED ? (
-            <button type="button" className="link-btn" onClick={() => setShowAllTags((v) => !v)}>
-              {showAllTags ? t('sidebar.collapse') : t('sidebar.showAllTags', { count: tags.length })}
+          {tagTotal > TAGS_COLLAPSED ? (
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                setShowAllTags((v) => !v)
+                setTagFilter('')
+              }}
+            >
+              {showAllTags ? t('sidebar.collapse') : t('sidebar.showAllTags', { count: tagTotal })}
             </button>
           ) : null}
         </div>

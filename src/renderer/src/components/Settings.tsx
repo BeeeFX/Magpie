@@ -22,6 +22,7 @@ import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
 import { ConfirmButton } from './ConfirmButton'
 import { IconCards, IconClose, IconMap, IconMasonry } from './Icons'
+import { LibraryTransfer } from './LibraryTransfer'
 
 const THEMES: { key: ThemeChoice; label: TranslationKey }[] = [
   { key: 'system', label: 'settings.system' },
@@ -753,6 +754,11 @@ export function Settings(): React.JSX.Element | null {
                 préparer : deux commandes qui ne servent que dans le cas rare où l'on refuse
                 l'automatisme, à l'endroit où personne ne les cherche. */}
           </section>
+
+          <div className="modal__sep" />
+
+          {/* La bibliothèque dans un fichier, et le chemin du retour : SPEC §10. */}
+          <LibraryTransfer />
 
           <div className="modal__sep" />
 

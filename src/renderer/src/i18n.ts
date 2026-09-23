@@ -32,6 +32,9 @@ const fr = {
   'sidebar.noTagsYet': 'Aucun pour l’instant',
   'sidebar.showAllTags': 'Voir {count} tag|Voir les {count} tags',
   'sidebar.collapse': 'Réduire',
+  'sidebar.filterTags': 'Filtrer les tags',
+  'sidebar.noTagMatch': 'Aucun tag ne correspond',
+  'sidebar.moreTags': 'Encore {count} — précisez le filtre|Encore {count} — précisez le filtre',
   'sidebar.settings': 'Réglages',
   'sidebar.newCollection': 'Nouvelle collection',
   'sidebar.collectionName': 'Nom de la collection',
@@ -497,6 +500,48 @@ const fr = {
     'Ce texte est écrit dans PROMPT.md. Vous pouvez l’adapter avant de le copier — c’est vous qui conversez, pas Magpie.',
   'export.done':
     '{posts} posts exportés · {collections} collections · {transcripts} transcriptions · {size}',
+
+  /* L'export JSON et l'import, dans les réglages — voir LibraryTransfer. */
+  'transfer.title': 'Exporter ou importer la bibliothèque',
+  'transfer.lead':
+    'Un seul fichier JSON avec tout ce que vous avez rangé : posts, tags, favoris, étiquettes, transcriptions et collections. De quoi changer d’ordinateur, garder une copie ou réunir deux bibliothèques.',
+  'transfer.export': 'Exporter en JSON…',
+  'transfer.import': 'Importer…',
+  'transfer.includeRaw':
+    'Inclure les réponses brutes des plateformes (fichier bien plus lourd, utile pour relire un post plus tard)',
+  'transfer.stop': 'Arrêter',
+  'transfer.exporting': 'Export en cours…',
+  'transfer.reading': 'Lecture du fichier…',
+  'transfer.importing': 'Import en cours…',
+  'transfer.undoing': 'Annulation en cours…',
+  'transfer.progress': '{done} / {total} posts',
+  'transfer.exported':
+    '{count} post exporté dans {path} ({size}).|{count} posts exportés dans {path} ({size}).',
+  'transfer.exportStopped': 'Export arrêté : aucun fichier n’a été écrit.',
+  'transfer.previewFile': '{file} — exporté le {date} par Magpie {version}',
+  'transfer.previewNew': '{count} nouveau post|{count} nouveaux posts',
+  'transfer.previewExisting':
+    '{count} post déjà là : ses tags, son favori et sa transcription s’y ajoutent, rien n’est remplacé|{count} posts déjà là : leurs tags, favoris et transcriptions s’y ajoutent, rien n’est remplacé',
+  'transfer.previewCollections':
+    '{count} collection · nouvelles : {fresh} · rejointes par leur nom : {matched}|{count} collections · nouvelles : {fresh} · rejointes par leur nom : {matched}',
+  'transfer.previewInvalid':
+    '{count} entrée illisible ou en double, ignorée|{count} entrées illisibles ou en double, ignorées',
+  'transfer.confirm': 'Importer',
+  'transfer.cancel': 'Annuler',
+  'transfer.done': 'Import terminé',
+  'transfer.stopped': 'Import arrêté en route : ce qui précède est importé',
+  'transfer.lastImport': 'Dernier import : {file}, le {date}',
+  'transfer.reportNothing':
+    'Rien de neuf : cette bibliothèque contenait déjà tout ce que ce fichier apporte.',
+  'transfer.reportAdded': '{count} post ajouté|{count} posts ajoutés',
+  'transfer.reportMerged': '{count} post existant enrichi|{count} posts existants enrichis',
+  'transfer.reportDetail':
+    'tags : {tags} · favoris : {favourites} · étiquettes : {labels} · transcriptions : {transcripts}',
+  'transfer.reportCollections': 'collections créées : {created} · complétées : {completed}',
+  'transfer.undo': 'Annuler cet import',
+  'transfer.undoYes':
+    'Retirer {count} post ajouté et défaire le reste|Retirer les {count} posts ajoutés et défaire le reste',
+  'transfer.undone': 'Import annulé : {count} post retiré|Import annulé : {count} posts retirés',
   'actions.prepareThumbs': 'Télécharger les images des tuiles',
   'actions.prepareClips': 'Télécharger les vidéos en {quality}',
   'actions.recheck': 'Revérifier toute la bibliothèque',
@@ -535,6 +580,7 @@ const fr = {
   'downloads.queued': 'En attente · {count} à faire',
   'downloads.kind.models': 'Téléchargement des modèles',
   'downloads.kind.export': 'Export',
+  'downloads.kind.import': 'Import',
   'downloads.kind.sync': 'Synchronisation',
   'downloads.kind.thumbnails': 'Images des tuiles',
   'downloads.kind.images': 'Lecture des images',
@@ -802,6 +848,9 @@ const en: Record<TranslationKey, string> = {
   'sidebar.noTagsYet': 'None yet',
   'sidebar.showAllTags': 'Show {count} tag|Show all {count} tags',
   'sidebar.collapse': 'Show fewer',
+  'sidebar.filterTags': 'Filter tags',
+  'sidebar.noTagMatch': 'No tag matches',
+  'sidebar.moreTags': '{count} more — narrow the filter|{count} more — narrow the filter',
   'sidebar.settings': 'Settings',
   'sidebar.newCollection': 'New collection',
   'sidebar.collectionName': 'Collection name',
@@ -1261,6 +1310,46 @@ const en: Record<TranslationKey, string> = {
     'This text is written to PROMPT.md. Adapt it before copying — you are the one having the conversation, not Magpie.',
   'export.done':
     '{posts} posts exported · {collections} collections · {transcripts} transcripts · {size}',
+
+  'transfer.title': 'Export or import the library',
+  'transfer.lead':
+    'A single JSON file with everything you organised: posts, tags, favourites, labels, transcripts and collections. Enough to move to another computer, keep a copy or merge two libraries.',
+  'transfer.export': 'Export as JSON…',
+  'transfer.import': 'Import…',
+  'transfer.includeRaw':
+    'Include the platforms’ raw responses (a much larger file, useful to re-read a post later)',
+  'transfer.stop': 'Stop',
+  'transfer.exporting': 'Exporting…',
+  'transfer.reading': 'Reading the file…',
+  'transfer.importing': 'Importing…',
+  'transfer.undoing': 'Undoing…',
+  'transfer.progress': '{done} / {total} posts',
+  'transfer.exported':
+    '{count} post exported to {path} ({size}).|{count} posts exported to {path} ({size}).',
+  'transfer.exportStopped': 'Export stopped: no file was written.',
+  'transfer.previewFile': '{file} — exported on {date} by Magpie {version}',
+  'transfer.previewNew': '{count} new post|{count} new posts',
+  'transfer.previewExisting':
+    '{count} post already here: its tags, favourite and transcript are added, nothing is replaced|{count} posts already here: their tags, favourites and transcripts are added, nothing is replaced',
+  'transfer.previewCollections':
+    '{count} collection · new: {fresh} · joined by name: {matched}|{count} collections · new: {fresh} · joined by name: {matched}',
+  'transfer.previewInvalid':
+    '{count} unreadable or duplicate entry, skipped|{count} unreadable or duplicate entries, skipped',
+  'transfer.confirm': 'Import',
+  'transfer.cancel': 'Cancel',
+  'transfer.done': 'Import finished',
+  'transfer.stopped': 'Import stopped midway: what came before is imported',
+  'transfer.lastImport': 'Last import: {file}, on {date}',
+  'transfer.reportNothing': 'Nothing new: this library already held everything this file brings.',
+  'transfer.reportAdded': '{count} post added|{count} posts added',
+  'transfer.reportMerged': '{count} existing post enriched|{count} existing posts enriched',
+  'transfer.reportDetail':
+    'tags: {tags} · favourites: {favourites} · labels: {labels} · transcripts: {transcripts}',
+  'transfer.reportCollections': 'collections created: {created} · completed: {completed}',
+  'transfer.undo': 'Undo this import',
+  'transfer.undoYes':
+    'Remove {count} added post and undo the rest|Remove the {count} added posts and undo the rest',
+  'transfer.undone': 'Import undone: {count} post removed|Import undone: {count} posts removed',
   'actions.prepareThumbs': 'Download tile images',
   'actions.prepareClips': 'Download videos in {quality}',
   'actions.recheck': 'Re-check the whole library',
@@ -1299,6 +1388,7 @@ const en: Record<TranslationKey, string> = {
   'downloads.queued': 'Queued · {count} to go',
   'downloads.kind.models': 'Downloading the models',
   'downloads.kind.export': 'Export',
+  'downloads.kind.import': 'Import',
   'downloads.kind.sync': 'Syncing',
   'downloads.kind.thumbnails': 'Tile images',
   'downloads.kind.images': 'Reading images',

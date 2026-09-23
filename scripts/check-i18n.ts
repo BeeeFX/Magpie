@@ -50,6 +50,7 @@ const QUALITIES = ['auto', '480p', '720p', '1080p', 'source'] satisfies Playback
 const SCHEDULES = ['manual', 'hourly', '6h', 'daily'] satisfies SyncSchedule[]
 const PROVIDERS = ['openai', 'anthropic', 'gemini', 'deepseek', 'custom'] satisfies AiProvider[]
 const TASK_KINDS = [
+  'import',
   'sync',
   'thumbnails',
   'clips',

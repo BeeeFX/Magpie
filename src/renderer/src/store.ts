@@ -26,6 +26,7 @@ import type {
 } from '@shared/types'
 import type { Language, LanguageChoice } from '@shared/types'
 import { AFTER_SYNC_STEPS, DEFAULT_QUERY, idleSyncState } from '@shared/types'
+import { normalizeTagName, tagKey } from '@shared/tags'
 import { magpie } from './bridge'
 import { describeError, notifyError, notifySuccess, reportFailure, useNotices } from './notices'
 import { afterPageFailure } from './paging'
@@ -737,15 +738,19 @@ export const useStore = create<State>()(
           notifyError('notice.favoriteFailed', error)
         }
       },
-      tagSelection: async (name) => {
+      tagSelection: async (typed) => {
+        /* Le nom tel que la base l'écrira, et non tel qu'il a été tapé : « #chats » posait une
+           puce « #chats » qui filtrait sur un tag inexistant. Voir `@shared/tags`. */
+        let name = normalizeTagName(typed)
+        if (!name) return
         try {
           const ids = get().selectedIds
-          for (const slice of chunk(ids)) await magpie.addTagMany(slice, name)
+          for (const slice of chunk(ids)) name = (await magpie.addTagMany(slice, name)) ?? name
           const selected = new Set(ids)
           const before = get().posts
           const posts = before
             .map((post) =>
-              selected.has(post.id) && !post.tags.some((tag) => tag.name === name)
+              selected.has(post.id) && !post.tags.some((tag) => tagKey(tag.name) === tagKey(name))
                 ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
                 : post
             )
@@ -765,7 +770,9 @@ export const useStore = create<State>()(
 
       /** Le pendant de `tagSelection`, qui n'existait pas : un tag posé par erreur sur trois
        *  cents posts ne se retirait qu'un post à la fois, depuis la vue détaillée. */
-      untagSelection: async (name) => {
+      untagSelection: async (typed) => {
+        const name = normalizeTagName(typed)
+        if (!name) return
         try {
           const ids = get().selectedIds
           for (const slice of chunk(ids)) await magpie.removeTagMany(slice, name)
@@ -773,12 +780,7 @@ export const useStore = create<State>()(
           set({
             posts: get().posts.map((post) =>
               selected.has(post.id)
-                ? {
-                    ...post,
-                    tags: post.tags.filter(
-                      (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
-                    )
-                  }
+                ? { ...post, tags: post.tags.filter((tag) => tagKey(tag.name) !== tagKey(name)) }
                 : post
             )
           })
@@ -965,13 +967,17 @@ export const useStore = create<State>()(
         set({ selectionMode: true, selectedIds: [...selected] })
       },
 
-      addTag: async (postId, name) => {
+      addTag: async (postId, typed) => {
+        const typedName = normalizeTagName(typed)
+        if (!typedName) return
         try {
-          await magpie.addTag(postId, name)
+          /* La base rend la forme qu'elle garde : la casse d'un tag déjà connu l'emporte sur la
+             frappe, et la puce doit dire ce qui est écrit. */
+          const name = (await magpie.addTag(postId, typedName)) ?? typedName
           const before = get().posts
           const posts = before
             .map((post) =>
-              post.id === postId && !post.tags.some((tag) => tag.name === name)
+              post.id === postId && !post.tags.some((tag) => tagKey(tag.name) === tagKey(name))
                 ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
                 : post
             )
@@ -992,16 +998,14 @@ export const useStore = create<State>()(
         try {
           await magpie.removeTag(postId, name)
           const before = get().posts
-          const selectedTags = new Set(get().query.tags.map((tag) => tag.toLocaleLowerCase()))
+          /* La comparaison de SQLite, pas celle de la langue : `NOCASE` ne replie que l'ASCII, et
+             retirer « été » ne retire pas « Été » en base — la puce ne doit pas prétendre
+             l'inverse. */
+          const selectedTags = new Set(get().query.tags.map(tagKey))
           const posts = before
             .map((post) =>
               post.id === postId
-                ? {
-                    ...post,
-                    tags: post.tags.filter(
-                      (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
-                    )
-                }
+                ? { ...post, tags: post.tags.filter((tag) => tagKey(tag.name) !== tagKey(name)) }
                 : post
             )
             .filter(
@@ -1009,7 +1013,7 @@ export const useStore = create<State>()(
                 !(
                   post.id === postId &&
                   selectedTags.size > 0 &&
-                  !post.tags.some((tag) => selectedTags.has(tag.name.toLocaleLowerCase()))
+                  !post.tags.some((tag) => selectedTags.has(tagKey(tag.name)))
                 )
             )
           set({
