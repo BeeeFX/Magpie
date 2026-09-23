@@ -414,6 +414,23 @@ const previewApi: MagpieApi = {
   clearMediaCache: async () => ({ removed: 0, failed: 0 }),
   openDataFolder: async () => {},
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),
+  /* Une sauvegarde d'hier et six autres : la ligne des sauvegardes se relit dans l'aperçu. */
+  getBackupStatus: async () => ({
+    lastAt: Date.now() - 20 * 3600 * 1000,
+    count: 7,
+    bytes: 7 * 41 * 1024 ** 2,
+    running: false,
+    lastError: null
+  }),
+  backupNow: async () => ({
+    lastAt: Date.now(),
+    count: 7,
+    bytes: 7 * 41 * 1024 ** 2,
+    running: false,
+    lastError: null
+  }),
+  openBackupsFolder: async () => {},
+  takeLibraryRecovery: async () => null,
   getMediaPlaybackUrl: async () => '',
   requestThumbnails: async () => {},
   diagnoseMedia: async () => ({

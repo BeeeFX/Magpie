@@ -15,7 +15,8 @@ import { pathToFileURL } from 'node:url'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { Readable } from 'node:stream'
-import { closeDb, getDb, mediaDir } from './db'
+import { closeDb, getDb, LibraryUnavailable, mediaDir } from './db'
+import { startBackupSchedule, stopBackupSchedule } from './db/backups'
 import { registerIpc } from './ipc'
 import {
   countPendingClips,
@@ -1048,6 +1049,8 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
   nativeTheme.on('updated', () => syncTheme())
 
   await bootstrap()
+  /* Une copie de la base par jour, dans la bibliothèque. Voir db/backups.ts. */
+  startBackupSchedule()
 
   // Une vérification incrémentale au lancement ne reparcourt pas tout l'historique : le
   // moteur s'arrête dès qu'il retrouve quelques pages déjà connues. Le premier compte
@@ -1062,7 +1065,20 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 }).catch((error: unknown) => {
-  dialog.showErrorBox(say('library.unreachable'), (error as Error).message)
+  /* Une base intacte qu'on n'a pas pu ouvrir le dit dans la langue de l'interface, avec ce
+     qu'il faut faire : ce n'est pas la même situation qu'une base abîmée, et rien n'a bougé. */
+  const message =
+    error instanceof LibraryUnavailable
+      ? say(
+          error.reason === 'locked'
+            ? 'library.locked'
+            : error.reason === 'denied'
+              ? 'library.denied'
+              : 'library.openFailed',
+          { detail: error.detail }
+        )
+      : (error as Error).message
+  dialog.showErrorBox(say('library.unreachable'), message)
   app.quit()
 })
 
@@ -1079,5 +1095,6 @@ app.on('before-quit', () => {
   if (organizerAfterSyncTimer) clearTimeout(organizerAfterSyncTimer)
   if (windowInteractionTimer) clearTimeout(windowInteractionTimer)
   stopUpdater()
+  stopBackupSchedule()
   closeDb()
 })

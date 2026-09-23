@@ -381,6 +381,29 @@ export interface LibraryInfo {
   version: string
 }
 
+/** Les sauvegardes régulières de la base, telles que l'écran de la bibliothèque les montre. */
+export interface BackupStatus {
+  /** La plus récente, ou `null` s'il n'y en a encore aucune. */
+  lastAt: number | null
+  count: number
+  /** Ce qu'elles occupent ensemble : chacune pèse la base entière. */
+  bytes: number
+  running: boolean
+  /** Le dernier échec d'une sauvegarde automatique, tant qu'aucune n'a réussi depuis. */
+  lastError: string | null
+}
+
+/**
+ * Ce que le secours d'ouverture a fait d'une base illisible, pour le dire à l'écran — il ne
+ * l'écrivait que dans la console, que personne ne lit.
+ */
+export interface LibraryRecovery {
+  /** Date de la sauvegarde remise en place ; `null` si aucune n'était saine. */
+  restoredAt: number | null
+  /** Nom du fichier mis de côté, dans le dossier de la bibliothèque. */
+  setAside: string | null
+}
+
 export type LibraryMovePhase =
   | 'preparing'
   | 'database'
@@ -560,6 +583,13 @@ export interface MagpieApi {
   pruneModels(): Promise<{ removed: string[]; freed: number }>
   openDataFolder(): Promise<void>
   chooseLibraryFolder(): Promise<{ moved: boolean; path: string }>
+  /* Sauvegardes de la base et secours d'ouverture. */
+  getBackupStatus(): Promise<BackupStatus>
+  /** Rend l'état une fois la copie écrite ; rejette si elle n'a pas pu l'être. */
+  backupNow(): Promise<BackupStatus>
+  openBackupsFolder(): Promise<void>
+  /** Ce qu'a fait le secours à l'ouverture, une seule fois : la seconde lecture rend `null`. */
+  takeLibraryRecovery(): Promise<LibraryRecovery | null>
   getMediaPlaybackUrl(
     postId: string,
     mediaIndex: number,

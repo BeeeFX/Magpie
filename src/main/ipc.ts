@@ -22,7 +22,15 @@ import type {
   Settings
 } from '@shared/types'
 import { BULK_MAX, CONTENT_SOURCES, DEFAULT_QUERY, LABELS, LOAD_PROFILES, PLATFORMS, POST_KINDS, PUBLIC_PLATFORMS, SORT_KEYS } from '@shared/types'
-import { dataDir, getDb, mediaDir, writeDataDirLocation } from './db'
+import { dataDir, getDb, mediaDir, takeLibraryRecovery, writeDataDirLocation } from './db'
+import {
+  backupNow,
+  backupsDir,
+  backupStatus,
+  resumeBackups,
+  suspendBackups
+} from './db/backups'
+import { BACKUPS_DIR } from './db/backup-files'
 import {
   addTag,
   addToCollection,
@@ -689,6 +697,25 @@ export function registerIpc({
 
   ipcMain.handle('app:openDataFolder', () => shell.openPath(dataDir()))
 
+  /* Sauvegardes de la base et secours d'ouverture. Voir db/backups.ts. */
+  ipcMain.handle('library:backupStatus', () => backupStatus())
+  ipcMain.handle('library:backupNow', async () => {
+    await backupNow()
+    return backupStatus()
+  })
+  ipcMain.handle('library:openBackups', async () => {
+    /* `openPath` ne rejette pas : il rend le message d'échec. Le laisser passer pour une
+       réussite, c'est un bouton qui ne fait rien sans le dire. */
+    const failure = await shell.openPath(backupsDir())
+    if (failure) throw new Error(failure)
+  })
+  /* `getDb()` d'abord : c'est l'ouverture qui décide s'il y a eu un secours, et le rendu peut
+     poser la question avant que quoi que ce soit d'autre n'ait ouvert la base. */
+  ipcMain.handle('library:takeRecovery', () => {
+    getDb()
+    return takeLibraryRecovery()
+  })
+
   ipcMain.handle('library:chooseFolder', async (event) => {
     const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined
     const options = {
@@ -726,6 +753,11 @@ export function registerIpc({
        geste des réglages qui pouvait coûter un gigaoctet sans le dire. */
     const targetModels = join(target, 'models')
     const sourceModels = join(source, 'models')
+    /* Les sauvegardes aussi : elles vivent dans la bibliothèque pour la suivre partout, et la
+       copie ne prenait que la base, les médias et les modèles. Une bibliothèque déplacée
+       repartait donc sans aucune sauvegarde — la veille d'en avoir besoin, peut-être. */
+    const targetBackups = join(target, BACKUPS_DIR)
+    const sourceBackups = join(source, BACKUPS_DIR)
     let startedWriting = false
     const sendProgress = (progress: LibraryMoveProgress): void => {
       if (!event.sender.isDestroyed()) event.sender.send('library:moveProgress', progress)
@@ -734,16 +766,22 @@ export function registerIpc({
     try {
       sendProgress({ phase: 'preparing', done: 0, total: 0, path: target, message: null })
       await pauseMedia()
+      await suspendBackups()
 
       const mediaFiles = await listLibraryFiles(sourceMedia)
       const modelFiles = await listLibraryFiles(sourceModels)
+      /* Une copie interrompue n'est pas une sauvegarde : elle reste derrière. */
+      const backupFiles = (await listLibraryFiles(sourceBackups)).filter(
+        (file) => !/\.part/.test(file.relativePath)
+      )
       const databaseBytes = await stat(join(source, 'magpie.db')).then((value) => value.size)
+      const backupBytes = backupFiles.reduce((sum, file) => sum + file.size, 0)
       const mediaBytes = mediaFiles.reduce((sum, file) => sum + file.size, 0)
       const modelBytes = modelFiles.reduce((sum, file) => sum + file.size, 0)
       /* Les modèles comptent dans le total : sans eux la vérification d'espace libre se
          trompait d'un gigaoctet, et la barre de progression annonçait une fin qui arrivait
-         bien avant que la copie soit finie. */
-      const total = Math.max(1, databaseBytes + mediaBytes + modelBytes)
+         bien avant que la copie soit finie. Les sauvegardes aussi, pour la même raison. */
+      const total = Math.max(1, databaseBytes + backupBytes + mediaBytes + modelBytes)
       const disk = statfsSync(target)
       const available = disk.bavail * disk.bsize
       if (available < total * 1.05) {
@@ -766,6 +804,22 @@ export function registerIpc({
         }
       })
 
+      let copiedBackupBytes = 0
+      if (backupFiles.length > 0) {
+        await mkdir(targetBackups, { recursive: true })
+        for (const file of backupFiles) {
+          await copyFile(file.path, join(targetBackups, file.relativePath))
+          copiedBackupBytes += file.size
+          sendProgress({
+            phase: 'database',
+            done: databaseBytes + copiedBackupBytes,
+            total,
+            path: target,
+            message: null
+          })
+        }
+      }
+
       await mkdir(targetMedia, { recursive: true })
       let copiedMediaBytes = 0
       for (const file of mediaFiles) {
@@ -775,7 +829,7 @@ export function registerIpc({
         copiedMediaBytes += file.size
         sendProgress({
           phase: 'media',
-          done: databaseBytes + copiedMediaBytes,
+          done: databaseBytes + backupBytes + copiedMediaBytes,
           total,
           path: target,
           message: null
@@ -792,7 +846,7 @@ export function registerIpc({
           copiedModelBytes += file.size
           sendProgress({
             phase: 'models',
-            done: databaseBytes + copiedMediaBytes + copiedModelBytes,
+            done: databaseBytes + backupBytes + copiedMediaBytes + copiedModelBytes,
             total,
             path: target,
             message: null
@@ -818,8 +872,10 @@ export function registerIpc({
         await rm(targetDb, { force: true }).catch(() => {})
         await rm(targetMedia, { recursive: true, force: true }).catch(() => {})
         await rm(targetModels, { recursive: true, force: true }).catch(() => {})
+        await rm(targetBackups, { recursive: true, force: true }).catch(() => {})
       }
       resumeMedia()
+      resumeBackups()
       throw error
     }
   })

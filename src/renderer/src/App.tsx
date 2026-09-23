@@ -9,6 +9,7 @@ import { Toolbar } from './components/Toolbar'
 import { ExportPanel } from './components/ExportPanel'
 import { Shortcuts } from './components/Shortcuts'
 import { useStore } from './store'
+import { useRecoveryNotice } from './useRecoveryNotice'
 
 /**
  * Trois écrans qui ne s'ouvrent pas au lancement, et qui pesaient quand même.
@@ -63,6 +64,7 @@ export function App(): React.JSX.Element {
   /* L'organiseur s'ouvre depuis la barre du haut, qui pousse l'état dans le store elle-même.
      Ce raccourci ne servait qu'au bouton des réglages, retiré. */
   const closeAiOrganizer = useCallback(() => setAiOrganizerOpen(false), [])
+  useRecoveryNotice(!settingsLoading)
 
   useEffect(() => {
     void refresh(true)

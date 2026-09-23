@@ -37,6 +37,7 @@ import type {
   SyncState,
   UpdateState
 } from '@shared/types'
+import type { BackupStatus, LibraryRecovery } from '@shared/types'
 
 /**
  * Pont typé. Le renderer n'a jamais accès à `ipcRenderer` directement : il ne peut appeler
@@ -160,6 +161,11 @@ const api: MagpieApi = {
   openDataFolder: (): Promise<void> => ipcRenderer.invoke('app:openDataFolder'),
   chooseLibraryFolder: (): Promise<{ moved: boolean; path: string }> =>
     ipcRenderer.invoke('library:chooseFolder'),
+  getBackupStatus: (): Promise<BackupStatus> => ipcRenderer.invoke('library:backupStatus'),
+  backupNow: (): Promise<BackupStatus> => ipcRenderer.invoke('library:backupNow'),
+  openBackupsFolder: (): Promise<void> => ipcRenderer.invoke('library:openBackups'),
+  takeLibraryRecovery: (): Promise<LibraryRecovery | null> =>
+    ipcRenderer.invoke('library:takeRecovery'),
   getMediaPlaybackUrl: (
     postId: string,
     mediaIndex: number,

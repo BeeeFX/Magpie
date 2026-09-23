@@ -54,6 +54,13 @@ const FR = {
   'library.noSpace': 'Espace libre insuffisant dans le dossier choisi.',
   'library.nested': 'Le nouveau dossier ne peut pas se trouver dans la bibliothèque actuelle.',
   'library.unreachable': 'Bibliothèque Magpie inaccessible',
+  /* Une base qu'on n'a pas pu ouvrir sans qu'elle soit abîmée : rien n'a été touché. */
+  'library.locked':
+    'Un autre programme utilise la base de la bibliothèque — un outil de synchronisation de fichiers, un antivirus. Fermez-le, puis relancez Magpie : la bibliothèque n’a pas été modifiée.\n\n{detail}',
+  'library.denied':
+    'Magpie n’a pas le droit d’ouvrir la base de la bibliothèque. Vérifiez les autorisations du dossier, puis relancez Magpie : la bibliothèque n’a pas été modifiée.\n\n{detail}',
+  'library.openFailed':
+    'La base de la bibliothèque n’a pas pu être ouverte, mais elle n’est pas abîmée : Magpie ne l’a pas touchée. Relancez Magpie ; si le problème revient, signalez-le avec ce détail.\n\n{detail}',
 
   'media.linkExpired':
     'La source en ligne de ce média a expiré. Synchronisez à nouveau le compte.',
@@ -88,6 +95,12 @@ const EN: Record<MessageKey, string> = {
   'library.noSpace': 'Not enough free space in the chosen folder.',
   'library.nested': 'The new folder cannot sit inside the current library.',
   'library.unreachable': 'Magpie library unreachable',
+  'library.locked':
+    'Another program is using the library database — a file-sync tool or an antivirus. Close it, then restart Magpie: your library has not been changed.\n\n{detail}',
+  'library.denied':
+    'Magpie is not allowed to open the library database. Check the folder’s permissions, then restart Magpie: your library has not been changed.\n\n{detail}',
+  'library.openFailed':
+    'The library database could not be opened, but it is not damaged: Magpie left it untouched. Restart Magpie; if this happens again, report it with this detail.\n\n{detail}',
 
   'media.linkExpired': 'The online source for this media expired. Sync the account again.',
   'media.noSource': 'No online source recorded for this media.',

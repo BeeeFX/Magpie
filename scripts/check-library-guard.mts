@@ -1,9 +1,16 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
 import { SCHEMA_VERSION } from '../src/main/db/schema'
+import {
+  autoBackupName,
+  autoBackupTime,
+  backupsToPrune,
+  KEEP_DAILY,
+  KEEP_WEEKLY
+} from '../src/main/db/backup-files'
 
 /**
  * Le secours d'ouverture répare-t-il seulement ce qui est cassé ?
@@ -25,6 +32,13 @@ import { SCHEMA_VERSION } from '../src/main/db/schema'
  *   — une base réellement abîmée est toujours secourue, sinon le remède d'origine est perdu ;
  *   — les mises à l'écart ne s'accumulent plus : elles pèsent la bibliothèque entière chacune.
  *
+ * Puis les sauvegardes régulières, et ce qu'elles ont changé au secours :
+ *
+ *   — une base verrouillée ou inaccessible n'est pas une base abîmée : on ne touche à rien ;
+ *   — le secours remet en place la sauvegarde **la plus récente qui est saine**, régulière ou
+ *     d'avant migration, jamais une copie venue du futur, et dit à quelle date ;
+ *   — une copie se fait, en un seul fichier, tourne, et restaure réellement.
+ *
  * Chaque scène tourne dans son propre processus : `getDb()` mémorise sa connexion, donc une
  * seule ouverture est possible par exécution.
  */
@@ -43,10 +57,16 @@ function makeLibrary(path: string, version: number): void {
 if (scene) {
   /* Dans le processus enfant : on ouvre, et on laisse l'erreur ou le succès parler. */
   process.env.MAGPIE_DATA_DIR = process.argv[3]
-  const { getDb } = await import('../src/main/db/index')
+  const { getDb, takeLibraryRecovery } = await import('../src/main/db/index')
   try {
     getDb()
     console.log('OUVERT')
+    /* Ce que l'interface annoncera : la date de la sauvegarde remise en place. */
+    console.log('SECOURS', JSON.stringify(takeLibraryRecovery()))
+    if (scene.startsWith('backup')) {
+      const { backupNow } = await import('../src/main/db/backups')
+      console.log('SAUVEGARDE', (await backupNow()).name)
+    }
   } catch (error) {
     console.log('REFUS', error instanceof Error ? error.message : String(error))
   }
@@ -238,6 +258,184 @@ console.log('\nUn fichier qu’on ne peut pas retirer n’arrête pas le ménage
     `et les sauvegardes de migration aussi (${backups.length})`
   )
 }
+/** Ce que le secours annonce, tel que l'enfant l'a imprimé. */
+function recoveryOf(out: string): { restoredAt: number | null; setAside: string | null } | null {
+  const line = out.split('\n').find((text) => text.startsWith('SECOURS '))
+  return line ? JSON.parse(line.slice('SECOURS '.length)) : null
+}
+
+function markerOf(path: string): string | null {
+  const db = new Database(path, { readonly: true })
+  try {
+    return (db.prepare('SELECT note FROM marker').get() as { note: string } | undefined)?.note ?? null
+  } catch {
+    return null
+  } finally {
+    db.close()
+  }
+}
+
+/** Une base valide qui dit d'où elle vient : c'est ce qu'on relit après restauration. */
+function makeNamedLibrary(path: string, version: number, note: string): void {
+  const db = new Database(path)
+  db.exec('CREATE TABLE IF NOT EXISTS marker (note TEXT)')
+  db.prepare('INSERT INTO marker (note) VALUES (?)').run(note)
+  db.pragma(`user_version = ${version}`)
+  db.close()
+}
+
+console.log('\nUne base verrouillée par un autre programme n’est pas une base abîmée')
+{
+  /* Un antivirus ou un outil de synchronisation qui tient le fichier suffisait à le faire
+     mettre de côté et remplacer par une sauvegarde ancienne. Le verrou est réel ici : ce
+     processus-ci tient la base en écriture exclusive pendant que l'enfant tente de l'ouvrir. */
+  let holder: Database.Database | null = null
+  const { out, files } = play('locked-db', (dir) => {
+    makeNamedLibrary(join(dir, 'magpie.db'), SCHEMA_VERSION, 'vraie')
+    makeNamedLibrary(join(dir, 'magpie-before-v9-1.db'), 0, 'ancienne')
+    holder = new Database(join(dir, 'magpie.db'))
+    holder.exec('BEGIN EXCLUSIVE')
+  })
+  holder!.exec('ROLLBACK')
+  holder!.close()
+
+  assert(out.includes('REFUS'), 'elle refuse de s’ouvrir')
+  assert(out.includes('(locked)'), 'et l’erreur parle d’un verrou, pas d’une corruption')
+  assert(!files.some((name) => name.startsWith('magpie-illisible')), 'rien n’est mis de côté')
+  assert(markerOf(join(root, 'locked-db', 'magpie.db')) === 'vraie', 'la base est restée la vraie')
+}
+
+console.log('\nUne base qu’on ne peut pas ouvrir n’est pas une base abîmée')
+{
+  /* Un refus d'accès. On ne peut pas retirer un droit de façon portable — et ce banc tourne
+     parfois en administrateur, que rien n'arrête — ; un dossier à la place du fichier produit
+     le même `SQLITE_CANTOPEN`. */
+  const { out, files } = play('denied', (dir) => {
+    mkdirSync(join(dir, 'magpie.db'))
+    makeNamedLibrary(join(dir, 'magpie-before-v9-1.db'), 0, 'ancienne')
+  })
+  assert(out.includes('REFUS') && out.includes('(denied)'), 'elle refuse de s’ouvrir, et dit pourquoi')
+  assert(!files.some((name) => name.startsWith('magpie-illisible')), 'rien n’est mis de côté')
+  assert(existsSync(join(root, 'denied', 'magpie-before-v9-1.db')), 'ni restauré')
+}
+
+console.log('\nLe secours remet en place la sauvegarde saine la plus récente')
+{
+  const now = Date.now()
+  const hour = 3_600_000
+  const at = (hoursAgo: number): number => Math.floor((now - hoursAgo * hour) / 1000) * 1000
+  const { out, files } = play('newest', (dir) => {
+    writeFileSync(join(dir, 'magpie.db'), Buffer.from('ceci n’est pas une base'))
+    const backups = join(dir, 'backups')
+    mkdirSync(backups)
+    /* La plus récente vient du futur, la suivante est abîmée : c'est celle d'hier qui doit
+       revenir — ni l'avant-veille, ni le filet de migration, bien plus ancien. */
+    makeNamedLibrary(join(backups, autoBackupName(at(1))), 999, 'futur')
+    writeFileSync(join(backups, autoBackupName(at(2))), Buffer.from('copie interrompue'))
+    makeNamedLibrary(join(backups, autoBackupName(at(24))), SCHEMA_VERSION, 'hier')
+    makeNamedLibrary(join(backups, autoBackupName(at(48))), SCHEMA_VERSION, 'avant-hier')
+    makeNamedLibrary(join(dir, `magpie-before-v${SCHEMA_VERSION}-${at(24 * 30)}.db`), 0, 'migration')
+  })
+  const recovery = recoveryOf(out)
+  assert(out.includes('OUVERT'), 'elle s’ouvre après restauration')
+  assert(markerOf(join(root, 'newest', 'magpie.db')) === 'hier', 'c’est la copie saine la plus récente qui revient')
+  assert(recovery?.restoredAt === at(24), 'et l’interface saura de quelle date')
+  assert(
+    Boolean(recovery?.setAside?.startsWith('magpie-illisible')) &&
+      files.includes(recovery!.setAside!),
+    'le fichier abîmé est gardé, sous le nom annoncé'
+  )
+}
+
+console.log('\nFaute de sauvegarde régulière saine, le filet de migration sert encore')
+{
+  const { out } = play('fallback', (dir) => {
+    writeFileSync(join(dir, 'magpie.db'), Buffer.from('abimee'))
+    mkdirSync(join(dir, 'backups'))
+    writeFileSync(join(dir, 'backups', autoBackupName(Date.now() - 3_600_000)), Buffer.from('abimee'))
+    makeNamedLibrary(join(dir, 'magpie-before-v9-1700000000000.db'), 0, 'migration')
+  })
+  assert(out.includes('OUVERT'), 'elle s’ouvre')
+  assert(markerOf(join(root, 'fallback', 'magpie.db')) === 'migration', 'depuis le filet de migration')
+  assert(recoveryOf(out)?.restoredAt === 1700000000000, 'dont la date vient du nom, pas du fichier')
+}
+
+console.log('\nSans aucune sauvegarde saine, l’interface le saura aussi')
+{
+  const { out } = play('nothing', (dir) => {
+    writeFileSync(join(dir, 'magpie.db'), Buffer.from('abimee'))
+  })
+  const recovery = recoveryOf(out)
+  assert(out.includes('OUVERT'), 'une bibliothèque vide s’ouvre')
+  assert(recovery !== null && recovery.restoredAt === null, 'et le secours dit qu’aucune date n’a pu revenir')
+}
+
+console.log('\nUne sauvegarde se fait, tourne, et restaure')
+{
+  const day = 86_400_000
+  const { out, files } = play('backup', (dir) => {
+    makeNamedLibrary(join(dir, 'magpie.db'), SCHEMA_VERSION, 'sauvegardée')
+    const backups = join(dir, 'backups')
+    mkdirSync(backups)
+    /* Deux mois de copies quotidiennes déjà là, et le reste d'une copie interrompue. */
+    for (let index = 1; index <= 60; index += 1) {
+      makeNamedLibrary(join(backups, autoBackupName(Date.now() - index * day)), SCHEMA_VERSION, `j-${index}`)
+    }
+    writeFileSync(join(backups, `${autoBackupName(Date.now() - 3_600_000)}.part`), 'interrompue')
+  })
+  const made = out.split('\n').find((line) => line.startsWith('SAUVEGARDE '))?.slice('SAUVEGARDE '.length)
+  const backups = readdirSync(join(root, 'backup', 'backups'))
+  assert(Boolean(made) && backups.includes(made!), `la copie est écrite dans backups/ (${made})`)
+  assert(!backups.some((name) => name.includes('.part')), 'rien d’interrompu ne reste à côté')
+  assert(
+    backups.length <= KEEP_DAILY + KEEP_WEEKLY,
+    `la rotation garde une dizaine de copies, pas soixante (${backups.length})`
+  )
+  const copy = new Database(join(root, 'backup', 'backups', made!), { readonly: true })
+  assert(copy.pragma('quick_check', { simple: true }) === 'ok', 'la copie est saine')
+  assert(copy.pragma('journal_mode', { simple: true }) === 'delete', 'et tient en un seul fichier')
+  copy.close()
+  assert(markerOf(join(root, 'backup', 'backups', made!)) === 'sauvegardée', 'elle contient la base')
+  assert(!files.some((name) => name.startsWith('magpie-illisible')), 'et la base, elle, n’a pas bougé')
+
+  /* Puis la base s'abîme — c'est la vraie raison d'être de tout ceci. */
+  const { out: after } = play('backup', (dir) => {
+    for (const suffix of ['-wal', '-shm']) rmSync(join(dir, `magpie.db${suffix}`), { force: true })
+    writeFileSync(join(dir, 'magpie.db'), Buffer.from('disque fatigué'))
+  })
+  assert(after.includes('OUVERT'), 'abîmée ensuite, elle se rouvre')
+  assert(
+    recoveryOf(after)?.restoredAt === autoBackupTime(made!),
+    'depuis la copie qu’on vient de faire'
+  )
+}
+
+console.log('\nLa rotation')
+{
+  const day = 86_400_000
+  const now = Date.now()
+  const all = Array.from({ length: 90 }, (_, index) => ({
+    name: autoBackupName(now - index * day),
+    at: Math.floor((now - index * day) / 1000) * 1000
+  }))
+  /* Trois clics sur « Sauvegarder maintenant » dans l'heure. */
+  for (let index = 1; index <= 3; index += 1) {
+    all.push({ name: autoBackupName(now - index * 60_000), at: now - index * 60_000 })
+  }
+  const pruned = new Set(backupsToPrune(all).map((backup) => backup.name))
+  const kept = all.filter((backup) => !pruned.has(backup.name))
+  assert(kept.length <= KEEP_DAILY + KEEP_WEEKLY, `trois mois donnent ${kept.length} copies gardées`)
+  assert(kept.some((backup) => backup.at === Math.max(...all.map((b) => b.at))), 'la plus récente reste')
+  const recent = kept.filter((backup) => now - backup.at < 6.5 * day)
+  assert(recent.length === KEEP_DAILY, `une par jour sur la dernière semaine (${recent.length})`)
+  const oldest = Math.min(...kept.map((backup) => backup.at))
+  assert(now - oldest > 21 * day && now - oldest < 36 * day, 'et l’historique remonte à un mois environ')
+  assert(
+    autoBackupTime(autoBackupName(1758639730123)) === 1758639730000,
+    'la date se relit dans le nom, à la seconde'
+  )
+}
+
 rmSync(root, { recursive: true, force: true })
 console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} échec(s).`)
 process.exit(failures === 0 ? 0 : 1)
