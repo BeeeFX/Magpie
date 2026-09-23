@@ -37,7 +37,8 @@ interface Props {
   copied: boolean
   selectionMode: boolean
   selected: boolean
-  onToggleSelected: (id: string) => void
+  /** `toggle` coche ou décoche une carte ; `range` va de la dernière carte touchée à celle-ci. */
+  onSelect: (id: string, how: 'toggle' | 'range') => void
 }
 
 /** Cadence de défilement d'un carrousel au survol. */
@@ -73,7 +74,7 @@ function CardImpl({
   copied,
   selectionMode,
   selected,
-  onToggleSelected
+  onSelect
 }: Props): React.JSX.Element {
   const t = useT()
   const sort = useStore((state) => state.query.sort)
@@ -361,6 +362,16 @@ function CardImpl({
     </div>
   ) : null
 
+  /* Un clic ouvre. Avec `Maj`, il sélectionne la plage qui va de la dernière carte touchée à
+     celle-ci ; avec `Ctrl` ou `⌘`, il coche cette seule carte. Les deux font entrer dans le mode
+     sélection : c'est lui qui montre le compteur et les actions, et une sélection qu'on ne voit
+     pas n'en est pas une. */
+  const activate = (event: React.MouseEvent, element: HTMLElement): void => {
+    if (event.shiftKey) onSelect(post.id, 'range')
+    else if (event.ctrlKey || event.metaKey || selectionMode) onSelect(post.id, 'toggle')
+    else onOpen(post, element)
+  }
+
   const openLabel = post.text?.trim()
     ? t('card.openLabel', { who: displayName(post), excerpt: excerpt(post.text, OPEN_LABEL_CHARS) })
     : t('card.openLabelBare', { who: displayName(post) })
@@ -383,9 +394,7 @@ function CardImpl({
       }
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={(e) =>
-        selectionMode ? onToggleSelected(post.id) : onOpen(post, e.currentTarget)
-      }
+      onClick={(event) => activate(event, event.currentTarget)}
     >
       {/*
         Ouvrir est un bouton en plein cadre, et non un `role="button"` posé sur l'article.
@@ -407,8 +416,7 @@ function CardImpl({
         {...(selectionMode ? { 'aria-pressed': selected } : {})}
         onClick={(event) => {
           event.stopPropagation()
-          if (selectionMode) onToggleSelected(post.id)
-          else onOpen(post, event.currentTarget.parentElement as HTMLElement)
+          activate(event, event.currentTarget.parentElement as HTMLElement)
         }}
       />
       {selectionMode ? (

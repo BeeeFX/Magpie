@@ -27,6 +27,13 @@ const EMPTY_TEXT = {
   source: 'grid.emptySource'
 } as const satisfies Record<string, TranslationKey>
 
+/** Un champ garde ses touches : `Ctrl+A` y sélectionne le texte, les flèches y déplacent le
+ *  curseur ou changent une valeur. */
+function isTyping(element: HTMLElement): boolean {
+  const tag = element.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || element.isContentEditable
+}
+
 export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
@@ -51,7 +58,6 @@ export function Grid(): React.JSX.Element {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const selectionMode = useStore((s) => s.selectionMode)
   const selectedIds = useStore((s) => s.selectedIds)
-  const toggleSelected = useStore((s) => s.toggleSelected)
 
   const query = useStore((s) => s.query)
   /* Ce qui a vidé l'écran décide de la sortie qu'on propose. */
@@ -321,13 +327,69 @@ export function Grid(): React.JSX.Element {
     setTimeout(() => setCopiedId((id) => (id === post.id ? null : id)), 1200)
   }, [])
 
+  /** La dernière carte cliquée ou cochée : le point de départ d'un `Maj`+clic. */
+  const anchor = useRef<string | null>(null)
+
+  /* Une plage appartient aux résultats où on l'a tracée : un autre filtre repart sans ancre. */
+  useEffect(() => {
+    anchor.current = null
+  }, [query])
+
   /* Ouvre la vue détaillée depuis la position exacte de la carte, pour qu'elle paraisse
      s'agrandir plutôt que de surgir au centre. Par identifiant : ne plus chercher la position
      rend aussi ce rappel stable, et `memo(Card)` n'est plus déjoué à chaque lot de posts. */
   const onOpen = useCallback(
-    (post: Post, element: HTMLElement) => openDetail(post.id, element.getBoundingClientRect()),
+    (post: Post, element: HTMLElement) => {
+      anchor.current = post.id
+      openDetail(post.id, element.getBoundingClientRect())
+    },
     [openDetail]
   )
+
+  /* La plage suit l'ordre du mur — celui de `posts`, que la mise en page empile dans l'ordre —
+     et s'ajoute à ce qui est déjà coché plutôt que de le remplacer : c'est le geste qui
+     pardonne, quand la sélection vient d'un `Ctrl+A` suivi de retouches. Elle ne couvre que
+     ce qui est chargé, ce qui est aussi tout ce qu'on a pu voir entre les deux clics. */
+  const onSelect = useCallback((id: string, how: 'toggle' | 'range') => {
+    const state = useStore.getState()
+    const from = anchor.current
+    if (how === 'range' && from !== null && from !== id) {
+      const order = state.posts.map((post) => post.id)
+      const start = order.indexOf(from)
+      const end = order.indexOf(id)
+      if (start >= 0 && end >= 0) {
+        state.selectIds(order.slice(Math.min(start, end), Math.max(start, end) + 1))
+        return
+      }
+    }
+    anchor.current = id
+    if (how === 'range') {
+      state.selectIds([id])
+      return
+    }
+    if (!state.selectionMode) state.setSelectionMode(true)
+    state.toggleSelected(id)
+  }, [])
+
+  /* `Ctrl+A` : tout le résultat, pas la tranche chargée — c'est ce que fait déjà « Tout » dans
+     la barre de sélection, qu'on n'avait aucun moyen d'atteindre sans la souris. Pas dans un
+     champ, où il sélectionne le texte, ni derrière une fenêtre, un menu ou la vue détaillée. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.altKey || event.shiftKey) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        const state = useStore.getState()
+        if (state.detailId !== null) return
+        if (document.querySelector('[aria-modal="true"], [role="menu"]')) return
+        if (event.target instanceof HTMLElement && isTyping(event.target)) return
+        event.preventDefault()
+        state.setSelectionMode(true)
+        void state.selectAllResults()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const onSendToNitrate = useCallback((post: Post) => {
     void magpie.sendToNitrate(post.url)
@@ -402,7 +464,7 @@ export function Grid(): React.JSX.Element {
             onSendToNitrate={onSendToNitrate}
             selectionMode={selectionMode}
             selected={selectedIdSet.has(item.post.id)}
-            onToggleSelected={toggleSelected}
+            onSelect={onSelect}
           />
         ))}
         {hasMore ? (

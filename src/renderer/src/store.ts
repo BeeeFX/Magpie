@@ -321,6 +321,8 @@ interface State {
   openDetail: (id: string, origin?: DOMRect) => void
   closeDetail: () => void
   stepDetail: (delta: number) => void
+  /** Ajoute des posts à la sélection, et passe en mode sélection : `Maj`+clic, `Ctrl`+clic. */
+  selectIds: (ids: string[]) => void
   addTag: (postId: string, name: string) => Promise<void>
   removeTag: (postId: string, name: string) => Promise<void>
   setLabel: (postId: string, label: LabelColor | null) => Promise<void>
@@ -934,6 +936,12 @@ export const useStore = create<State>()(
         }),
 
       closeDetail: () => set({ detailId: null, detailOrigin: null }),
+
+      selectIds: (ids) => {
+        const selected = new Set(get().selectedIds)
+        for (const id of ids) selected.add(id)
+        set({ selectionMode: true, selectedIds: [...selected] })
+      },
 
       addTag: async (postId, name) => {
         try {

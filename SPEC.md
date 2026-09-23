@@ -562,6 +562,11 @@ rapide de l'interface — on le voit sans lire, ce qu'aucun tag ne permet.
 - Collections : un post peut appartenir à plusieurs ; création par une phrase depuis le rail de la
   carte, ou à la main depuis la barre latérale.
 - **Sélection en masse** : mode sélection, puis « Ajouter à la collection », tags, favoris.
+  `Ctrl+A` prend **tout le résultat** — pas seulement la tranche chargée —, `Maj`+clic une plage
+  depuis la dernière carte touchée, dans l'ordre du mur, et `Ctrl`+clic une seule carte. Les
+  trois font entrer en mode sélection : une sélection qu'on ne voit pas n'en est pas une. La
+  plage s'ajoute à ce qui est coché plutôt que de le remplacer. Dans un champ, `Ctrl+A` garde son
+  sens : sélectionner le texte.
 - **Doublons** : la contrainte de clé primaire les rend impossibles. Quand une partie de la
   sélection est déjà dans la collection, un dialogue annonce le décompte et propose d'ajouter le
   reste.
@@ -730,9 +735,10 @@ sélection, comme promis.
 **§9 — « Voir en vrai ».** Aucune webview, et le renderer tourne en bac à sable. Le bouton ouvre
 la page dans le navigateur du système. C'est la position la plus sûre, et elle est assumée.
 
-**§9 — Raccourcis de la grille.** `Ctrl+B`, `Ctrl+,` et `Ctrl+K` existent. Les flèches, `Espace`
-pour l'aperçu, `F`, `T`, `C`, `Ctrl+A` et `Maj`+clic pour une plage n'existent pas : la sélection
-se fait une carte à la fois.
+**§9 — Raccourcis de la grille.** Les flèches, `Espace` pour l'aperçu, et `F`, `T` et `C` sur la
+carte active — favori, tag, copie du lien — n'existent pas, ni `Ctrl+C` pour copier les liens de
+la sélection : il faut passer par la barre de sélection. Ce que la fiche des raccourcis annonce
+pour le mur est tenu par `check:shortcuts`, qui refuse une ligne dont il ne trouve pas le câblage.
 
 **§9 — Doublons.** L'avertissement est une boîte système avec un décompte, sans « voir lesquels »
 ni « ajouter les autres » séparément.

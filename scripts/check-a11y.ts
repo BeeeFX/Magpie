@@ -93,7 +93,9 @@ console.log('\nune fenêtre modale piège le focus')
   const offenders: string[] = []
   for (const file of files) {
     const text = code(read(file))
-    if (!/aria-modal="true"/.test(text)) continue
+    /* L'attribut posé sur un élément, pas un sélecteur qui le cherche : le mur demande
+       `[aria-modal="true"]` pour se taire quand une fenêtre le recouvre, il n'en est pas une. */
+    if (!/(?<!\[)aria-modal="true"/.test(text)) continue
     if (!/useModalFocus\s*\(/.test(text)) {
       offenders.push(`${file} — se déclare modale sans appeler useModalFocus`)
     }

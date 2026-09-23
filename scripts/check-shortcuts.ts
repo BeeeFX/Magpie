@@ -96,5 +96,55 @@ console.log('\nla touche de commande porte son nom sur cette machine')
   else for (const offender of offenders) fail(`${offender} : sur Mac le clavier dit ⌘`)
 }
 
+console.log('\nla fiche du mur ne promet que ce que le mur fait')
+{
+  /**
+   * Chaque ligne du groupe « Sur le mur » de la fiche, et ce qui prouve qu'elle est câblée.
+   *
+   * La fiche est tenue à la main, et son en-tête le dit : c'est un engagement. Pendant des
+   * versions, elle n'annonçait sur le mur que l'Entrée, tandis que la spécification (§14)
+   * déclarait absents `Ctrl+A` et la plage — vrai, mais rien ne tenait les deux ensemble.
+   * Livrer ces gestes sans le dire aurait été aussi faux que l'inverse.
+   *
+   * D'où deux règles. Une ligne de la fiche sans preuve dans cette table, ou dont la preuve ne se
+   * retrouve plus dans le code du mur, échoue. Et §14 ne dit plus absent ce que la fiche annonce.
+   * Une table plutôt qu'une déduction, pour la même raison que plus haut : un contrôle qui devine
+   * finit par crier au loup.
+   */
+  const WALL: Record<string, { proof: RegExp; missing?: RegExp }> = {
+    /* L'Entrée est celle du navigateur : l'ouverture est un vrai bouton, qui la reçoit seul. */
+    'shortcuts.openPost': { proof: /<button[^>]*\n[^>]*className="card__open"/ },
+    'shortcuts.selectAll': {
+      proof: /key\.toLowerCase\(\) === 'a'[\s\S]{0,600}selectAllResults\(\)/,
+      missing: /`Ctrl\+A`/
+    },
+    'shortcuts.selectRange': { proof: /event\.shiftKey\) onSelect\(post\.id, 'range'\)/, missing: /`Maj`\+clic/ },
+    'shortcuts.selectOne': { proof: /event\.ctrlKey \|\| event\.metaKey \|\| selectionMode\) onSelect\(post\.id, 'toggle'\)/ }
+  }
+
+  const sheet = code(read(join(ROOT, 'Shortcuts.tsx')))
+  const start = sheet.indexOf("title: 'shortcuts.groupWall'")
+  const end = sheet.indexOf('title:', start + 1)
+  const labels = [...sheet.slice(start, end < 0 ? undefined : end).matchAll(/label: '([\w.]+)'/g)].map(
+    (match) => match[1]
+  )
+  const wall = ['Grid.tsx', 'Card.tsx'].map((name) => code(read(join(ROOT, name)))).join('\n')
+
+  if (start < 0 || labels.length === 0) fail('le groupe « Sur le mur » est introuvable dans Shortcuts.tsx')
+  for (const label of labels) {
+    const entry = WALL[label]
+    if (!entry) fail(`${label} est dans la fiche, sans preuve dans ce contrôle — ajoutez-la`)
+    else if (!entry.proof.test(wall)) fail(`${label} est annoncé, mais Grid.tsx et Card.tsx ne le câblent plus`)
+    else pass(`${label} — annoncé, et câblé`)
+  }
+
+  const spec = read('SPEC.md')
+  const heading = spec.indexOf('**§9 — Raccourcis de la grille.**')
+  const paragraph = heading < 0 ? '' : spec.slice(heading, spec.indexOf('\n\n', heading))
+  const contradicted = labels.filter((label) => WALL[label]?.missing?.test(paragraph))
+  if (contradicted.length === 0) pass('SPEC §14 ne dit absent aucun geste que la fiche annonce')
+  else for (const label of contradicted) fail(`SPEC §14 dit absent ce que ${label} annonce`)
+}
+
 console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} manquement(s).`)
 process.exitCode = failures === 0 ? 0 : 1
