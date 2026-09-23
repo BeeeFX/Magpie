@@ -549,9 +549,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name ON collections(name COLLA
  * `organizer_applications` : ce n'est pas un historique, c'est un filet pour le geste qu'on
  * vient de faire.
  *
- * Les prototypes ne sont pas conservés — ce sont des vecteurs recalculés à la passe suivante.
- * Ce qu'on garde est ce qui ne se recalcule pas : le nom, la couleur, les mots-clés et leurs
- * poids, et l'appartenance des posts, qui peut contenir des ajouts faits à la main.
+ * Les prototypes des collections ne sont pas conservés : ils se recalculent. Ce qu'on garde, ce
+ * sont le nom, la couleur, les mots-clés avec leurs poids **et leurs vecteurs** — sans eux, une
+ * collection rétablie n'avait rien pour noter et le premier recalcul la vidait (voir
+ * `snapshot` dans `tagging/collections.ts`) —, et l'appartenance des posts, qui peut contenir
+ * des ajouts faits à la main. Le format vit dans le JSON de `payload` : aucune colonne à ajouter.
  */
 export const MIGRATION_28_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS collection_snapshots (

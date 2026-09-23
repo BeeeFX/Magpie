@@ -98,3 +98,44 @@ export class MuteStreak {
     return this.ids
   }
 }
+
+/**
+ * Ce qu'une extraction a pour rendre ses premières secondes de son.
+ *
+ * La connexion, les en-têtes, l'index d'un MP4 rangé à la fin du fichier : sur une URL de CDN,
+ * tout cela précède le premier échantillon. Une minute est large, et c'est voulu — ce délai ne
+ * juge pas une connexion lente, il attrape une extraction qui ne rendra jamais rien.
+ */
+export const EXTRACTION_GRACE_MS = 60_000
+
+/**
+ * Et ensuite, combien de secondes d'horloge par seconde de son rendue.
+ *
+ * ffmpeg ne lit pas au rythme de la vidéo : il avale le fichier aussi vite que le disque ou le
+ * réseau le lui donnent, soit des dizaines de fois le temps réel sur un fichier local. Six fois
+ * *plus lent* que le temps réel, c'est une connexion à quelques centaines de kilobits pour un
+ * reel ordinaire — encore de la patience, pas encore un abandon.
+ */
+export const EXTRACTION_SLOWNESS = 6
+
+/**
+ * Au-delà, une lecture réseau muette est tenue pour morte — passé à ffmpeg par `-rw_timeout`.
+ *
+ * Son lecteur HTTP attend indéfiniment par défaut : une URL de CDN qui accepte la connexion et
+ * ne répond plus figeait la transcription, donc l'étape d'après synchronisation, donc toutes les
+ * synchronisations suivantes, jusqu'au redémarrage.
+ */
+export const NETWORK_STALL_MS = 30_000
+
+/**
+ * L'extraction a-t-elle dépassé ce qu'on lui accorde ?
+ *
+ * Le budget suit ce qu'elle a déjà rendu plutôt qu'une durée fixe : on ne connaît pas la durée
+ * du clip avant de l'avoir lu, et un plafond unique serait soit trop court pour une vidéo de
+ * dix minutes sur une connexion lente, soit une éternité pour un fichier local qui ne bouge
+ * plus. Tant que le son arrive au sixième du temps réel, le délai recule ; quand il cesse
+ * d'arriver, le délai tombe.
+ */
+export function extractionOverdue(elapsedMs: number, audioSeconds: number): boolean {
+  return elapsedMs > EXTRACTION_GRACE_MS + audioSeconds * 1000 * EXTRACTION_SLOWNESS
+}

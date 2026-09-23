@@ -26,38 +26,80 @@ const NEIGHBOURS = 12
 const MAJORITY = 0.5
 
 /**
- * Combien de posts orphelins entre deux respirations.
+ * Combien de temps entre deux respirations.
  *
- * Chacun se compare à tous les posts déjà classés, sur 768 dimensions : sur la bibliothèque de
- * référence — 2 900 orphelins contre 6 700 classés — la boucle entière fait quinze milliards
- * de multiplications et occupe le processus principal **onze secondes**, mesuré. Windows
- * déclare une fenêtre « ne répond pas » au bout de cinq. C'est exactement ce que l'on voyait :
- * l'animation continuait de tourner — elle vit dans le rendu, un autre processus — pendant que
- * la fenêtre passait pour morte.
+ * Chaque orphelin se compare à tous les posts déjà classés, sur 768 dimensions : sur la
+ * bibliothèque de référence — 2 900 orphelins contre 6 700 classés — la boucle entière fait
+ * quinze milliards de multiplications et occupe le processus principal **onze secondes**,
+ * mesuré. Windows déclare une fenêtre « ne répond pas » au bout de cinq. C'est exactement ce que
+ * l'on voyait : l'animation continuait de tourner — elle vit dans le rendu, un autre processus —
+ * pendant que la fenêtre passait pour morte.
  *
- * Le calcul ne rétrécit pas pour autant : trente-deux posts font une tranche d'environ cent
- * millisecondes, assez courte pour que la fenêtre réponde entre deux.
+ * On respirait d'abord tous les trente-deux orphelins, soit « environ cent millisecondes ». Le
+ * compte ne dit rien du temps : une tranche coûte le nombre de posts classés fois la largeur,
+ * et la machine qui la paie. Relevé à 316 ms dans une passe de `check:organizer`, au-dessus des
+ * 250 ms tenues partout ailleurs. On regarde donc l'horloge : vingt-cinq millisecondes, puis la
+ * main. Un seul orphelin ne se découpe pas — il pèse quelques millisecondes à dix mille posts,
+ * une vingtaine à trente mille.
  */
-const BREATHE_EVERY = 32
+const SLICE_MS = 25
+/** Et l'écran n'a pas besoin de quarante nouvelles par seconde. */
+const PROGRESS_MS = 100
 
-function centred(vectors: Float32Array[]): Float32Array[] {
-  if (vectors.length === 0) return []
+/**
+ * Rend la main dès que la tranche en cours a assez duré.
+ *
+ * À appeler souvent : ne coûte qu'une lecture d'horloge tant que la tranche n'est pas pleine.
+ */
+function pacer(breathe: Breathe): { pace(): Promise<boolean> } {
+  let start = performance.now()
+  return {
+    async pace() {
+      if (performance.now() - start < SLICE_MS) return false
+      await breathe()
+      start = performance.now()
+      return true
+    }
+  }
+}
+
+/**
+ * Lit, centre puis renormalise, en rendant la main.
+ *
+ * La lecture des blobs et le centrage de toute la bibliothèque précédaient la boucle d'un seul
+ * tenant : jusqu'à deux cents millisecondes mesurées sur neuf mille six cents posts, soit à eux
+ * seuls presque toute la marge une fois les tranches de la boucle réglées sur l'horloge.
+ */
+async function centred(
+  blobs: Buffer[],
+  pace: () => Promise<boolean>
+): Promise<Float32Array[]> {
+  if (blobs.length === 0) return []
+  const vectors: Float32Array[] = []
+  for (const blob of blobs) {
+    vectors.push(toVector(blob))
+    await pace()
+  }
   const dims = vectors[0].length
   const mean = new Float64Array(dims)
   for (const vector of vectors) {
     for (let i = 0; i < dims; i += 1) mean[i] += vector[i] / vectors.length
+    await pace()
   }
-  return vectors.map((vector) => {
-    const out = new Float32Array(dims)
+  const out: Float32Array[] = []
+  for (const vector of vectors) {
+    const shifted = new Float32Array(dims)
     let norm = 0
     for (let i = 0; i < dims; i += 1) {
-      out[i] = vector[i] - mean[i]
-      norm += out[i] * out[i]
+      shifted[i] = vector[i] - mean[i]
+      norm += shifted[i] * shifted[i]
     }
     norm = Math.sqrt(norm) || 1
-    for (let i = 0; i < dims; i += 1) out[i] /= norm
-    return out
-  })
+    for (let i = 0; i < dims; i += 1) shifted[i] /= norm
+    out.push(shifted)
+    await pace()
+  }
+  return out
 }
 
 export interface PropagationResult {
@@ -92,7 +134,11 @@ export async function propagateByImage(
   /* Le sujet plutôt que le style : deux illustrations au même trait mais sur des thèmes
      éloignés ne vont pas dans la même collection. C'est aussi ce que la mesure disait — le
      bloc « sujet » pèse trois fois le bloc « structure ». */
-  const block = centred(known.map((id) => toVector((images.get(id) as PostImageEmbedding).meaning)))
+  const { pace } = pacer(breathe)
+  const block = await centred(
+    known.map((id) => (images.get(id) as PostImageEmbedding).meaning),
+    pace
+  )
   const dims = block[0]?.length ?? 0
   const labelled = known
     .map((id, index) => ({ id, index, label: labelOf.get(id) }))
@@ -105,12 +151,16 @@ export async function propagateByImage(
   onProgress?.(0, orphans.length)
   let seen = 0
   const indexOf = new Map(known.map((id, index) => [id, index]))
+  let reported = performance.now()
   for (const id of orphans) {
-    seen += 1
-    if (seen % BREATHE_EVERY === 0) {
-      onProgress?.(seen, orphans.length)
-      await breathe()
+    if (await pace()) {
+      const now = performance.now()
+      if (now - reported >= PROGRESS_MS) {
+        reported = now
+        onProgress?.(seen, orphans.length)
+      }
     }
+    seen += 1
     const self = block[indexOf.get(id) as number]
     const best: { label: string; score: number }[] = []
     for (const other of labelled) {

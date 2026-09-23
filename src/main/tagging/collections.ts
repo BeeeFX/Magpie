@@ -72,16 +72,67 @@ function definitionOf(id: number): CollectionDefinition | null {
   }
 }
 
-/** Ranger un mot et son vecteur. Encodé une seule fois : le modèle n'est réveillé qu'à l'ajout. */
+/**
+ * Ranger un mot et son vecteur. Encodé une seule fois : le modèle n'est réveillé qu'à l'ajout.
+ *
+ * Sur un mot déjà là, seul le poids changeait — y compris quand ce mot n'avait **pas** de
+ * vecteur, comme ceux d'une collection rétablie avant qu'on les garde. Retaper le mot, le
+ * geste évident pour réparer, encodait donc pour rien et laissait le trou. Un vecteur manquant
+ * se remplit désormais ; un vecteur présent reste celui qui a servi jusqu'ici.
+ */
 function saveKeyword(id: number, word: string, weight: number, vector: Prototype, order: number): void {
   getDb()
     .prepare(
       `INSERT INTO collection_keywords
          (collection_id, word, weight, vector_text, vector_meaning, sort_index)
        VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(collection_id, word) DO UPDATE SET weight = excluded.weight`
+       ON CONFLICT(collection_id, word) DO UPDATE SET
+         weight = excluded.weight,
+         vector_text = COALESCE(collection_keywords.vector_text, excluded.vector_text),
+         vector_meaning = COALESCE(collection_keywords.vector_meaning, excluded.vector_meaning)`
     )
     .run(id, word, weight, toBlob(vector.text), toBlob(vector.meaning), order)
+}
+
+/** Un mot sans aucun vecteur ne sait noter personne. */
+const blind = (keyword: Keyword): boolean => !keyword.vector.text && !keyword.vector.meaning
+
+/**
+ * Encode les mots qui n'ont pas de vecteur, là où il en manque.
+ *
+ * Deux chemins en produisent : le rétablissement d'un instantané pris avant qu'on y range les
+ * vecteurs, et l'import JSON, qui ne réveille pas les modèles pour si peu. Appelé avant chaque recalcul d'ensemble et après un rétablissement ; s'il échoue —
+ * modèle absent, hors ligne —, rien n'est perdu, `recompute` refuse de vider une collection
+ * qu'il ne sait pas noter, et la passe suivante réessaie.
+ */
+export async function refillKeywordVectors(ids?: number[]): Promise<number> {
+  const db = getDb()
+  const wanted = ids ? new Set(ids) : null
+  const missing = (
+    db
+      .prepare(
+        `SELECT k.collection_id AS id, k.word AS word
+           FROM collection_keywords k JOIN collections c ON c.id = k.collection_id
+          WHERE c.kind = 'query' AND k.vector_text IS NULL AND k.vector_meaning IS NULL`
+      )
+      .all() as { id: number; word: string }[]
+  ).filter((row) => !wanted || wanted.has(row.id))
+  if (missing.length === 0) return 0
+  const fill = db.prepare(
+    `UPDATE collection_keywords
+        SET vector_text = COALESCE(vector_text, ?), vector_meaning = COALESCE(vector_meaning, ?)
+      WHERE collection_id = ? AND word = ?`
+  )
+  const encoded = new Map<string, Prototype>()
+  for (const row of missing) {
+    let vector = encoded.get(row.word)
+    if (!vector) {
+      vector = await encodePhrase(row.word)
+      encoded.set(row.word, vector)
+    }
+    fill.run(toBlob(vector.text), toBlob(vector.meaning), row.id, row.word)
+  }
+  return missing.length
 }
 
 /** Les verdicts posés à la main, par collection. */
@@ -120,18 +171,18 @@ export function recompute(id: number): Membership | null {
   /* Une liste posée à la main n'a rien à recalculer, et surtout rien à perdre : la réécrire
      depuis un score qu'elle n'a pas la viderait. */
   if (definition.kind !== 'query') return null
-  /* Des mots qui n'ont pas encore de vecteur ne savent noter personne. Deux chemins en rangent
-     ainsi — l'import d'une bibliothèque et le rétablissement de « Que garder ? » — et le
-     premier recalcul venu vidait la collection : `scoreKeywords` écartait tous ses mots, rien ne
-     passait la coupe, et `collection_posts` était réécrite vide. L'appartenance connue tient
-     donc jusqu'à ce que `encodeMissingKeywords` leur en ait donné un. */
-  if (
-    definition.keywords.length > 0 &&
-    definition.keywords.every((entry) => !entry.vector.text && !entry.vector.meaning)
-  ) {
-    return null
-  }
   const scores = scoreKeywords(definition.keywords)
+  /* Un mot sans vecteur n'y aurait rien apporté : ses posts sortiraient sans que personne l'ait
+     demandé. C'est ce qui arrivait à une collection rétablie — ses mots revenaient sans leurs
+     vecteurs, et le recalcul qui suit chaque synchronisation la vidait. L'import JSON range de
+     même des mots sans vecteur, pour ne pas réveiller les modèles. On garde donc
+     l'appartenance telle qu'elle est tant que tous les mots ne savent pas noter. */
+  if (definition.keywords.some(blind)) {
+    const kept = getDb()
+      .prepare('SELECT post_id AS postId FROM collection_posts WHERE collection_id = ?')
+      .all(id) as { postId: string }[]
+    return { scores, size: definition.size, members: kept.map((row) => row.postId) }
+  }
   const verdict = verdicts(id)
   const forcedOut = new Set(verdict.no)
   const forcedIn = new Set(verdict.yes)
@@ -214,10 +265,11 @@ export async function addKeyword(
 ): Promise<Membership | null> {
   const clean = word.trim()
   if (!clean) return recompute(id)
-  /* Les mots déjà là d'abord : sans vecteur, seul le nouveau noterait, et la collection se
-     réduirait à lui. */
-  await encodeMissingKeywords(id)
   const vector = await encodePhrase(clean)
+  /* Le modèle vient de répondre : c'est le moment de rendre leurs vecteurs aux autres mots de
+     la collection s'il leur en manque, sans quoi `recompute` garderait l'appartenance figée
+     et ce mot-ci n'y ferait rien entrer. */
+  await refillKeywordVectors([id])
   const order = (
     getDb()
       .prepare(
@@ -227,45 +279,6 @@ export async function addKeyword(
   ).next
   saveKeyword(id, clean, weight, vector, order)
   return recompute(id)
-}
-
-/**
- * Donne un vecteur aux mots rangés sans — ceux d'une bibliothèque importée, ceux d'une
- * collection rétablie. Rend combien en ont reçu un.
- *
- * Appelé là où les modèles servent déjà — le rejeu d'après synchronisation, l'ajout d'un mot —
- * et jamais à l'import lui-même : importer ne doit pas déclencher le téléchargement de
- * centaines de mégaoctets de modèles. Un mot que l'encodage ne sait pas traiter reste tel quel,
- * et `recompute` garde alors l'appartenance connue plutôt que de la vider.
- */
-export async function encodeMissingKeywords(id?: number): Promise<number> {
-  const db = getDb()
-  const rows = (
-    id === undefined
-      ? db
-          .prepare(
-            `SELECT collection_id AS id, word FROM collection_keywords
-              WHERE vector_text IS NULL AND vector_meaning IS NULL`
-          )
-          .all()
-      : db
-          .prepare(
-            `SELECT collection_id AS id, word FROM collection_keywords
-              WHERE vector_text IS NULL AND vector_meaning IS NULL AND collection_id = ?`
-          )
-          .all(id)
-  ) as { id: number; word: string }[]
-  let encoded = 0
-  for (const row of rows) {
-    const vector = await encodePhrase(row.word)
-    if (!vector.text && !vector.meaning) continue
-    db.prepare(
-      `UPDATE collection_keywords SET vector_text = ?, vector_meaning = ?
-        WHERE collection_id = ? AND word = ?`
-    ).run(toBlob(vector.text), toBlob(vector.meaning), row.id, row.word)
-    encoded += 1
-  }
-  return encoded
 }
 
 /** Changer le poids d'un mot. Aucun encodage : seul le facteur bouge. */
@@ -454,7 +467,12 @@ export async function refreshQueryCollections(): Promise<{ collections: number; 
   if (ids.length === 0) return { collections: 0, members: 0 }
 
   await embedItems(organizationItems(), () => new Promise((resolve) => setImmediate(resolve)))
-  await encodeMissingKeywords()
+  try {
+    await refillKeywordVectors()
+  } catch (error) {
+    // Rien de perdu : `recompute` laisse intacte une collection qu'il ne sait pas noter.
+    console.warn('[magpie] Vecteurs de mots-clés encore manquants :', error)
+  }
 
   let members = 0
   for (const id of ids) {
@@ -491,7 +509,10 @@ export function merge(sourceId: number, targetId: number): Membership | null {
               (SELECT COALESCE(MAX(sort_index), -1) + 1 FROM collection_keywords WHERE collection_id = ?)
                 + sort_index
          FROM collection_keywords WHERE collection_id = ?
-       ON CONFLICT(collection_id, word) DO UPDATE SET weight = MAX(weight, excluded.weight)`
+       ON CONFLICT(collection_id, word) DO UPDATE SET
+         weight = MAX(weight, excluded.weight),
+         vector_text = COALESCE(collection_keywords.vector_text, excluded.vector_text),
+         vector_meaning = COALESCE(collection_keywords.vector_meaning, excluded.vector_meaning)`
     ).run(targetId, targetId, sourceId)
     /* Les membres épinglés de la source. Pour une collection à mots-clés, le recalcul qui suit
        les remplacera de toute façon ; pour une liste manuelle, ce sont eux qui comptent. */
@@ -570,23 +591,39 @@ interface CollectionSnapshot {
   query: string | null
   targetSize: number
   sortIndex: number
-  keywords: { word: string; weight: number; sortIndex: number }[]
+  /** Les vecteurs en base64. Absents des instantanés pris avant qu'on les garde. */
+  keywords: {
+    word: string
+    weight: number
+    sortIndex: number
+    text?: string | null
+    meaning?: string | null
+  }[]
   postIds: string[]
 }
+
+const toText = (blob: Buffer | null): string | null => (blob ? blob.toString('base64') : null)
+const fromText = (text: string | null | undefined): Buffer | null =>
+  text ? Buffer.from(text, 'base64') : null
 
 /**
  * L'état des collections condamnées, avant qu'elles ne partent.
  *
- * Les prototypes — deux vecteurs par collection — ne sont pas conservés : ils se recalculent à
- * la passe suivante. Ce qu'on garde est ce qui ne se recalcule pas, et notamment l'appartenance
- * des posts, qui peut contenir des ajouts faits à la main.
+ * Les vecteurs des mots-clés sont gardés avec eux, et c'était l'oubli qui rendait le filet
+ * trompeur. On les croyait « recalculés à la passe suivante » : rien ne les recalculait. Une
+ * collection rétablie revenait avec ses mots sans vecteurs, donc sans rien pour noter, et le
+ * recalcul qui suit chaque synchronisation la vidait. Deux vecteurs par mot — six kilo-octets
+ * en base64 —, c'est le prix d'un rétablissement qui rétablit.
+ *
+ * Et l'appartenance des posts, qui peut contenir des ajouts faits à la main.
  */
 function snapshot(db: ReturnType<typeof getDb>, ids: number[]): CollectionSnapshot[] {
   const row = db.prepare(
     'SELECT name, color, kind, query, target_size, sort_index FROM collections WHERE id = ?'
   )
   const words = db.prepare(
-    'SELECT word, weight, sort_index FROM collection_keywords WHERE collection_id = ? ORDER BY sort_index'
+    `SELECT word, weight, sort_index, vector_text, vector_meaning
+       FROM collection_keywords WHERE collection_id = ? ORDER BY sort_index`
   )
   const members = db.prepare('SELECT post_id FROM collection_posts WHERE collection_id = ?')
   const out: CollectionSnapshot[] = []
@@ -602,9 +639,21 @@ function snapshot(db: ReturnType<typeof getDb>, ids: number[]): CollectionSnapsh
       query: found.query,
       targetSize: found.target_size,
       sortIndex: found.sort_index,
-      keywords: (words.all(id) as { word: string; weight: number; sort_index: number }[]).map(
-        (word) => ({ word: word.word, weight: word.weight, sortIndex: word.sort_index })
-      ),
+      keywords: (
+        words.all(id) as {
+          word: string
+          weight: number
+          sort_index: number
+          vector_text: Buffer | null
+          vector_meaning: Buffer | null
+        }[]
+      ).map((word) => ({
+        word: word.word,
+        weight: word.weight,
+        sortIndex: word.sort_index,
+        text: toText(word.vector_text),
+        meaning: toText(word.vector_meaning)
+      })),
       postIds: (members.all(id) as { post_id: string }[]).map((member) => member.post_id)
     })
   }
@@ -655,11 +704,17 @@ export function removedCollections(): { count: number; at: number } | null {
  * Rétablit les collections du dernier instantané.
  *
  * Les identifiants ne sont pas restaurés : ils seraient déjà repris. Ce qui compte est ce que
- * l'utilisateur voit — un nom, une couleur, des mots et les mêmes posts dedans.
+ * l'utilisateur voit — un nom, une couleur, des mots et les mêmes posts dedans — et ce que le
+ * recalcul suivant lit : les vecteurs des mots.
  *
  * L'appartenance passe par `INSERT OR IGNORE` sur des posts qui peuvent avoir disparu entre
  * temps : une collection rétablie avec deux posts en moins vaut mieux qu'un rétablissement qui
  * lève.
+ *
+ * Un instantané pris avant qu'on y range les vecteurs rend des mots sans vecteur. Ils sont
+ * réencodés ensuite, sans faire attendre la réponse — le premier encodage peut exiger un
+ * téléchargement de modèle. Si cela échoue, `recompute` laisse ces collections telles qu'elles
+ * ont été rétablies, et le recalcul d'après synchronisation réessaie.
  */
 export function restoreRemovedCollections(): { restored: number } {
   const db = getDb()
@@ -674,7 +729,8 @@ export function restoreRemovedCollections(): { restored: number } {
     return { restored: 0 }
   }
 
-  return db.transaction(() => {
+  const revived: number[] = []
+  const result = db.transaction(() => {
     let restored = 0
     for (const entry of saved) {
       /* Le nom est unique depuis la migration 27 : une collection recréée entre-temps sous le
@@ -690,12 +746,21 @@ export function restoreRemovedCollections(): { restored: number } {
         )
         .run(entry.name, entry.color, entry.kind, entry.query, entry.targetSize, entry.sortIndex)
       const id = Number(info.lastInsertRowid)
+      revived.push(id)
       const word = db.prepare(
-        `INSERT INTO collection_keywords (collection_id, word, weight, sort_index)
-         VALUES (?, ?, ?, ?)`
+        `INSERT INTO collection_keywords
+           (collection_id, word, weight, sort_index, vector_text, vector_meaning)
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       for (const keyword of entry.keywords) {
-        word.run(id, keyword.word, keyword.weight, keyword.sortIndex)
+        word.run(
+          id,
+          keyword.word,
+          keyword.weight,
+          keyword.sortIndex,
+          fromText(keyword.text),
+          fromText(keyword.meaning)
+        )
       }
       /* `added_at` est obligatoire, et son sens ici est « rétabli maintenant » : la date
          d'ajout d'origine n'est pas conservée, et prétendre la connaître serait faux. */
@@ -709,4 +774,11 @@ export function restoreRemovedCollections(): { restored: number } {
     db.prepare('DELETE FROM collection_snapshots').run()
     return { restored }
   })()
+
+  if (revived.length > 0) {
+    void refillKeywordVectors(revived).catch((error: unknown) => {
+      console.warn('[magpie] Mots-clés rétablis sans vecteurs, réessai après la synchro :', error)
+    })
+  }
+  return result
 }

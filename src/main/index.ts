@@ -41,6 +41,7 @@ import { aiTagger } from './tagging/ai'
 import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
 import { stopInference } from './tagging/inference'
 import { refreshQueryCollections } from './tagging/collections'
+import { sweepPartialDownloads } from './models/store'
 import type {
   AfterSyncStep,
   BackgroundState,
@@ -933,6 +934,16 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
   })
   createWindow()
   refreshBackgroundFeatures()
+  /* Les téléchargements de modèles interrompus laissent des `*.tmp.*` que rien ne reprend et que
+     l'écran de stockage comptait comme des modèles. Le processus des modèles ne démarre qu'au
+     premier encodage : à cet instant, aucun partiel n'a d'auteur vivant. */
+  void sweepPartialDownloads()
+    .then(({ removed, freed }) => {
+      if (removed > 0) {
+        console.log(`[magpie] ${removed} téléchargements de modèles interrompus effacés (${freed} octets)`)
+      }
+    })
+    .catch((error: unknown) => console.warn('[magpie] Partiels de modèles non effacés :', error))
   initializeUpdater({
     getWindow: () => mainWindow,
     beforeInstall: () => {

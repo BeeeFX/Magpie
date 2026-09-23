@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { mediaDir } from '../db'
 import { encodeImage, encodePrompts } from './inference'
+import { MEANING_MODEL, STRUCTURE_MODEL } from './models'
 import type { PostFrames } from './frames'
 import {
   organizationItems,
@@ -26,10 +27,8 @@ import {
  * deux images au hasard, contre 3,49 et 2,96 (cf. `scripts/bench-vision-mix`).
  */
 
-/** La structure et le style. Le plus petit des candidats, et le meilleur : 23 Mo, 26 ms. */
-const STRUCTURE_MODEL = 'Xenova/dinov2-small'
-/** Le sujet. Sait aussi comparer une image à des mots, ce que DINOv2 ne sait pas faire. */
-const MEANING_MODEL = 'Xenova/siglip-base-patch16-224'
+/* Les deux encodeurs sont nommés dans `models.ts` : une copie ici était la seconde liste qu'on
+   avait juré de ne plus tenir. La chaîne produite est la même, donc aucune empreinte ne bouge. */
 /** Entre dans le hash : changer de modèle doit tout réencoder, et rien d'autre ne le doit. */
 const VERSION = `${STRUCTURE_MODEL}|${MEANING_MODEL}|q8|v1`
 

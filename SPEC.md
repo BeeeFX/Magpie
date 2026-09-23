@@ -393,7 +393,9 @@ Effet mesuré sur le classement : **1 299 posts sans légende correctement rang�
 exploitable et la légende médiane fait douze mots. La langue est devinée depuis la légende et
 depuis la bibliothèque autour : un reel français entendu comme de l'anglais n'en sort pas
 approximatif, il en sort inventé. Le transcript sert au regroupement, à la recherche plein texte
-et à l'export.
+et à l'export. Au regroupement par le **vecteur** seulement : il entre dans le texte encodé après
+la légende, sans jamais l'évincer (`embeddingText`), mais pas dans les mots qui nomment catégories
+et régions — un mot mal entendu se dilue dans un vecteur et s'affiche sur une étiquette.
 
 **Deux gardes, parce qu'une panne ne lève pas toujours.** Écrire « rien à entendre » est un
 verdict définitif — `pendingTranscripts` ne regarde que les posts dont le transcript est `NULL`,
@@ -473,7 +475,8 @@ fois qu'on est entré dedans.
 **Les positions sont figées** (`post_positions` + `map_state`). Un post arrivé à la
 synchronisation suivante est placé contre la carte existante, pas au terme d'une reprojection
 générale. Un lieu dont on se souvient reste où il était — c'est la propriété qui fait qu'une carte
-est un endroit et pas un graphique.
+est un endroit et pas un graphique. Un post **réencodé** ne bouge pas davantage : sa transcription
+arrivée change sa catégorie, pas sa place, jusqu'à ce que la carte soit refaite.
 
 Un **zoom minimum de ×2** est imposé : plus loin, cent trente mille arêtes se superposent au point
 que la carte redevient une nappe informe. Mieux vaut interdire l'échelle que la montrer.
@@ -712,9 +715,9 @@ déclencher un schéma applicatif arbitraire.
   favori s'il l'était d'un côté, étiquette ou transcription absentes comblées. Une collection
   homonyme à la casse près garde sa définition ; une liste y reçoit les membres de la liste du
   fichier. Une collection à mots-clés créée par l'import arrive **sans vecteurs** : elle garde les
-  membres du fichier, `recompute` refuse de la vider tant qu'aucun mot ne sait noter, et ses mots
-  sont encodés au prochain rejeu d'après synchronisation ou au prochain mot ajouté. Réimporter le
-  même fichier ne change rien.
+  membres du fichier, `recompute` refuse de la vider tant qu'un de ses mots ne sait pas noter,
+  et ses mots sont encodés au prochain rejeu d'après synchronisation ou au prochain mot ajouté.
+  Réimporter le même fichier ne change rien.
 - **Il est annulable.** Chaque paquet écrit son journal (`last-import.jsonl`, à côté de la base)
   après sa transaction ; l'annulation défait exactement ce qui y est listé, et seulement si la
   valeur est encore celle que l'import avait posée. Un import arrêté en route, ou interrompu par
