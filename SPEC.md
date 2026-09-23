@@ -686,13 +686,50 @@ déclencher un schéma applicatif arbitraire.
 - Aucun serveur, aucune télémétrie, aucun service de modèle. Les seules requêtes sortantes vont
   aux plateformes connectées, au dépôt GitHub pour les mises à jour, et au CDN de Hugging Face au
   premier téléchargement d'un modèle.
-- Les sessions vivent dans des partitions Electron isolées, une par plateforme, dans le stockage
-  chiffré de Chromium. Magpie ne voit jamais le mot de passe saisi sur la vraie page de connexion.
+- Les sessions vivent dans des partitions Electron isolées, une par plateforme. Magpie ne voit
+  jamais le mot de passe saisi sur la vraie page de connexion.
+- **Les cookies sont chiffrés sur le disque** avec la clé du système (DPAPI sous Windows), par le
+  fusible `EnableCookieEncryption` que pose l'empaquetage. Ce paragraphe l'affirmait déjà
+  jusqu'à la 0.44, et c'était faux : Electron écrit ses cookies en clair tant que le fusible
+  n'est pas posé, et il ne l'était pas — le `sessionid` d'Instagram et l'`auth_token` de X se
+  lisaient dans `Partitions/magpie-*`. Chromium ne rechiffre pas de lui-même un cookie déjà en
+  clair : au premier lancement d'une version chiffrante, Magpie les repose une fois, à
+  l'identique, et ils sont écrits chiffrés (marqueur `cookies-encrypted` dans le profil). Passage
+  sans retour : un binaire sans le fusible efface les cookies d'un magasin chiffré. Le
+  développement, qui tourne sur l'Electron non modifié, a donc ses propres partitions
+  (`magpie-dev-*`, en clair) et ne touche jamais à celles de la version installée.
 - Bouton « Déconnecter » par plateforme, qui purge réellement la partition.
-- `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, IPC typée et restreinte,
-  CSP stricte, schéma `magpie://` privilégié plutôt que `file://`.
+- Fusibles d'Electron, gravés à l'empaquetage (`electron-builder.yml`) : pas de mode Node
+  (`ELECTRON_RUN_AS_NODE`), pas de `NODE_OPTIONS`, pas de `--inspect` ; l'archive `app.asar` est
+  vérifiée contre l'empreinte inscrite dans l'exécutable et c'est la seule que l'application
+  charge ; `file://` n'a plus ses privilèges historiques. Ce qui est déballé de l'archive —
+  modules natifs, ffmpeg, fil de projection — n'est pas couvert par la vérification.
+- Le renderer : `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, IPC typée et
+  restreinte. Il est servi par `app://magpie/`, qui ne rend que les fichiers de `out/renderer` ;
+  les médias passent par `magpie://`. CSP stricte : aucun socket dans la version livrée (celui
+  de Vite n'est ajouté qu'au service de développement), `font-src 'self' data:` pour le
+  sous-ensemble de police que Vite incruste.
+- **Permissions refusées par défaut.** Le renderer obtient le plein écran (lecteur) et l'écriture
+  du presse-papier, rien d'autre ; les partitions des plateformes n'obtiennent rien — ni
+  notification, ni caméra, ni ouverture d'un programme externe (`ms-msdt:`, `search-ms:`…) — et
+  n'y téléchargent rien.
+- **Navigations gardées**, pour chaque contenu web dès sa création : le renderer ne quitte pas son
+  origine et ouvre les liens web — `http(s)` seulement — dans le navigateur du système ; une
+  fenêtre de plateforme va où elle veut pourvu que ce soit du `https:`, popups compris, qui
+  restent dans sa partition. Pas de liste de domaines : Facebook, Google, Apple et la double
+  authentification la casseraient sans qu'on puisse l'éprouver. Faute de barre d'adresse, le
+  titre d'une fenêtre de connexion commence par l'hôte réel de la page.
 - Aucune page distante n'est chargée dans une fenêtre de Magpie en dehors des fenêtres de
-  connexion : « voir en vrai » ouvre le navigateur du système.
+  connexion, de leurs popups, et de la page cachée où X montre sa requête des signets (§5.2) :
+  « voir en vrai » ouvre le navigateur du système.
+- Un **journal** sur la machine, jamais envoyé : `logs/magpie.log` et son prédécesseur, un
+  mégaoctet chacun, qui recopient la console du processus principal, les erreurs du renderer et
+  la sortie du processus des modèles. Il est fait pour être joint à un ticket public : requêtes
+  d'URL signées, cookies, jetons et dossier personnel en sont masqués, et `check:log` interdit
+  de passer une légende ou un cookie à la console. Les réglages l'ouvrent (« Dépannage »), à
+  côté d'un diagnostic à copier — versions, système, nombre de posts, sans chemin ni compte.
+- Une fenêtre dont le renderer meurt se recharge seule ; à la seconde chute en moins d'une
+  minute, Magpie demande au lieu de boucler.
 - La bibliothèque entière est un dossier déplaçable : base, médias, réglages.
 - **Rien n'est captif.** Réglages → « Exporter ou importer la bibliothèque » écrit un fichier JSON
   unique, `magpie-library` en version 1 (`src/main/library-file.ts`) : par post, identifiant,
@@ -753,7 +790,8 @@ personne. Au 2026-08-26, en version 0.42.0 :
 | Export pour assistant | livré |
 | Export JSON et import de bibliothèque, annulable | livré |
 | Tray, sync planifiée, réglages, mise à jour automatique | livré |
-| Build Windows NSIS + mises à jour différentielles | livré, **non signé** |
+| Build Windows NSIS + mises à jour différentielles | livré, **non signé** — signature branchée, inactive faute de certificat (§12) |
+| Fusibles, permissions, navigations gardées, journal sur disque (§10) | livré |
 | Reddit | en sommeil (§5.3) |
 | macOS, Linux | ni testés ni signés |
 
@@ -789,7 +827,24 @@ Deux outils non prévus par la spec initiale, tous deux justifiés :
 3. **Comptes multiples par plateforme.** Le modèle suppose un compte par plateforme. Le supporter
    coûte une colonne ; le rétro-adapter coûtera davantage à mesure que la base grossit.
 4. **Signature du binaire Windows.** SmartScreen avertit à chaque installation, et c'est le premier
-   frein à l'adoption qu'un utilisateur rencontre.
+   frein à l'adoption qu'un utilisateur rencontre. **Il ne manque plus que le certificat** : le
+   workflow de publication signe dès que ses secrets existent — un `.pfx` classique ou Azure
+   Trusted Signing, voir « Signing » dans le README — et construit non signé sinon, comme
+   aujourd'hui. Il vérifie ensuite la signature de l'installateur et de `Magpie.exe`, et que
+   `app-update.yml` nomme bien le signataire.
+
+   Le piège est dans electron-updater : une version signée inscrit son éditeur
+   (`publisherName`) dans `app-update.yml`, et **refuse ensuite toute mise à jour qui n'est pas
+   signée de ce nom**. Le passage du non signé au signé est sans danger — une installation non
+   signée n'a pas d'éditeur et accepte la première version signée. Le retour ne l'est pas : une
+   seule release partie sans ses secrets bloquerait toutes les installations signées. D'où la
+   variable `REQUIRE_SIGNING=true` à poser après la première version signée, qui fait échouer
+   la publication plutôt que de la laisser partir. Changer d'identité (de CN) demande une
+   version de transition **encore signée par l'ancien certificat** et qui nomme les deux éditeurs
+   (`WINDOWS_PUBLISHER_NAME`, séparés par `;`) : une installation juge une mise à jour avec les
+   noms de la version qu'elle fait tourner, donc seule la suivante peut changer de certificat —
+   et il faut s'y prendre avant que l'ancien expire. Le renouvellement quotidien d'Azure Trusted
+   Signing garde le même CN : ce n'est pas un changement d'identité.
 5. **Reddit.** Le remettre suppose de décider ce qu'un post textuel devient dans un mur d'images et
    dans la carte, pas seulement de rallumer l'adaptateur.
 

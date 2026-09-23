@@ -591,6 +591,9 @@ export interface MagpieApi {
   /** Supprime les modèles que plus aucun code ne charge. Rend ce qui est parti. */
   pruneModels(): Promise<{ removed: string[]; freed: number }>
   openDataFolder(): Promise<void>
+  /** Dépannage : le dossier du journal sur disque, et l'état de l'installation copié. */
+  openLogsFolder(): Promise<void>
+  copyDiagnostics(): Promise<void>
   chooseLibraryFolder(): Promise<{ moved: boolean; path: string }>
   /* Sauvegardes de la base et secours d'ouverture. */
   getBackupStatus(): Promise<BackupStatus>

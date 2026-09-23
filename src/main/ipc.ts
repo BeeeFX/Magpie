@@ -95,6 +95,8 @@ import { hasAiKey, writeAiKey } from './tagging/credentials'
 import type { AiProvider } from '@shared/types'
 import { checkForUpdates, getUpdateState, installUpdate } from './updater'
 import { exportDir, exportLibrary, stopExport, systemPrompt } from './export'
+import { logsDir } from './log'
+import { diagnostics } from './diagnostics'
 import {
   addKeyword,
   contested,
@@ -724,6 +726,15 @@ export function registerIpc({
   ipcMain.handle('library:takeRecovery', () => {
     getDb()
     return takeLibraryRecovery()
+  })
+  /* Dépannage. `openPath` ne rejette pas : il rend un message d'erreur, que l'autre bouton
+     jette. Ici on le relaie, pour que le renderer puisse dire que rien ne s'est ouvert. */
+  ipcMain.handle('app:openLogsFolder', async () => {
+    const failure = await shell.openPath(logsDir())
+    if (failure) throw new Error(failure)
+  })
+  ipcMain.handle('app:copyDiagnostics', async () => {
+    clipboard.writeText(await diagnostics())
   })
 
   ipcMain.handle('library:chooseFolder', async (event) => {

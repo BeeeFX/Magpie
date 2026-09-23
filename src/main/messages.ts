@@ -82,7 +82,14 @@ const FR = {
   'transfer.unreadable': 'Ce fichier ne peut pas être lu.',
   'transfer.busy': 'Un export ou un import est déjà en cours.',
   'transfer.changed': 'Le fichier a changé depuis son aperçu. Choisissez-le de nouveau.',
-  'transfer.noUndo': 'Il n’y a pas d’import à annuler.'
+  'transfer.noUndo': 'Il n’y a pas d’import à annuler.',
+  /* La fenêtre principale tombée deux fois de suite (`recovery.ts`). */
+  'crash.relapse': 'La fenêtre de Magpie s’est arrêtée deux fois de suite.',
+  'crash.relapseDetail':
+    'Votre bibliothèque n’est pas touchée. Le journal dit ce qui s’est passé : joignez-le à un signalement si cela se reproduit.',
+  'crash.reload': 'Recharger',
+  'crash.openLogs': 'Ouvrir le dossier des journaux',
+  'crash.quit': 'Quitter'
 } as const
 
 export type MessageKey = keyof typeof FR
@@ -134,7 +141,13 @@ const EN: Record<MessageKey, string> = {
   'transfer.unreadable': 'This file cannot be read.',
   'transfer.busy': 'An export or an import is already running.',
   'transfer.changed': 'The file changed since its preview. Choose it again.',
-  'transfer.noUndo': 'There is no import to undo.'
+  'transfer.noUndo': 'There is no import to undo.',
+  'crash.relapse': 'Magpie’s window stopped twice in a row.',
+  'crash.relapseDetail':
+    'Your library is untouched. The log says what happened: attach it to a report if this happens again.',
+  'crash.reload': 'Reload',
+  'crash.openLogs': 'Open logs folder',
+  'crash.quit': 'Quit'
 }
 
 const DICTIONARIES: Record<'fr' | 'en', Record<MessageKey, string>> = { fr: FR, en: EN }

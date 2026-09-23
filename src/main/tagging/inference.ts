@@ -10,6 +10,7 @@ import type {
   ModelPinned
 } from './inference.worker'
 import { backgroundTasks } from '../tasks'
+import { forwardOutput } from '../log'
 
 /**
  * Le guichet des modèles, vu du processus principal.
@@ -130,10 +131,14 @@ function spawn(): Promise<UtilityProcess> {
     const script = workerScriptPath(app.getAppPath())
     const process_ = utilityProcess.fork(script, [], {
       serviceName: 'Magpie models',
-      /* Hérité : ce que les modèles écrivent — un téléchargement, un avertissement d'ORT —
-         doit apparaître dans le même journal que le reste, sinon il n'existe pour personne. */
-      stdio: 'inherit'
+      /* Ce que les modèles écrivent — un téléchargement, un avertissement d'ORT — doit
+         apparaître dans le même journal que le reste, sinon il n'existe pour personne.
+         `inherit` l'envoyait sur la sortie standard, qui n'est reliée à rien dans la version
+         installée : on la recopie donc dans la console, et de là dans le fichier. */
+      stdio: 'pipe'
     })
+    forwardOutput(process_.stdout, 'modèles', 'info')
+    forwardOutput(process_.stderr, 'modèles', 'warn')
 
     process_.on('message', (message: InferenceReply | DownloadProgress | Heartbeat | ModelPinned) => {
       lastHeard = Date.now()
