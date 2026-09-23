@@ -23,11 +23,28 @@
    et le déplacement de bibliothèque ont besoin de la même liste, et une seconde copie est
    précisément ce qui a laissé cinq modèles abandonnés sur le disque. Ce module n'importe
    rien, donc le charger ici ne coûte rien au démarrage du processus. */
-import { MEANING_MODEL, SPEECH_MODEL, STRUCTURE_MODEL, TEXT_MODEL } from './models'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import {
+  chooseRevision,
+  isCommit,
+  MEANING_MODEL,
+  PINNED_REVISIONS,
+  pinnedUrl,
+  SPEECH_MODEL,
+  STRUCTURE_MODEL,
+  TEXT_MODEL
+} from './models'
 
 /** Ce qu'on demande. `id` revient tel quel dans la réponse : c'est ce qui les apparie. */
 export type InferenceRequest =
-  | { id: number; kind: 'configure'; cacheDir: string }
+  | {
+      id: number
+      kind: 'configure'
+      cacheDir: string
+      /** Les révisions déjà rangées par le magasin de modèles, par identifiant. */
+      revisions?: Record<string, string>
+    }
   | { id: number; kind: 'embed'; texts: string[] }
   | { id: number; kind: 'encode-images'; paths: string[] }
   | { id: number; kind: 'encode-prompts'; prompts: string[] }
@@ -83,6 +100,19 @@ export interface Heartbeat {
 
 const HEARTBEAT_MS = 5_000
 
+/**
+ * La révision qu'un modèle va télécharger, annoncée avant le premier octet.
+ *
+ * Le processus principal la range (`recordModelRevision`) : c'est lui qui tient le magasin des
+ * modèles, et ce fil ne fait que la découvrir.
+ */
+export interface ModelPinned {
+  id: 0
+  kind: 'pinned'
+  model: string
+  revision: string
+}
+
 /** Préfixe attendu par la famille e5, des deux côtés pour une comparaison symétrique. */
 const TEXT_PREFIX = 'query: '
 
@@ -122,17 +152,123 @@ function once<T>(load: () => Promise<T>): () => Promise<T> {
   }
 }
 
+/**
+ * Le `fetch` d'origine de la bibliothèque, gardé avant qu'on ne l'enveloppe.
+ *
+ * Toutes les requêtes vers le hub — fichiers, sondes de métadonnées — passent par `env.fetch`.
+ * C'est là que l'épingle se pose : voir `pinnedUrl`.
+ */
+type HubFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
+let hubFetch: HubFetch | null = null
+
 async function library(): Promise<typeof import('@huggingface/transformers')> {
   const transformers = await import('@huggingface/transformers')
   transformers.env.cacheDir = cacheDir
   transformers.env.allowLocalModels = false
+  if (!hubFetch) {
+    const original = transformers.env.fetch as HubFetch
+    hubFetch = original
+    transformers.env.fetch = (input: string | URL, init?: RequestInit) =>
+      original(pinnedUrl(String(input), transformers.env.remoteHost, pins), init)
+  }
   return transformers
+}
+
+/** Les révisions rangées, reçues à la configuration, puis complétées par ce qu'on résout ici. */
+let recorded: Record<string, string> = {}
+/** Les commits en vigueur, par modèle — ceux que `pinnedUrl` substitue à `main`. */
+const pins = new Map<string, string>()
+const revisions = new Map<string, Promise<string>>()
+
+/**
+ * Le commit que `main` désigne maintenant, lu dans l'en-tête `x-repo-commit`.
+ *
+ * `transformers.js` ne l'expose pas : il construit l'URL `…/resolve/{révision}/…` et ne regarde
+ * pas les en-têtes. Une requête `HEAD` sur `config.json` — petit fichier que chaque chargement
+ * demande de toute façon — suffit, par le même `fetch` et le même hôte que les téléchargements,
+ * mais sans l'épingle, puisque c'est elle qu'on cherche. Une panne réseau remonte telle quelle :
+ * le téléchargement qui suivrait échouerait pareil.
+ */
+async function resolveMain(model: string): Promise<string | null> {
+  const { env } = await library()
+  const host = env.remoteHost.endsWith('/') ? env.remoteHost : `${env.remoteHost}/`
+  const response = await (hubFetch as HubFetch)(`${host}${model}/resolve/main/config.json`, {
+    method: 'HEAD'
+  })
+  /* Un refus — dépôt retiré, accès interdit — vaudrait pour le téléchargement aussi : on le dit
+     plutôt que de retomber sur `main`, qui serait refusé de la même façon. */
+  if (!response.ok) throw new Error(`Révision de ${model} illisible (HTTP ${response.status}).`)
+  const commit = response.headers.get('x-repo-commit')
+  return isCommit(commit) ? commit : null
+}
+
+/**
+ * La révision d'un modèle, décidée une fois par processus avant sa première requête, et
+ * partagée par tous ses chargeurs : SigLIP est chargé par deux côtés (images, phrases), et ses
+ * deux tours doivent venir du même commit.
+ */
+function revisionOf(model: string): Promise<string> {
+  let known = revisions.get(model)
+  if (!known) {
+    known = (async () => {
+      const choice = chooseRevision({
+        recorded: recorded[model] ?? null,
+        legacy: existsSync(join(cacheDir, model, 'config.json')),
+        pinned: PINNED_REVISIONS[model] ?? null
+      })
+      let commit = choice.revision
+      if (commit === null) {
+        commit = await resolveMain(model)
+        if (!commit) {
+          /* Réponse sans l'en-tête — un intermédiaire qui l'a retiré. Refuser tout
+             téléchargement laisserait l'application sans modèle pour toujours ; on retombe sur
+             `main`, comme avant, et le cache ainsi rempli fera office d'épingle (`legacy`). */
+          console.warn(`[magpie] Révision de ${model} introuvable, téléchargement depuis main.`)
+          return 'main'
+        }
+      }
+      if (isCommit(commit)) {
+        pins.set(model, commit)
+        if (choice.source !== 'recorded') announce(model, commit)
+      }
+      return commit
+    })()
+    revisions.set(model, known)
+    // Une résolution ratée (hors ligne) se retente au chargement suivant.
+    known.catch(() => revisions.delete(model))
+  }
+  return known
+}
+
+function announce(model: string, revision: string): void {
+  recorded[model] = revision
+  process.parentPort.postMessage({ id: 0, kind: 'pinned', model, revision } satisfies ModelPinned)
+}
+
+/**
+ * Ce que chaque chargement reçoit, une fois sa révision décidée : le relais de son
+ * téléchargement. La révision elle-même ne passe pas en option — voir `pinnedUrl`.
+ */
+async function sourceOf(model: string): Promise<{ progress_callback: typeof watchDownload }> {
+  await revisionOf(model)
+  return { progress_callback: watchDownload }
 }
 
 type Extractor = (
   texts: string[],
   options: { pooling: 'mean'; normalize: boolean }
 ) => Promise<{ data: Float32Array; dims: number[] }>
+
+/**
+ * Au plus quatre nouvelles par seconde.
+ *
+ * La bibliothèque rapporte chaque paquet reçu, soit des centaines par seconde sur une bonne
+ * connexion, et chacun coûtait un message à l'hôte, un instantané du registre des tâches envoyé
+ * à la fenêtre et une reconstruction du menu de la barre système. Personne ne lit une barre
+ * plus vite que ça ; la fin d'un fichier, elle, passe toujours.
+ */
+const DOWNLOAD_REPORT_MS = 250
+let lastReport = 0
 
 /**
  * Ce que la bibliothèque rapporte pendant un téléchargement, réémis vers l'hôte.
@@ -147,6 +283,10 @@ function watchDownload(event: {
   total?: number
 }): void {
   if (event.status !== 'progress' || !event.total) return
+  const now = Date.now()
+  const finished = (event.loaded ?? 0) >= event.total
+  if (!finished && now - lastReport < DOWNLOAD_REPORT_MS) return
+  lastReport = now
   const message: DownloadProgress = {
     id: 0,
     kind: 'download',
@@ -161,7 +301,7 @@ const textEncoder = once(async (): Promise<Extractor> => {
   const { pipeline } = await library()
   return (await pipeline('feature-extraction', TEXT_MODEL, {
     dtype: 'q8',
-    progress_callback: watchDownload
+    ...(await sourceOf(TEXT_MODEL))
   })) as unknown as Extractor
 })
 
@@ -173,17 +313,14 @@ interface Encoders {
 
 const imageEncoders = once(async (): Promise<Encoders> => {
   const { AutoModel, AutoProcessor, SiglipVisionModel } = await library()
+  const structure = await sourceOf(STRUCTURE_MODEL)
+  const meaning = await sourceOf(MEANING_MODEL)
   const [structureProcessor, structureModel, meaningModel] = await Promise.all([
-    AutoProcessor.from_pretrained(STRUCTURE_MODEL, { progress_callback: watchDownload }),
-    AutoModel.from_pretrained(STRUCTURE_MODEL, { dtype: 'q8', progress_callback: watchDownload }),
-    SiglipVisionModel.from_pretrained(MEANING_MODEL, {
-      dtype: 'q8',
-      progress_callback: watchDownload
-    })
+    AutoProcessor.from_pretrained(STRUCTURE_MODEL, structure),
+    AutoModel.from_pretrained(STRUCTURE_MODEL, { dtype: 'q8', ...structure }),
+    SiglipVisionModel.from_pretrained(MEANING_MODEL, { dtype: 'q8', ...meaning })
   ])
-  const meaningProcessor = await AutoProcessor.from_pretrained(MEANING_MODEL, {
-    progress_callback: watchDownload
-  })
+  const meaningProcessor = await AutoProcessor.from_pretrained(MEANING_MODEL, meaning)
   return {
     process: async (image) => ({
       structure: await structureProcessor(image as never),
@@ -198,13 +335,9 @@ type Tower = (prompts: string[]) => Promise<{ flat: Float32Array; width: number 
 
 const promptEncoder = once(async (): Promise<Tower> => {
   const { AutoTokenizer, SiglipTextModel } = await library()
-  const tokenizer = await AutoTokenizer.from_pretrained(MEANING_MODEL, {
-    progress_callback: watchDownload
-  })
-  const model = await SiglipTextModel.from_pretrained(MEANING_MODEL, {
-    dtype: 'q8',
-    progress_callback: watchDownload
-  })
+  const meaning = await sourceOf(MEANING_MODEL)
+  const tokenizer = await AutoTokenizer.from_pretrained(MEANING_MODEL, meaning)
+  const model = await SiglipTextModel.from_pretrained(MEANING_MODEL, { dtype: 'q8', ...meaning })
   return async (prompts) => {
     /* SigLIP est entraîné avec un remplissage fixe à 64 jetons. Laisser le remplissage par
        défaut décale les positions et rend les vecteurs inutilisables : mesuré, la justesse
@@ -231,7 +364,7 @@ const speechRecogniser = once(async (): Promise<Recogniser> => {
   const { pipeline } = await library()
   return (await pipeline('automatic-speech-recognition', SPEECH_MODEL, {
     dtype: 'q8',
-    progress_callback: watchDownload
+    ...(await sourceOf(SPEECH_MODEL))
   })) as unknown as Recogniser
 })
 
@@ -301,6 +434,7 @@ async function answer(request: InferenceRequest): Promise<InferenceReply> {
   const { id } = request
   if (request.kind === 'configure') {
     cacheDir = request.cacheDir
+    recorded = { ...(request.revisions ?? {}) }
     return { id, ok: true, kind: 'done' }
   }
   if (request.kind === 'embed') {

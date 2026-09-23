@@ -6,6 +6,7 @@ import {
   type PostEmbedding
 } from '../db/queries'
 import { embedBatch } from './inference'
+import { TEXT_MODEL } from './models'
 import type { Breathe } from './organize'
 
 /**
@@ -37,7 +38,9 @@ import type { Breathe } from './organize'
  * corrige : l'écart moyen entre paires proches et lointaines passe de 0,042 à 0,231.
  * Le recentrage n'est donc pas un raffinement, il est indispensable.
  */
-const MODEL = 'Xenova/multilingual-e5-small'
+/* Le nom vient de `models.ts`, seule liste que la purge et le déplacement consultent ; il entre
+   tel quel dans `embeddingHash`, donc rien ne se réencode pour l'avoir déplacé. */
+const MODEL = TEXT_MODEL
 /** Au-delà, on n'ajoute plus de sens : on ajoute du hors-sujet et du temps de calcul. */
 const MAX_CHARS = 512
 const BATCH = 32

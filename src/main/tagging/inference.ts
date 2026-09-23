@@ -1,11 +1,13 @@
 import { join } from 'node:path'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import { modelsDir } from '../db'
+import { modelRevisions, recordModelRevision, sweepPartialDownloads } from '../models/store'
 import type {
   DownloadProgress,
   Heartbeat,
   InferenceReply,
-  InferenceRequest
+  InferenceRequest,
+  ModelPinned
 } from './inference.worker'
 import { backgroundTasks } from '../tasks'
 
@@ -133,9 +135,19 @@ function spawn(): Promise<UtilityProcess> {
       stdio: 'inherit'
     })
 
-    process_.on('message', (message: InferenceReply | DownloadProgress | Heartbeat) => {
+    process_.on('message', (message: InferenceReply | DownloadProgress | Heartbeat | ModelPinned) => {
       lastHeard = Date.now()
       if ('kind' in message && message.kind === 'alive') return
+      /* Rangée avant que le premier octet n'arrive : c'est ce qui fera redemander le même
+         commit la prochaine fois, et non ce que `main` sera devenu. */
+      if ('kind' in message && message.kind === 'pinned') {
+        try {
+          recordModelRevision(message.model, message.revision)
+        } catch (error) {
+          console.warn('[magpie] Révision de modèle non rangée :', error)
+        }
+        return
+      }
       /* `id: 0` n'est la réponse à rien : c'est la diffusion du téléchargement. Un premier
          rangement rapatrie 688 Mo, et l'interface n'en disait rien — « Préparation en cours… »
          et huit minutes de silence, indiscernables d'une application figée. */
@@ -155,6 +167,9 @@ function spawn(): Promise<UtilityProcess> {
        repartira sur un processus neuf. */
     process_.on('exit', () => {
       if (child === process_) child = null
+      /* Un processus arrêté en plein téléchargement — chien de garde, panne, fermeture — laisse
+         ses fichiers partiels. Son numéro ne tourne plus : ils partent maintenant. */
+      void sweepPartialDownloads().catch(() => undefined)
       const reason = killedBecause ?? 'Le processus des modèles s’est arrêté. Relancez l’étape.'
       killedBecause = null
       failAll(reason)
@@ -187,7 +202,7 @@ function spawn(): Promise<UtilityProcess> {
    donc le compilateur ne peut rien en déduire, et le cast qui rattrapait le coup masquait le
    jour où les formes divergeraient. */
 function isDownload(
-  message: InferenceReply | DownloadProgress | Heartbeat
+  message: InferenceReply | DownloadProgress | Heartbeat | ModelPinned
 ): message is DownloadProgress {
   return 'kind' in message && message.kind === 'download'
 }
@@ -244,7 +259,7 @@ let configured: Promise<unknown> | null = null
 async function ready(): Promise<void> {
   const worker = await spawn()
   if (!configured) {
-    configured = ask({ kind: 'configure', cacheDir: modelsDir() })
+    configured = ask({ kind: 'configure', cacheDir: modelsDir(), revisions: modelRevisions() })
     worker.once('exit', () => {
       configured = null
     })
