@@ -56,6 +56,7 @@ import { streamMedia } from './adapters/http'
 import { installLogFile } from './log'
 import { installCrashLogging, watchRenderer } from './recovery'
 import { guardWebContents, hardenSessions } from './security'
+import { encryptPlaintextCookies } from './adapters/session'
 import {
   migrateUiStorage,
   registerRendererProtocol,
@@ -935,8 +936,10 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
       void drainMediaQueue()
     }
   })
-  /* Une fois par profil, avant que la fenêtre ne relise ses préférences : elles vivaient
-     dans le stockage de `file://`. Inutile quand Vite sert la page. */
+  /* Deux reprises à faire une fois par profil, avant que la fenêtre ne s'ouvre : les cookies
+     laissés en clair par les versions sans fusible, et les préférences d'affichage, qui
+     vivaient dans le stockage de `file://` — inutile quand Vite sert la page. */
+  await encryptPlaintextCookies()
   if (!(isDev && process.env['ELECTRON_RENDERER_URL'])) await migrateUiStorage()
   createWindow()
   refreshBackgroundFeatures()

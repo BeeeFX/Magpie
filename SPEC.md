@@ -620,13 +620,50 @@ déclencher un schéma applicatif arbitraire.
 - Aucun serveur, aucune télémétrie, aucun service de modèle. Les seules requêtes sortantes vont
   aux plateformes connectées, au dépôt GitHub pour les mises à jour, et au CDN de Hugging Face au
   premier téléchargement d'un modèle.
-- Les sessions vivent dans des partitions Electron isolées, une par plateforme, dans le stockage
-  chiffré de Chromium. Magpie ne voit jamais le mot de passe saisi sur la vraie page de connexion.
+- Les sessions vivent dans des partitions Electron isolées, une par plateforme. Magpie ne voit
+  jamais le mot de passe saisi sur la vraie page de connexion.
+- **Les cookies sont chiffrés sur le disque** avec la clé du système (DPAPI sous Windows), par le
+  fusible `EnableCookieEncryption` que pose l'empaquetage. Ce paragraphe l'affirmait déjà
+  jusqu'à la 0.44, et c'était faux : Electron écrit ses cookies en clair tant que le fusible
+  n'est pas posé, et il ne l'était pas — le `sessionid` d'Instagram et l'`auth_token` de X se
+  lisaient dans `Partitions/magpie-*`. Chromium ne rechiffre pas de lui-même un cookie déjà en
+  clair : au premier lancement d'une version chiffrante, Magpie les repose une fois, à
+  l'identique, et ils sont écrits chiffrés (marqueur `cookies-encrypted` dans le profil). Passage
+  sans retour : un binaire sans le fusible efface les cookies d'un magasin chiffré. Le
+  développement, qui tourne sur l'Electron non modifié, a donc ses propres partitions
+  (`magpie-dev-*`, en clair) et ne touche jamais à celles de la version installée.
 - Bouton « Déconnecter » par plateforme, qui purge réellement la partition.
-- `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, IPC typée et restreinte,
-  CSP stricte, schéma `magpie://` privilégié plutôt que `file://`.
+- Fusibles d'Electron, gravés à l'empaquetage (`electron-builder.yml`) : pas de mode Node
+  (`ELECTRON_RUN_AS_NODE`), pas de `NODE_OPTIONS`, pas de `--inspect` ; l'archive `app.asar` est
+  vérifiée contre l'empreinte inscrite dans l'exécutable et c'est la seule que l'application
+  charge ; `file://` n'a plus ses privilèges historiques. Ce qui est déballé de l'archive —
+  modules natifs, ffmpeg, fil de projection — n'est pas couvert par la vérification.
+- Le renderer : `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, IPC typée et
+  restreinte. Il est servi par `app://magpie/`, qui ne rend que les fichiers de `out/renderer` ;
+  les médias passent par `magpie://`. CSP stricte : aucun socket dans la version livrée (celui
+  de Vite n'est ajouté qu'au service de développement), `font-src 'self' data:` pour le
+  sous-ensemble de police que Vite incruste.
+- **Permissions refusées par défaut.** Le renderer obtient le plein écran (lecteur) et l'écriture
+  du presse-papier, rien d'autre ; les partitions des plateformes n'obtiennent rien — ni
+  notification, ni caméra, ni ouverture d'un programme externe (`ms-msdt:`, `search-ms:`…) — et
+  n'y téléchargent rien.
+- **Navigations gardées**, pour chaque contenu web dès sa création : le renderer ne quitte pas son
+  origine et ouvre les liens web — `http(s)` seulement — dans le navigateur du système ; une
+  fenêtre de plateforme va où elle veut pourvu que ce soit du `https:`, popups compris, qui
+  restent dans sa partition. Pas de liste de domaines : Facebook, Google, Apple et la double
+  authentification la casseraient sans qu'on puisse l'éprouver. Faute de barre d'adresse, le
+  titre d'une fenêtre de connexion commence par l'hôte réel de la page.
 - Aucune page distante n'est chargée dans une fenêtre de Magpie en dehors des fenêtres de
-  connexion : « voir en vrai » ouvre le navigateur du système.
+  connexion, de leurs popups, et de la page cachée où X montre sa requête des signets (§5.2) :
+  « voir en vrai » ouvre le navigateur du système.
+- Un **journal** sur la machine, jamais envoyé : `logs/magpie.log` et son prédécesseur, un
+  mégaoctet chacun, qui recopient la console du processus principal, les erreurs du renderer et
+  la sortie du processus des modèles. Il est fait pour être joint à un ticket public : requêtes
+  d'URL signées, cookies, jetons et dossier personnel en sont masqués, et `check:log` interdit
+  de passer une légende ou un cookie à la console. Les réglages l'ouvrent (« Dépannage »), à
+  côté d'un diagnostic à copier — versions, système, nombre de posts, sans chemin ni compte.
+- Une fenêtre dont le renderer meurt se recharge seule ; à la seconde chute en moins d'une
+  minute, Magpie demande au lieu de boucler.
 - La bibliothèque entière est un dossier déplaçable : base, médias, réglages. Rien n'est captif —
   sous la réserve du §14 sur l'import.
 
