@@ -73,6 +73,7 @@ import {
 } from './db/queries'
 import {
   exportLibraryJson,
+  IMPORT_JOURNAL,
   importLibrary,
   lastLibraryImport,
   previewLibraryImport,
@@ -813,6 +814,11 @@ export function registerIpc({
         }
       })
 
+      /* Le journal du dernier import décrit la base qu'on déplace : sans lui, un déplacement
+         faisait perdre l'annulation de cet import. Quelques kilo-octets, copiés avec elle. */
+      const sourceJournal = join(source, IMPORT_JOURNAL)
+      if (existsSync(sourceJournal)) await copyFile(sourceJournal, join(target, IMPORT_JOURNAL))
+
       let copiedBackupBytes = 0
       if (backupFiles.length > 0) {
         await mkdir(targetBackups, { recursive: true })
@@ -879,6 +885,7 @@ export function registerIpc({
       sendProgress({ phase: 'error', done: 0, total: 0, path: target, message })
       if (startedWriting) {
         await rm(targetDb, { force: true }).catch(() => {})
+        await rm(join(target, IMPORT_JOURNAL), { force: true }).catch(() => {})
         await rm(targetMedia, { recursive: true, force: true }).catch(() => {})
         await rm(targetModels, { recursive: true, force: true }).catch(() => {})
         await rm(targetBackups, { recursive: true, force: true }).catch(() => {})

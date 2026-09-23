@@ -169,8 +169,11 @@ export async function previewLibraryImport(
  * l'import a changé quelque chose. Réimporter le même fichier — ce qui ne change rien — ne doit
  * pas faire perdre l'annulation de l'import qui, lui, a tout apporté.
  */
+/** Le nom du journal, que le déplacement de la bibliothèque emporte aussi. */
+export const IMPORT_JOURNAL = 'last-import.jsonl'
+
 function journalPath(): string {
-  return join(dataDir(), 'last-import.jsonl')
+  return join(dataDir(), IMPORT_JOURNAL)
 }
 
 type JournalLine =
