@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Post } from '@shared/types'
 import { magpie } from '../bridge'
-import { alignItemsToPosts, computeLayout, visibleItems } from '../layout'
+import {
+  alignItemsToPosts,
+  computeLayout,
+  neighbourItem,
+  visibleItems,
+  type Direction,
+  type LayoutItem
+} from '../layout'
 import { reportFailure } from '../notices'
 import type { TranslationKey } from '../i18n'
 import { shouldPrefetch } from '../paging'
@@ -27,6 +34,25 @@ const EMPTY_TEXT = {
   source: 'grid.emptySource'
 } as const satisfies Record<string, TranslationKey>
 
+const ARROWS: Record<string, Direction> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right'
+}
+
+/** Ce qui se parcourt déjà aux flèches, selon son rôle ARIA. */
+const OWNS_ARROWS =
+  '[role="toolbar"], [role="separator"], [role="slider"], [role="tablist"], ' +
+  '[role="radiogroup"], [role="listbox"]'
+
+/** Un champ garde ses touches : `Ctrl+A` y sélectionne le texte, les flèches y déplacent le
+ *  curseur ou changent une valeur. */
+function isTyping(element: HTMLElement): boolean {
+  const tag = element.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || element.isContentEditable
+}
+
 export function Grid(): React.JSX.Element {
   const t = useT()
   const posts = useStore((s) => s.posts)
@@ -51,12 +77,12 @@ export function Grid(): React.JSX.Element {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const selectionMode = useStore((s) => s.selectionMode)
   const selectedIds = useStore((s) => s.selectedIds)
-  const toggleSelected = useStore((s) => s.toggleSelected)
 
   const query = useStore((s) => s.query)
   /* Ce qui a vidé l'écran décide de la sortie qu'on propose. */
   const empty = emptyReason(query)
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState({ width: 0, height: 0 })
   const [layoutWidth, setLayoutWidth] = useState(0)
   const [layoutDensity, setLayoutDensity] = useState(density)
@@ -321,15 +347,258 @@ export function Grid(): React.JSX.Element {
     setTimeout(() => setCopiedId((id) => (id === post.id ? null : id)), 1200)
   }, [])
 
+  /** La dernière carte cliquée ou cochée : le point de départ d'un `Maj`+clic. */
+  const anchor = useRef<string | null>(null)
+
+  /* Une plage appartient aux résultats où on l'a tracée : un autre filtre repart sans ancre. */
+  useEffect(() => {
+    anchor.current = null
+  }, [query])
+
   /* Ouvre la vue détaillée depuis la position exacte de la carte, pour qu'elle paraisse
-     s'agrandir plutôt que de surgir au centre. */
+     s'agrandir plutôt que de surgir au centre. Par identifiant : ne plus chercher la position
+     rend aussi ce rappel stable, et `memo(Card)` n'est plus déjoué à chaque lot de posts. */
   const onOpen = useCallback(
     (post: Post, element: HTMLElement) => {
-      const index = posts.findIndex((p) => p.id === post.id)
-      if (index >= 0) openDetail(index, element.getBoundingClientRect())
+      anchor.current = post.id
+      openDetail(post.id, element.getBoundingClientRect())
     },
-    [posts, openDetail]
+    [openDetail]
   )
+
+  /* La plage suit l'ordre du mur — celui de `posts`, que la mise en page empile dans l'ordre —
+     et s'ajoute à ce qui est déjà coché plutôt que de le remplacer : c'est le geste qui
+     pardonne, quand la sélection vient d'un `Ctrl+A` suivi de retouches. Elle ne couvre que
+     ce qui est chargé, ce qui est aussi tout ce qu'on a pu voir entre les deux clics. */
+  const onSelect = useCallback((id: string, how: 'toggle' | 'range') => {
+    const state = useStore.getState()
+    const from = anchor.current
+    if (how === 'range' && from !== null && from !== id) {
+      const order = state.posts.map((post) => post.id)
+      const start = order.indexOf(from)
+      const end = order.indexOf(id)
+      if (start >= 0 && end >= 0) {
+        state.selectIds(order.slice(Math.min(start, end), Math.max(start, end) + 1))
+        return
+      }
+    }
+    anchor.current = id
+    if (how === 'range') {
+      state.selectIds([id])
+      return
+    }
+    if (!state.selectionMode) state.setSelectionMode(true)
+    state.toggleSelected(id)
+  }, [])
+
+  /* Ce que le clavier lit à chaque touche, sans réabonner l'écouteur à chaque vignette. */
+  const nav = useRef({ layout, itemsById })
+  useLayoutEffect(() => {
+    nav.current = { layout, itemsById }
+  }, [layout, itemsById])
+
+  /** La carte active entière à l'écran, avec une marge : on défile le strict nécessaire. */
+  const reveal = useCallback((item: LayoutItem): void => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const offset = canvasRef.current?.offsetTop ?? 0
+    const top = item.y + offset - GAP
+    const bottom = item.y + offset + item.height + GAP
+    if (top < scroller.scrollTop) scroller.scrollTop = top
+    else if (bottom > scroller.scrollTop + scroller.clientHeight) {
+      // Une carte plus haute que la fenêtre se montre par le haut.
+      scroller.scrollTop = Math.min(top, bottom - scroller.clientHeight)
+    }
+  }, [])
+
+  /**
+   * Vrai tant que le clavier parcourt le mur. Le focus du DOM ne suffit pas à le dire : quand
+   * une flèche fait défiler loin, l'ancienne carte est démontée avant que la nouvelle n'arrive,
+   * le focus passe un instant par `<body>`, et la touche suivante d'une répétition se perdait.
+   * Un clic ou un focus posé ailleurs y mettent fin.
+   */
+  const keyboardInWall = useRef(false)
+
+  const focusItem = useCallback(
+    (item: LayoutItem): void => {
+      const state = useStore.getState()
+      const id = item.post.id
+      keyboardInWall.current = true
+      // L'aperçu suit le focus, comme celui du survol suit la souris.
+      if (state.previewId !== null) state.setPreviewId(id)
+      state.setFocusedId(id)
+      reveal(item)
+      /* Déjà montée, la carte prend le focus tout de suite ; sinon elle le prendra en arrivant
+         dans la fenêtre de rendu (voir Card). */
+      scrollerRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-id="${CSS.escape(id)}"] .card__open`)
+        ?.focus({ preventScroll: true })
+    },
+    [reveal]
+  )
+
+  /** Un pas vers le bas demandé au bout de ce qui est chargé, joué à l'arrivée de la suite. */
+  const pendingMove = useRef<{ from: string; direction: Direction } | null>(null)
+
+  useEffect(() => {
+    const pending = pendingMove.current
+    if (!pending) return
+    const from = itemsById.get(pending.from)
+    if (!from || useStore.getState().focusedId !== pending.from) {
+      pendingMove.current = null
+      return
+    }
+    const next = neighbourItem(layout, from, pending.direction)
+    if (next) {
+      pendingMove.current = null
+      focusItem(next)
+    } else if (!hasMore && !loadingMore) {
+      pendingMove.current = null
+    }
+  }, [layout, itemsById, hasMore, loadingMore, focusItem])
+
+  /*
+   * Le mur au clavier.
+   *
+   * La fiche des raccourcis le reconnaissait elle-même : sur le mur, seule l'Entrée faisait
+   * quelque chose, et la sélection se faisait une carte à la fois. Sur la fenêtre plutôt que
+   * sur la grille, pour que la première flèche entre dans le mur quand rien n'a le focus.
+   *
+   * Ce qui garde ses touches : un champ, un menu ouvert, une fenêtre modale, la vue détaillée —
+   * qui a ses propres flèches. Et `Échap` ne quitte la sélection que depuis le mur ou la barre de
+   * sélection : trois cents posts cochés ne se perdent pas sur une touche pressée ailleurs.
+   */
+  useEffect(() => {
+    /**
+     * D'où part la flèche. La carte qui a le focus, si elle l'a vraiment ; sinon, on entre dans
+     * le mur sans encore bouger — sur la carte active si on la voit, celle du coin haut gauche
+     * de ce qu'on voit sinon. La première touche montre où l'on est, la suivante déplace :
+     * partir d'une carte cliquée il y a longtemps, sans anneau visible, faisait surgir le focus
+     * là où l'on ne regardait pas.
+     */
+    const entryItem = (): { item: LayoutItem; active: boolean } | null => {
+      const scroller = scrollerRef.current
+      if (!scroller) return null
+      const { layout: current, itemsById: byId } = nav.current
+      const top = scroller.scrollTop - (canvasRef.current?.offsetTop ?? 0)
+      const bottom = top + scroller.clientHeight
+      const focusedId = useStore.getState().focusedId
+      const focused = focusedId !== null ? byId.get(focusedId) : undefined
+      if (focused && focused.y < bottom && focused.y + focused.height > top) {
+        const holder = document.activeElement?.closest('[data-id]')
+        return {
+          item: focused,
+          active: keyboardInWall.current || holder?.getAttribute('data-id') === focusedId
+        }
+      }
+      const shown = visibleItems(current, top, scroller.clientHeight, 0)
+      let best: LayoutItem | null = null
+      for (const item of shown) {
+        if (item.y < top) continue
+        if (!best || item.x < best.x || (item.x === best.x && item.y < best.y)) best = item
+      }
+      const entry = best ?? shown[0]
+      return entry ? { item: entry, active: false } : null
+    }
+
+    const move = (direction: Direction): void => {
+      const entry = entryItem()
+      if (!entry) return
+      // La première flèche entre dans le mur là où l'on regarde, sans encore bouger.
+      if (!entry.active) {
+        focusItem(entry.item)
+        return
+      }
+      const next = neighbourItem(nav.current.layout, entry.item, direction)
+      if (next) {
+        focusItem(next)
+        return
+      }
+      const state = useStore.getState()
+      if (direction === 'down' && state.hasMore) {
+        pendingMove.current = { from: entry.item.post.id, direction }
+        void state.loadMore()
+      }
+    }
+
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.altKey) return
+      const state = useStore.getState()
+      if (state.detailId !== null) return
+      if (document.querySelector('[aria-modal="true"], [role="menu"]')) return
+      const target = event.target instanceof HTMLElement ? event.target : null
+      if (target && isTyping(target)) return
+      const scroller = scrollerRef.current
+      if (!scroller) return
+      const onWall = !target || target === document.body || scroller.contains(target)
+
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'a') {
+        /* Tout le résultat, pas la tranche chargée : c'est ce que fait déjà « Tout » dans la
+           barre de sélection, qu'on n'avait aucun moyen d'atteindre sans la souris. */
+        event.preventDefault()
+        state.setSelectionMode(true)
+        void state.selectAllResults()
+        return
+      }
+      if (event.ctrlKey || event.metaKey) return
+
+      /* Depuis la barre latérale ou la barre d'outils aussi : après un clic sur « Favoris », la
+         première flèche entre dans le mur au lieu d'imposer de tabuler à travers toute
+         l'interface. Sauf là où les flèches ont déjà un sens. */
+      const direction = ARROWS[event.key]
+      if (direction) {
+        if (event.shiftKey || target?.closest(OWNS_ARROWS)) return
+        event.preventDefault()
+        move(direction)
+        return
+      }
+
+      /* `Espace` sur une carte : l'aperçu, c'est-à-dire ce que fait le survol — la vidéo se
+         lit, le carrousel défile. Le bouton l'aurait pris pour un clic et ouvert le post, ce
+         que fait déjà l'Entrée. En sélection, on laisse le clic : il coche la carte. */
+      if (event.key === ' ' && !event.shiftKey && target?.classList.contains('card__open')) {
+        if (state.selectionMode) return
+        const id = target.closest('[data-id]')?.getAttribute('data-id') ?? null
+        if (id === null) return
+        event.preventDefault()
+        // Une touche tenue ne fait pas clignoter l'aperçu.
+        if (event.repeat) return
+        state.setFocusedId(id)
+        state.setPreviewId(state.previewId === id ? null : id)
+        return
+      }
+
+      if (event.key === 'Escape') {
+        if (state.previewId !== null) {
+          state.setPreviewId(null)
+          return
+        }
+        if (!onWall && !target?.closest('.bulk-bar')) return
+        if (state.selectionMode) {
+          state.setSelectionMode(false)
+          return
+        }
+        if (state.focusedId !== null) {
+          state.setFocusedId(null)
+          if (target && scroller.contains(target)) target.blur()
+        }
+      }
+    }
+
+    const leaveWall = (event: Event): void => {
+      if (event.type === 'focusin' && scrollerRef.current?.contains(event.target as Node)) return
+      keyboardInWall.current = false
+    }
+
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('focusin', leaveWall)
+    window.addEventListener('pointerdown', leaveWall, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('focusin', leaveWall)
+      window.removeEventListener('pointerdown', leaveWall, true)
+    }
+  }, [focusItem])
 
   const onSendToNitrate = useCallback((post: Post) => {
     void magpie.sendToNitrate(post.url)
@@ -388,6 +657,7 @@ export function Grid(): React.JSX.Element {
           et le mur se repose au lieu de se substituer sèchement. */}
       <div
         key={resultsKey}
+        ref={canvasRef}
         className="grid__canvas grid__canvas--fresh"
         style={{ height: layout.totalHeight + (hasMore ? 64 : 0) }}
       >
@@ -404,7 +674,7 @@ export function Grid(): React.JSX.Element {
             onSendToNitrate={onSendToNitrate}
             selectionMode={selectionMode}
             selected={selectedIdSet.has(item.post.id)}
-            onToggleSelected={toggleSelected}
+            onSelect={onSelect}
           />
         ))}
         {hasMore ? (

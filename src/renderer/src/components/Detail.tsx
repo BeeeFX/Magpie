@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useModalFocus } from '../useModalFocus'
 import type { CollectionInfo, Post } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
@@ -32,6 +32,40 @@ import {
   IconStar
 } from './Icons'
 
+/** Au-delà de ce silence entre deux événements de molette, c'est un nouveau geste. L'inertie
+ *  d'un trackpad en émet toutes les 16 ms ; une molette qu'on tourne, toutes les 30 à 100 ms. */
+const WHEEL_GESTURE_GAP = 250
+
+/**
+ * Ce que la molette ferait au-dessus de `target` : faire défiler un bloc (`scrolls`), buter sur
+ * le bout d'un bloc qui défile (`at-edge`), ou rien du tout (`none`).
+ *
+ * On remonte de la cible jusqu'au calque : la transcription défile dans le panneau latéral, qui
+ * défile lui-même, et le navigateur passe de l'un à l'autre. Il suffit qu'un seul puisse encore
+ * avancer dans ce sens pour que la molette lui appartienne.
+ */
+function wheelScrollState(
+  target: EventTarget,
+  boundary: Element,
+  deltaY: number
+): 'scrolls' | 'at-edge' | 'none' {
+  let found = false
+  for (
+    let node = target instanceof Element ? target : null;
+    node && node !== boundary;
+    node = node.parentElement
+  ) {
+    if (node.scrollHeight <= node.clientHeight + 1) continue
+    const overflow = getComputedStyle(node).overflowY
+    if (overflow !== 'auto' && overflow !== 'scroll' && overflow !== 'overlay') continue
+    found = true
+    const room =
+      deltaY > 0 ? node.scrollHeight - node.clientHeight - node.scrollTop : node.scrollTop
+    if (room > 1) return 'scrolls'
+  }
+  return found ? 'at-edge' : 'none'
+}
+
 /**
  * Vue détaillée.
  *
@@ -44,7 +78,7 @@ import {
 export function Detail(): React.JSX.Element | null {
   const t = useT()
   const posts = useStore((s) => s.posts)
-  const index = useStore((s) => s.detailIndex)
+  const detailId = useStore((s) => s.detailId)
   const origin = useStore((s) => s.detailOrigin)
   const close = useStore((s) => s.closeDetail)
   const step = useStore((s) => s.stepDetail)
@@ -87,6 +121,8 @@ export function Detail(): React.JSX.Element | null {
   const panelRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const lastWheel = useRef(0)
+  /** Dernier événement de molette, quel qu'il soit : c'est ce qui délimite un geste. */
+  const lastWheelEvent = useRef(0)
   const [entered, setEntered] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const [mediaIndex, setMediaIndex] = useState(0)
@@ -102,9 +138,21 @@ export function Detail(): React.JSX.Element | null {
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
   const fullscreen = htmlFullscreen || nativeFullscreen
 
-  const post: Post | undefined = index === null ? undefined : posts[index]
+  /* Retrouvé par son identifiant à chaque rendu. La position ne sert qu'aux flèches et aux
+     bornes des boutons : lue telle quelle, elle montrait un autre post dès que la liste
+     bougeait sous la vue — un favori retiré dans « Favoris », un tag posé dans « Sans tag ». */
+  const index = useMemo(
+    () => (detailId === null ? -1 : posts.findIndex((candidate) => candidate.id === detailId)),
+    [posts, detailId]
+  )
+  const post: Post | undefined = index >= 0 ? posts[index] : undefined
 
   const postId = post?.id ?? null
+  /** Le post affiché, lu par les écritures asynchrones qui reviennent après un changement. */
+  const shownId = useRef(postId)
+  useLayoutEffect(() => {
+    shownId.current = postId
+  }, [postId])
   useEffect(() => {
     setTranscript(null)
     if (!postId) return
@@ -189,12 +237,29 @@ export function Detail(): React.JSX.Element | null {
     }
   }, [originTransform])
 
-  /* Chaque post repart de son premier média et recharge ses collections. */
+  /* Chaque post repart de son premier média et recharge ses collections.
+
+     La réponse est annulée si l'on a changé de post entre-temps : en passant vite d'un post à
+     l'autre, une réponse lente arrivait après la suivante et cochait les collections d'un autre
+     post. Et la liste est vidée d'abord, pour ne jamais montrer celles du précédent pendant
+     l'attente. */
   useEffect(() => {
     setMediaIndex(0)
-    if (!post) return
-    void magpie.collectionsForPost(post.id).then(setInCollections)
-  }, [post?.id])
+    setInCollections([])
+    if (!postId) return
+    let cancelled = false
+    magpie
+      .collectionsForPost(postId)
+      .then((ids) => {
+        if (!cancelled) setInCollections(ids)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) notifyError('notice.collectionsReadFailed', error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [postId])
 
   useEffect(() => {
     if (!post || selectedMedia?.kind !== 'image') {
@@ -222,12 +287,16 @@ export function Detail(): React.JSX.Element | null {
     }
   }, [post?.id, selectedMedia?.idx, selectedMedia?.kind, selectedMedia?.thumbUrl])
 
-  useModalFocus(index !== null, panelRef)
+  const showing = post !== undefined
+  useModalFocus(showing, panelRef)
 
+  /* Monté à chaque ouverture, démonté à la fermeture : une lecture suffit. */
   useEffect(() => {
-    if (index === null) return
-    void magpie.listCollections().then(setCollections)
-  }, [index])
+    magpie
+      .listCollections()
+      .then(setCollections)
+      .catch((error: unknown) => notifyError('notice.collectionsReadFailed', error))
+  }, [])
 
   useEffect(() => {
     const update = (): void => setHtmlFullscreen(Boolean(document.fullscreenElement))
@@ -274,8 +343,11 @@ export function Detail(): React.JSX.Element | null {
     [post]
   )
 
+  /* Pas de post affiché, pas de touches : le composant restait monté sans rien rendre quand la
+     position tombait hors de la liste, et son écouteur continuait de répondre depuis le mur —
+     `←` rouvrait un post, `F` passait la fenêtre en plein écran. */
   useEffect(() => {
-    if (index === null) return
+    if (!showing) return
     const onKey = (e: KeyboardEvent): void => {
       // Ne pas capturer les flèches pendant la saisie d'un tag.
       if (e.target instanceof HTMLInputElement) {
@@ -313,17 +385,40 @@ export function Detail(): React.JSX.Element | null {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [fullscreen, index, requestClose, step, stepMedia, toggleFullscreen])
+  }, [fullscreen, showing, requestClose, step, stepMedia, toggleFullscreen])
+
+  /* Le post a quitté la liste sous la vue ouverte : on referme plutôt que de passer au voisin.
+     Passer au voisin enchaînait bien un tri — taguer dans « Sans tag », puis le suivant —, mais
+     le champ de tag garde le focus : le deuxième tag tapé pour le même post partait sur un post
+     qu'on n'avait pas encore regardé. Refermer montre le mur, où le post a visiblement disparu,
+     ce que fait déjà « Retirer ». */
+  useEffect(() => {
+    if (detailId !== null && !showing) requestClose()
+  }, [detailId, showing, requestClose])
 
   /**
    * Molette : un cran vers le bas passe au signet suivant, vers le haut au précédent.
    * Le verrou évite qu'un seul geste de trackpad, qui émet des dizaines d'événements,
    * ne fasse défiler vingt posts d'un coup.
+   *
+   * Sauf au-dessus d'un texte qui défile. Le gestionnaire est posé sur tout le calque, et une
+   * légende longue ou une transcription ne se lisaient plus : chaque cran changeait de post, à
+   * peu près toutes les 320 ms. `overscroll-behavior` n'y pouvait rien — il empêche le défilement
+   * de se propager, pas l'événement. Un bloc qui peut encore défiler dans ce sens garde donc la
+   * molette ; arrivé au bout, il ne la rend qu'à un **nouveau** geste, sans quoi l'inertie d'un
+   * trackpad sautait au post suivant à la dernière ligne lue.
    */
   const onWheel = useCallback(
     (event: React.WheelEvent) => {
+      /* L'heure de l'événement, pas celle du traitement : une fenêtre occupée livre les crans en
+         retard et par paquets, et un geste continu passerait alors pour deux. */
+      const now = event.timeStamp
+      const sameGesture = now - lastWheelEvent.current < WHEEL_GESTURE_GAP
+      lastWheelEvent.current = now
+      const scroll = wheelScrollState(event.target, event.currentTarget, event.deltaY)
+      if (scroll === 'scrolls') return
+      if (scroll === 'at-edge' && sameGesture) return
       if (Math.abs(event.deltaY) < 12) return
-      const now = Date.now()
       if (now - lastWheel.current < 320) return
       lastWheel.current = now
       step(event.deltaY > 0 ? 1 : -1)
@@ -331,7 +426,7 @@ export function Detail(): React.JSX.Element | null {
     [step]
   )
 
-  if (index === null || !post) return null
+  if (detailId === null || !post) return null
 
   const media = selectedMedia
   const isVideo = media?.kind === 'video' && Boolean(
@@ -358,16 +453,21 @@ export function Detail(): React.JSX.Element | null {
   /* Le correctif ne s'applique qu'après l'écriture, et l'échec se dit : une pastille qui se
      coche sur une écriture refusée est un mensonge que rien ne vient corriger. */
   const toggleCollection = async (collection: CollectionInfo): Promise<void> => {
+    /* L'écriture vise le post du clic ; la pastille, elle, n'est cochée que s'il est encore
+       celui qu'on regarde à la réponse. */
+    const target = post.id
     try {
       if (inCollections.includes(collection.id)) {
-        await magpie.removeFromCollection(collection.id, post.id)
-        setInCollections((ids) => ids.filter((id) => id !== collection.id))
+        await magpie.removeFromCollection(collection.id, target)
+        if (shownId.current === target) {
+          setInCollections((ids) => ids.filter((id) => id !== collection.id))
+        }
         notifySuccess('detail.removedFrom', { name: collection.name })
         return
       }
 
-      const result = await magpie.addToCollection(collection.id, [post.id])
-      setInCollections((ids) => [...ids, collection.id])
+      const result = await magpie.addToCollection(collection.id, [target])
+      if (shownId.current === target) setInCollections((ids) => [...ids, collection.id])
       // La clé primaire composite rend le doublon impossible : on rend compte de l'état
       // réel plutôt que de proposer un « réajouter » qui ne ferait rien.
       notifySuccess(result.added > 0 ? 'detail.addedTo' : 'detail.alreadyIn', {
@@ -382,11 +482,12 @@ export function Detail(): React.JSX.Element | null {
     event.preventDefault()
     const name = collectionDraft.trim()
     if (!name) return
+    const target = post.id
     try {
       const created = await magpie.createCollection(name)
       setCollections(await magpie.listCollections())
-      await magpie.addToCollection(created.id, [post.id])
-      setInCollections((ids) => [...ids, created.id])
+      await magpie.addToCollection(created.id, [target])
+      if (shownId.current === target) setInCollections((ids) => [...ids, created.id])
       notifySuccess('detail.addedTo', { name: created.name })
       setCollectionDraft('')
       setCreatingCollection(false)

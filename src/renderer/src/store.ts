@@ -212,8 +212,15 @@ interface State {
   /** Son des aperçus au survol dans la grille. Coupé par défaut : un mur qui se met à
    *  parler quand la souris le traverse serait insupportable. */
   hoverAudio: boolean
-  /** Index du post ouvert en vue détaillée, ou null quand on est sur la grille. */
-  detailIndex: number | null
+  /**
+   * Identifiant du post ouvert en vue détaillée, ou null quand on est sur la grille.
+   *
+   * Un identifiant, et non plus une position dans `posts` : la liste bouge sous la vue ouverte
+   * — retirer un favori dans « Favoris », taguer dans « Sans tag », changer d'étiquette sous un
+   * filtre d'étiquette —, et la même position désignait alors silencieusement un autre post.
+   * La position n'est recalculée que pour avancer d'un cran.
+   */
+  detailId: string | null
   selectionMode: boolean
   selectedIds: string[]
 
@@ -311,9 +318,25 @@ interface State {
 
   /** Rectangle de la carte cliquée, pour que la vue détaillée s'ouvre depuis elle. */
   detailOrigin: { x: number; y: number; width: number; height: number } | null
-  openDetail: (index: number, origin?: DOMRect) => void
+  openDetail: (id: string, origin?: DOMRect) => void
   closeDetail: () => void
   stepDetail: (delta: number) => void
+
+  /**
+   * La carte active du mur, au clavier.
+   *
+   * Dans le store plutôt que dans le DOM : le mur est virtualisé, la carte active sort donc du
+   * document dès qu'on la fait défiler hors de vue. L'identifiant survit, et la carte reprend le
+   * focus en revenant. Chaque carte n'écoute que « est-ce moi ? » : déplacer le focus ne
+   * redessine que les deux cartes concernées.
+   */
+  focusedId: string | null
+  setFocusedId: (id: string | null) => void
+  /** La carte dont l'aperçu tourne sans la souris — `Espace`, l'équivalent clavier du survol. */
+  previewId: string | null
+  setPreviewId: (id: string | null) => void
+  /** Ajoute des posts à la sélection, et passe en mode sélection : `Maj`+clic, `Ctrl`+clic. */
+  selectIds: (ids: string[]) => void
   addTag: (postId: string, name: string) => Promise<void>
   removeTag: (postId: string, name: string) => Promise<void>
   setLabel: (postId: string, label: LabelColor | null) => Promise<void>
@@ -366,11 +389,13 @@ export const useStore = create<State>()(
       volume: 0.7,
       muted: false,
       hoverAudio: false,
-      detailIndex: null,
+      detailId: null,
       selectionMode: false,
       selectedIds: [],
       selecting: false,
       detailOrigin: null,
+      focusedId: null,
+      previewId: null,
       scrollTop: 0,
 
       accounts: [],
@@ -545,7 +570,7 @@ export const useStore = create<State>()(
         /* Une sélection appartient au jeu de résultats qui l'a produite : changer de filtre la
            vide, sans quoi la barre annonçait « 40 sélectionnés » alors qu'aucun des quarante
            n'était à l'écran — et les actions groupées s'appliquaient bien à ces quarante-là. */
-        set({ query: { ...get().query, ...patch }, scrollTop: 0, detailIndex: null, selectedIds: [] })
+        set({ query: { ...get().query, ...patch }, scrollTop: 0, detailId: null, selectedIds: [] })
         flushDeferredUiStorage()
         void get().refresh(true)
       },
@@ -565,7 +590,7 @@ export const useStore = create<State>()(
             collectionIds: []
           },
           scrollTop: 0,
-          detailIndex: null,
+          detailId: null,
           selectedIds: []
         })
         flushDeferredUiStorage()
@@ -584,7 +609,7 @@ export const useStore = create<State>()(
         set({
           query: clearedQuery(get().query),
           scrollTop: 0,
-          detailIndex: null,
+          detailId: null,
           selectedIds: []
         })
         flushDeferredUiStorage()
@@ -918,15 +943,27 @@ export const useStore = create<State>()(
 
       setIsDark: (isDark) => set({ isDark }),
 
-      openDetail: (detailIndex, origin) =>
+      openDetail: (detailId, origin) =>
         set({
-          detailIndex,
+          detailId,
           detailOrigin: origin
             ? { x: origin.x, y: origin.y, width: origin.width, height: origin.height }
             : null
         }),
 
-      closeDetail: () => set({ detailIndex: null, detailOrigin: null }),
+      closeDetail: () => set({ detailId: null, detailOrigin: null }),
+
+      setFocusedId: (focusedId) => {
+        if (get().focusedId !== focusedId) set({ focusedId })
+      },
+      setPreviewId: (previewId) => {
+        if (get().previewId !== previewId) set({ previewId })
+      },
+      selectIds: (ids) => {
+        const selected = new Set(get().selectedIds)
+        for (const id of ids) selected.add(id)
+        set({ selectionMode: true, selectedIds: [...selected] })
+      },
 
       addTag: async (postId, name) => {
         try {
@@ -1008,20 +1045,25 @@ export const useStore = create<State>()(
         }
       },
 
-      /** Navigation dans la vue détaillée, bornée aux extrémités plutôt que circulaire. */
+      /** Navigation dans la vue détaillée, bornée aux extrémités plutôt que circulaire. La
+       *  position est relue à chaque pas : c'est l'identifiant qui fait foi. */
       stepDetail: (delta) => {
-        const { detailIndex, posts, hasMore } = get()
-        if (detailIndex === null || posts.length === 0) return
-        if (delta > 0 && detailIndex === posts.length - 1 && hasMore) {
-          const currentId = posts[detailIndex].id
+        const { detailId, posts, hasMore } = get()
+        if (detailId === null) return
+        const at = posts.findIndex((post) => post.id === detailId)
+        if (at < 0) return
+        if (delta > 0 && at === posts.length - 1 && hasMore) {
           void get().loadMore().then(() => {
-            const current = get().posts.findIndex((post) => post.id === currentId)
-            if (current >= 0 && current + 1 < get().posts.length) set({ detailIndex: current + 1 })
+            /* On a pu fermer, ou passer à un autre post, pendant le chargement. */
+            if (get().detailId !== detailId) return
+            const current = get().posts.findIndex((post) => post.id === detailId)
+            const next = current >= 0 ? get().posts[current + 1] : undefined
+            if (next) set({ detailId: next.id })
           })
           return
         }
-        const next = Math.min(posts.length - 1, Math.max(0, detailIndex + delta))
-        if (next !== detailIndex) set({ detailIndex: next })
+        const next = posts[Math.min(posts.length - 1, Math.max(0, at + delta))]
+        if (next && next.id !== detailId) set({ detailId: next.id })
       },
 
       loadAccounts: async (): Promise<void> => {

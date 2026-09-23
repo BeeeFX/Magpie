@@ -37,13 +37,31 @@ interface Props {
   copied: boolean
   selectionMode: boolean
   selected: boolean
-  onToggleSelected: (id: string) => void
+  /** `toggle` coche ou décoche une carte ; `range` va de la dernière carte touchée à celle-ci. */
+  onSelect: (id: string, how: 'toggle' | 'range') => void
 }
 
 /** Cadence de défilement d'un carrousel au survol. */
 const CAROUSEL_INTERVAL = 1400
 /** Laisse le temps de franchir le petit espace entre l'icône et le curseur. */
 const VOLUME_CLOSE_DELAY = 420
+/** Assez pour reconnaître un post, assez peu pour qu'un lecteur d'écran passe à la suite. */
+const OPEN_LABEL_CHARS = 80
+
+/**
+ * Le début d'une légende, coupé à un mot.
+ *
+ * Le bouton d'ouverture prenait la légende **entière** pour nom — jusqu'à deux mille caractères
+ * sur Instagram : un lecteur d'écran la lisait avant chaque carte, passer à la suivante la
+ * coupait au milieu d'un mot, et rien ne disait de qui était le post.
+ */
+function excerpt(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  if (flat.length <= max) return flat
+  const cut = flat.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.–—-]+$/, '')}…`
+}
 
 function CardImpl({
   item,
@@ -56,7 +74,7 @@ function CardImpl({
   copied,
   selectionMode,
   selected,
-  onToggleSelected
+  onSelect
 }: Props): React.JSX.Element {
   const t = useT()
   const sort = useStore((state) => state.query.sort)
@@ -67,6 +85,11 @@ function CardImpl({
   const setVolume = useStore((s) => s.setVolume)
   const setMuted = useStore((s) => s.setMuted)
   const { post } = item
+  /* Des booléens, pas les identifiants : déplacer le focus ou l'aperçu ne redessine que la
+     carte qui les perd et celle qui les prend, pas les soixante autres. */
+  const focused = useStore((s) => s.focusedId === post.id)
+  const previewing = useStore((s) => s.previewId === post.id)
+  const setFocusedId = useStore((s) => s.setFocusedId)
   /* Quelle date montrer : celle sur laquelle le mur est trié. Le mur est ordonné par « Date de
      sauvegarde » — le tri par défaut — et la carte n'affichait que la date de **publication**.
      Sur les tris qui n'ordonnent pas par date — auteur, plateforme, aléatoire — la date de
@@ -77,13 +100,31 @@ function CardImpl({
   /** Fichier de vignette référencé mais illisible : mieux vaut le dire qu'un carré noir. */
   const [broken, setBroken] = useState(false)
   const [hovered, setHovered] = useState(false)
+  /** Le survol, ou son équivalent clavier : ce qui anime la carte. */
+  const live = hovered || previewing
   const [index, setIndex] = useState(0)
   const [videoReady, setVideoReady] = useState(false)
   const [streamedVideoUrl, setStreamedVideoUrl] = useState<string | null>(null)
   const [volumeOpen, setVolumeOpen] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const rootRef = useRef<HTMLElement>(null)
+  const openRef = useRef<HTMLButtonElement>(null)
   const volumeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /* La carte active reprend le focus en revenant dans le DOM. La virtualisation la démonte dès
+     qu'elle sort de la fenêtre de rendu — les flèches la font justement défiler hors de vue —,
+     et le focus retombait alors sur `<body>`, où la touche suivante ne trouvait plus rien.
+
+     Seulement si le focus est au mur ou nulle part : une carte qui remonte pendant qu'on tape
+     une recherche ne vient pas le voler au champ. */
+  useEffect(() => {
+    const button = openRef.current
+    if (!focused || !button) return
+    const active = document.activeElement
+    if (active && rootRef.current?.contains(active)) return
+    const idle = !active || active === document.body
+    if (idle || active.closest('.grid')) button.focus({ preventScroll: true })
+  }, [focused])
 
   const media = post.media
   const current = media[index] ?? media[0]
@@ -112,20 +153,21 @@ function CardImpl({
     []
   )
 
-  /* Un carrousel défile tant que la souris reste dessus, et repart de la première image
-     quand elle sort — revenir sur une carte doit toujours montrer la même chose. */
+  /* Un carrousel défile tant que la souris reste dessus — ou que l'aperçu clavier tourne —, et
+     repart de la première image quand elle sort : revenir sur une carte doit toujours montrer
+     la même chose. */
   useEffect(() => {
-    if (!hovered || !isCarousel) {
+    if (!live || !isCarousel) {
       setIndex(0)
       return
     }
     const id = setInterval(() => setIndex((i) => (i + 1) % media.length), CAROUSEL_INTERVAL)
     return () => clearInterval(id)
-  }, [hovered, isCarousel, media.length])
+  }, [live, isCarousel, media.length])
 
   useEffect(() => {
-    if (!hovered) setVideoReady(false)
-  }, [hovered])
+    if (!live) setVideoReady(false)
+  }, [live])
 
   useEffect(() => {
     setStreamedVideoUrl(null)
@@ -147,7 +189,7 @@ function CardImpl({
 
   useEffect(() => {
     if (
-      !hovered ||
+      !live ||
       current?.kind !== 'video' ||
       current.videoUrl ||
       streamedVideoUrl
@@ -162,9 +204,9 @@ function CardImpl({
     return () => {
       cancelled = true
     }
-  }, [current?.idx, current?.kind, current?.videoUrl, hovered, post.id, streamedVideoUrl])
+  }, [current?.idx, current?.kind, current?.videoUrl, live, post.id, streamedVideoUrl])
 
-  const videoUrl = hovered ? (current?.videoUrl ?? streamedVideoUrl) : null
+  const videoUrl = live ? (current?.videoUrl ?? streamedVideoUrl) : null
 
   /* Le son des aperçus suit le réglage global. Il reste coupé par défaut, et la lecture
      est relancée à chaque clip : un refus d'autoplay est avalé sans bruit. */
@@ -284,7 +326,7 @@ function CardImpl({
 
       {/* Vue courante du carrousel, superposée en fondu. Les suivantes ne sont chargées
           qu'au survol : une grille de carrousels ne tire pas cinq images par carte. */}
-      {hovered && isCarousel && index > 0 && current?.thumbUrl ? (
+      {live && isCarousel && index > 0 && current?.thumbUrl ? (
         <img key={index} src={current.thumbUrl} alt="" draggable={false} className="card__slide" />
       ) : null}
 
@@ -344,12 +386,27 @@ function CardImpl({
     </div>
   ) : null
 
+  /* Un clic ouvre. Avec `Maj`, il sélectionne la plage qui va de la dernière carte touchée à
+     celle-ci ; avec `Ctrl` ou `⌘`, il coche cette seule carte. Les deux font entrer dans le mode
+     sélection : c'est lui qui montre le compteur et les actions, et une sélection qu'on ne voit
+     pas n'en est pas une. */
+  const activate = (event: React.MouseEvent, element: HTMLElement): void => {
+    if (event.shiftKey) onSelect(post.id, 'range')
+    else if (event.ctrlKey || event.metaKey || selectionMode) onSelect(post.id, 'toggle')
+    else onOpen(post, element)
+  }
+
+  const openLabel = post.text?.trim()
+    ? t('card.openLabel', { who: displayName(post), excerpt: excerpt(post.text, OPEN_LABEL_CHARS) })
+    : t('card.openLabelBare', { who: displayName(post) })
+
   return (
     <article
       ref={rootRef as React.RefObject<HTMLElement>}
+      data-id={post.id}
       className={`card card--${mode} ${post.label ? 'is-labelled' : ''} ${selected ? 'is-selected' : ''} ${
-        isLightColor(post.dominantColor) ? 'is-light' : ''
-      }`}
+        previewing ? 'is-previewing' : ''
+      } ${isLightColor(post.dominantColor) ? 'is-light' : ''}`}
       style={
         {
           '--x': `${item.x}px`,
@@ -362,9 +419,8 @@ function CardImpl({
       }
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={(e) =>
-        selectionMode ? onToggleSelected(post.id) : onOpen(post, e.currentTarget)
-      }
+      onFocus={() => setFocusedId(post.id)}
+      onClick={(event) => activate(event, event.currentTarget)}
     >
       {/*
         Ouvrir est un bouton en plein cadre, et non un `role="button"` posé sur l'article.
@@ -379,14 +435,15 @@ function CardImpl({
         disparaissent d'un coup : il n'y a plus d'ancêtre à qui la touche puisse remonter.
       */}
       <button
+        ref={openRef}
         type="button"
         className="card__open"
-        aria-label={post.text ?? post.authorName ?? post.authorHandle ?? post.url}
+        /* L'auteur et le début du texte, pas la légende entière : voir `excerpt`. */
+        aria-label={openLabel}
         {...(selectionMode ? { 'aria-pressed': selected } : {})}
         onClick={(event) => {
           event.stopPropagation()
-          if (selectionMode) onToggleSelected(post.id)
-          else onOpen(post, event.currentTarget.parentElement as HTMLElement)
+          activate(event, event.currentTarget.parentElement as HTMLElement)
         }}
       />
       {selectionMode ? (

@@ -543,6 +543,17 @@ troisième dessine sur un canevas.
 - Un **carrousel défile** ses vues en fondu, avec des points de position, et revient à la première
   image quand la souris sort. Les vues suivantes ne sont chargées qu'au survol.
 
+**Le mur se parcourt aussi au clavier.** Les flèches passent d'une carte à sa voisine. Un mur en
+colonnes n'a pas de rangées, donc la voisine se cherche dans la géométrie de la mise en page :
+`↑` et `↓` suivent la colonne, `←` et `→` passent à la colonne d'à côté, jamais plus loin, sur la
+carte la mieux alignée. La carte active est tenue par son identifiant et non par le DOM — le mur
+est virtualisé, elle en sort dès qu'on la fait défiler hors de vue — et reprend le focus en
+revenant ; au bas de ce qui est chargé, `↓` charge la suite. `Espace` lance l'**aperçu**, c'est-à-
+dire ce que fait le survol : la vidéo se lit, le carrousel défile, et l'aperçu suit ensuite le
+focus comme il suit la souris. `Entrée` ouvre le post, `Échap` arrête l'aperçu, puis quitte la
+sélection. Le focus clavier montre les actions de la carte, que la souris seule faisait
+apparaître.
+
 ### La carte, gestes compris
 
 Survoler un point le lit ; cliquer l'ouvre dans un **panneau redimensionnable à côté de la carte**,
@@ -583,6 +594,11 @@ rapide de l'interface — on le voit sans lire, ce qu'aucun tag ne permet.
 - Collections : un post peut appartenir à plusieurs ; création par une phrase depuis le rail de la
   carte, ou à la main depuis la barre latérale.
 - **Sélection en masse** : mode sélection, puis « Ajouter à la collection », tags, favoris.
+  `Ctrl+A` prend **tout le résultat** — pas seulement la tranche chargée —, `Maj`+clic une plage
+  depuis la dernière carte touchée, dans l'ordre du mur, et `Ctrl`+clic une seule carte. Les
+  trois font entrer en mode sélection : une sélection qu'on ne voit pas n'en est pas une. La
+  plage s'ajoute à ce qui est coché plutôt que de le remplacer. Dans un champ, `Ctrl+A` garde son
+  sens : sélectionner le texte.
 - **Doublons** : la contrainte de clé primaire les rend impossibles. Quand une partie de la
   sélection est déjà dans la collection, un dialogue annonce le décompte et propose d'ajouter le
   reste.
@@ -599,6 +615,16 @@ arrière-plan si on ferme, et le dernier classement appliqué s'annule en un cli
 Une vue modale par-dessus la grille : média plein, carrousel, lecteur vidéo avec choix de qualité,
 plein écran, texte complet, tags éditables, collections, favori, copie du lien, ouverture sur la
 plateforme. Flèches pour passer d'un post à l'autre, `Échap` pour sortir.
+
+La molette passe aussi d'un post à l'autre, **sauf au-dessus d'un texte qui défile encore** — une
+légende longue, une transcription : elle le fait défiler, et arrivée au bout ne rend la main
+qu'à un nouveau geste, pour que l'inertie d'un trackpad ne saute pas au post suivant à la
+dernière ligne lue.
+
+La vue suit **le post**, pas une position dans la liste. Quand le post quitte la liste sous elle —
+favori retiré dans « Favoris », tag posé dans « Sans tag », autre étiquette sous un filtre
+d'étiquette —, elle se referme plutôt que de passer au voisin : le champ de tag garde le focus,
+et le deuxième tag tapé pour ce post partirait sur un post qu'on n'a pas encore regardé.
 
 ### Copie — l'usage central
 
@@ -752,9 +778,10 @@ sélection, comme promis.
 **§9 — « Voir en vrai ».** Aucune webview, et le renderer tourne en bac à sable. Le bouton ouvre
 la page dans le navigateur du système. C'est la position la plus sûre, et elle est assumée.
 
-**§9 — Raccourcis de la grille.** `Ctrl+B`, `Ctrl+,` et `Ctrl+K` existent. Les flèches, `Espace`
-pour l'aperçu, `F`, `T`, `C`, `Ctrl+A` et `Maj`+clic pour une plage n'existent pas : la sélection
-se fait une carte à la fois.
+**§9 — Raccourcis de la grille.** `F`, `T` et `C` sur la carte active — favori, tag, copie du
+lien — n'existent pas, ni `Ctrl+C` pour copier les liens de la sélection : il faut passer par la
+barre de sélection. Ce que la fiche des raccourcis annonce pour le mur est tenu par
+`check:shortcuts`, qui refuse une ligne dont il ne trouve pas le câblage.
 
 **§9 — Doublons.** L'avertissement est une boîte système avec un décompte, sans « voir lesquels »
 ni « ajouter les autres » séparément.

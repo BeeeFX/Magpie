@@ -7116,3 +7116,29 @@ html.window-is-moving .app *::after {
 .card__diagnostic {
   z-index: 3;
 }
+
+/* Le clavier voit ce que voit la souris. Les actions et les flèches de carrousel n'existaient
+   qu'au survol : en tabulant dans une carte, on posait le focus sur « Copier le lien » sans
+   rien voir s'allumer, à l'aveugle. `:has(:focus-visible)` plutôt que `:focus-within` : le clic
+   de souris sur l'étoile donne lui aussi le focus, et les actions restaient alors affichées
+   une fois la souris partie. L'aperçu lancé par `Espace` montre les points du carrousel,
+   comme le survol. */
+.card:has(:focus-visible) {
+  z-index: 4;
+}
+
+.card:has(:focus-visible) .card__actions,
+.card:has(:focus-visible) .card__media-nav,
+.card:has(:focus-visible) .card__dots,
+.card:has(:focus-visible) .card__overlay,
+.card.is-previewing .card__dots {
+  opacity: 1;
+}
+
+.card:has(:focus-visible) .icon-btn {
+  transform: scale(1);
+}
+
+.card:has(:focus-visible) .card__badge {
+  opacity: 0;
+}
