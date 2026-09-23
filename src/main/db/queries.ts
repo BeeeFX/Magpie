@@ -12,7 +12,7 @@ import type {
   VideoQuality
 } from '@shared/types'
 import { CONTENT_SOURCES, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
-import { MEDIA_UPSERT_SQL } from './media-upsert'
+import { MEDIA_UPSERT_SQL, THUMB_AWAITING_LINK } from './media-upsert'
 import { getDb } from './index'
 import { searchClause } from './search'
 
@@ -399,9 +399,12 @@ function attachMedia(posts: Post[]): void {
       // déclarait pourtant « en préparation » : la carte tournait indéfiniment sur une
       // attente qui n'arriverait jamais. Mieux vaut annoncer qu'il n'y aura pas d'aperçu,
       // ce qui invite d'ailleurs à survoler pour lire.
+      /* Une vignette qui attend un lien neuf n'a pas échoué : « en préparation » est exact,
+         et c'est ce qui fait que la grille la redemande — donc que son lien se renouvelle. */
       thumbStatus: row.thumb_path
         ? 'ready'
-        : !(row.source_path || /^https?:/i.test(row.remote_url ?? '')) || row.thumb_attempts >= 3
+        : !(row.source_path || /^https?:/i.test(row.remote_url ?? '')) ||
+            (row.thumb_attempts >= 3 && row.thumb_attempts !== THUMB_AWAITING_LINK)
           ? 'failed'
           : 'pending',
       width: row.width,
@@ -1179,6 +1182,78 @@ export function upsertPosts(
   })
 
   run()
+}
+
+/**
+ * Réenregistre les liens média de posts déjà connus, et rien d'autre.
+ *
+ * Le renouvellement d'un lien expiré passait par `upsertPosts`, dont l'origine vaut `'saved'`
+ * par défaut : ouvrir la vidéo d'un post seulement liké lui ajoutait une ligne de signet. Le
+ * post apparaissait alors dans « Signets », gonflait leur décompte, et ne pouvait plus en
+ * sortir — la synchronisation suivante n'avait aucune raison de retirer une origine qu'elle
+ * n'avait pas écrite. Un renouvellement ne dit rien de l'endroit où le post a été rangé : on ne
+ * touche donc ni à `post_sources`, ni à `discovered_at`, ni aux rangs, ni au texte.
+ *
+ * Délibérément à part de `upsertPosts`, qui évolue de son côté : les deux partagent
+ * `MEDIA_UPSERT_SQL`, c'est-à-dire la seule règle qui compte ici — un lien resigné garde la
+ * vignette et le clip, et rend ses tentatives à une vignette qui n'existe pas encore.
+ *
+ * Un post inconnu est ignoré plutôt que recréé : retiré entre-temps, il n'a rien à renouveler.
+ * Rend le nombre de posts effectivement mis à jour.
+ */
+export function refreshPostMedia(posts: PostInput[], media: MediaInput[]): number {
+  const db = getDb()
+  const known = db.prepare('SELECT media_count FROM posts WHERE id = ?')
+  const setCount = db.prepare('UPDATE posts SET media_count = ? WHERE id = ?')
+  const mediaStmt = db.prepare(MEDIA_UPSERT_SQL)
+  const trimMedia = db.prepare('DELETE FROM media WHERE post_id = ? AND idx >= ?')
+  const trimVariants = db.prepare('DELETE FROM media_variants WHERE post_id = ? AND idx >= ?')
+  const deleteVariants = db.prepare('DELETE FROM media_variants WHERE post_id = ? AND idx = ?')
+  const variantStmt = db.prepare(/* sql */ `
+    INSERT INTO media_variants (post_id, idx, quality, source, width, height, bitrate)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const updated = new Set<string>()
+  db.transaction(() => {
+    for (const p of posts) {
+      const row = known.get(p.id) as { media_count: number } | undefined
+      if (!row) continue
+      updated.add(p.id)
+      const count = p.mediaCount ?? 0
+      /* Un carrousel peut avoir perdu une vue. Une réponse sans aucun média, elle, ne prouve
+         rien : on ne vide pas un post sur la foi d'un payload incomplet. */
+      if (count > 0) {
+        if (row.media_count !== count) setCount.run(count, p.id)
+        trimMedia.run(p.id, count)
+        trimVariants.run(p.id, count)
+      }
+    }
+    for (const m of media) {
+      if (!updated.has(m.postId)) continue
+      mediaStmt.run({
+        post_id: m.postId,
+        idx: m.idx,
+        kind: m.kind,
+        remote_url: m.remoteUrl ?? null,
+        source_path: m.sourcePath ?? null,
+        video_source: m.videoSource ?? null
+      })
+      deleteVariants.run(m.postId, m.idx)
+      for (const variant of m.videoVariants ?? []) {
+        variantStmt.run(
+          m.postId,
+          m.idx,
+          variant.quality,
+          variant.source,
+          variant.width ?? null,
+          variant.height ?? null,
+          variant.bitrate ?? null
+        )
+      }
+    }
+  })()
+  return updated.size
 }
 
 /**
@@ -1991,6 +2066,52 @@ export function markThumbnailFailure(postId: string, idx: number): void {
     .run(postId, idx)
 }
 
+/**
+ * Sort une vignette de la file jusqu'à ce qu'un lien neuf arrive, sans lui compter d'échec.
+ *
+ * Conditionnée au lien qu'on a vu périmer : un renouvellement peut s'être glissé entre la
+ * lecture de la file et cette écriture, et poser l'attente sur un lien déjà neuf la laisserait
+ * dormir jusqu'au renouvellement suivant.
+ */
+export function awaitFreshThumbnailLink(postId: string, idx: number, remoteUrl: string | null): void {
+  getDb()
+    .prepare(
+      `UPDATE media SET thumb_attempts = ?
+        WHERE post_id = ? AND idx = ? AND thumb_path IS NULL AND remote_url IS ?`
+    )
+    .run(THUMB_AWAITING_LINK, postId, idx, remoteUrl)
+}
+
+export interface ThumbnailLinkRow {
+  post_id: string
+  platform: Platform
+  remote_url: string
+  thumb_attempts: number
+}
+
+/**
+ * Les vignettes manquantes de ces posts, avec leur lien : de quoi décider lesquelles attendent
+ * un renouvellement. La décision elle-même vit dans `media/links.ts`, qui sait lire une date
+ * d'expiration dans une URL ; ici, on ne fait que la matière.
+ */
+export function thumbnailLinksForPosts(postIds: string[]): ThumbnailLinkRow[] {
+  const ids = [...new Set(postIds)].filter(Boolean).slice(0, 500)
+  if (ids.length === 0) return []
+  const placeholders = ids.map(() => '?').join(',')
+  return getDb()
+    .prepare(
+      `SELECT m.post_id, p.platform, m.remote_url, m.thumb_attempts
+         FROM media m JOIN posts p ON p.id = m.post_id
+        WHERE m.post_id IN (${placeholders})
+          AND p.is_demo = 0
+          AND m.thumb_path IS NULL
+          AND m.source_path IS NULL
+          AND m.remote_url LIKE 'http%'
+          AND (m.thumb_attempts < 3 OR m.thumb_attempts = ?)`
+    )
+    .all(...ids, THUMB_AWAITING_LINK) as ThumbnailLinkRow[]
+}
+
 export function setVideo(postId: string, idx: number, videoPath: string): void {
   getDb()
     .prepare(
@@ -2000,13 +2121,19 @@ export function setVideo(postId: string, idx: number, videoPath: string): void {
     .run(videoPath, postId, idx)
 }
 
+/**
+ * `skipped` veut dire « pas de place », pas « clip impossible » : il sort le clip de la file
+ * jusqu'à la prochaine purge ou le prochain plafond relevé, sans lui coûter de tentative. Il en
+ * coûtait une, si bien qu'au troisième cache plein un clip était abandonné pour de bon.
+ */
 export function markVideoCacheResult(postId: string, idx: number, state: 'skipped' | 'pending'): void {
   getDb()
     .prepare(
-      `UPDATE media SET video_cache_state = ?, video_attempts = video_attempts + 1
+      `UPDATE media SET video_cache_state = ?,
+              video_attempts = video_attempts + CASE WHEN ? = 'skipped' THEN 0 ELSE 1 END
        WHERE post_id = ? AND idx = ?`
     )
-    .run(state, postId, idx)
+    .run(state, state, postId, idx)
 }
 
 export function pendingVideos(rawLimit = 150): PendingMedia[] {

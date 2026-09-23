@@ -52,7 +52,7 @@ import { backgroundTasks } from './tasks'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
-import { parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
+import { linkRefresher, parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
 import { streamMedia } from './adapters/http'
 
 const isDev = !app.isPackaged
@@ -514,6 +514,9 @@ const requestedThumbnailPostIds = new Set<string>()
 function requestThumbnailDrain(postIds: string[]): void {
   void touchCachedThumbnails(postIds)
   for (const id of postIds) requestedThumbnailPostIds.add(id)
+  /* Ce qu'on regarde et dont le lien a passé part se faire renouveler, au rythme de la
+     plateforme ; le renouvellement rappelle cette fonction pour ces posts-là. */
+  linkRefresher.request(postIds)
   void drainMediaQueue()
 }
 
@@ -770,7 +773,9 @@ async function drainMediaQueue(): Promise<void> {
       // mais *derrière* les identifiants arrivés entre-temps. Un Set conserve son ordre
       // d'insertion, si bien que la position courante repasse naturellement devant ce
       // qu'on a déjà dépassé.
-      if (result.hasMore && !sweeping) {
+      /* Sauf quand une vignette n'a pas trouvé de place : elle ne perd plus de tentative, donc
+         rien ne l'userait, et la reprendre aussitôt ferait tourner la file contre le même mur. */
+      if (result.hasMore && !sweeping && !result.thumbnailQuota) {
         for (const id of requested) requestedThumbnailPostIds.add(id)
       }
 
@@ -902,6 +907,7 @@ async function bootstrap(): Promise<void> {
 
 if (isPrimaryInstance) void app.whenReady().then(async () => {
   registerMediaProtocol()
+  linkRefresher.onRefreshed(requestThumbnailDrain)
   registerIpc({
     onThemeChange: syncTheme,
     drainMedia: () => void drainMediaQueue(),
