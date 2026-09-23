@@ -11,9 +11,11 @@ import type {
   PostQuery,
   Settings,
   SyncState,
+  TagTally,
   UpdateState
 } from '@shared/types'
 import { idleSyncState, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
+import { normalizeTagName } from '@shared/tags'
 
 /**
  * Accès au processus principal.
@@ -59,11 +61,20 @@ function previewStats(posts: Post[]): LibraryStats {
       liked: posts.filter((post) => post.sources?.includes('liked')).length
     },
     byLabel: {},
-    topTags: [...counts.entries()]
-      .map(([name, count]) => ({ name, count, source: 'rule' as const }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 40)
+    topTags: previewTags(posts).slice(0, 40),
+    tagCount: counts.size
   }
+}
+
+/** Les tags de la fixture, du plus porté au moins porté : de quoi relire la complétion. */
+function previewTags(posts: Post[]): TagTally[] {
+  const counts = new Map<string, number>()
+  for (const post of posts) {
+    for (const tag of post.tags) counts.set(tag.name, (counts.get(tag.name) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count, source: 'rule' as const }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 }
 
 /** En aperçu, les réglages vivent dans le localStorage plutôt que sur disque. */
@@ -205,7 +216,7 @@ const previewApi: MagpieApi = {
   getStats: async () => previewStats(await previewPosts()),
   toggleFavorite: async () => false,
   setFavoriteMany: async () => {},
-  addTagMany: async () => {},
+  addTagMany: async (_ids, name) => normalizeTagName(name) || null,
   removeTagMany: async () => {},
   postUrls: async (ids) => (await previewPosts()).filter((p) => ids.includes(p.id)).map((p) => p.url),
   // Une clé fictivement « présente » permet de tester le parcours d'organisation dans
@@ -442,7 +453,7 @@ const previewApi: MagpieApi = {
   // courant sans rien modifier, plutôt que de simuler une persistance qui mentirait.
   setLabel: async () => {},
   setCollectionColor: async () => {},
-  addTag: async () => {},
+  addTag: async (_postId, name) => normalizeTagName(name) || null,
   removeTag: async () => {},
   listCollections: async () => [],
   createCollection: async (name) => ({ id: 0, name, count: 0, color: null, kind: 'manual' }),
@@ -479,6 +490,8 @@ const previewApi: MagpieApi = {
   getSyncState: async () => IDLE_SYNC,
   loadDemoData: async () => 0,
   removeDemoData: async () => 0,
+
+  listTags: async () => previewTags(await previewPosts().catch(() => [])),
 
   platform: 'browser-preview' as NodeJS.Platform
 }

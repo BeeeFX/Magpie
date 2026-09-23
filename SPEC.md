@@ -559,6 +559,17 @@ rapide de l'interface — on le voit sans lire, ce qu'aucun tag ne permet.
 ### Tags et collections
 
 - Tags multiples par post, filtrage par combinaison.
+- **Un nom de tag est normalisé des deux côtés** (`src/shared/tags.ts`) : dièse de tête retiré,
+  espaces resserrés, forme Unicode composée, 80 caractères. Taper « #chats » posait une puce
+  « #chats » qui ne filtrait rien, la base ayant écrit « chats » ; le geste groupé, lui, gardait
+  le dièse en base. La comparaison suit `NOCASE` — qui ne replie que l'ASCII — et la casse d'un tag
+  déjà connu l'emporte sur la frappe.
+- **Complétion** : le champ de la vue détaillée et les formulaires « Tag » et « Retirer un tag »
+  de la barre de sélection proposent les tags existants, du plus porté au moins porté. Le retrait
+  propose les tags **de la sélection** quand tous ses posts sont chargés, tous les tags sinon.
+- La barre latérale montre huit tags ; « Voir les N tags » les montre **tous** — N est le vrai
+  nombre, et non plus les quarante que recevaient les statistiques. Au-delà de trente, un filtre ;
+  au-delà de trois cents lignes dessinées, le filtre est le seul chemin, et la liste le dit.
 - Collections : un post peut appartenir à plusieurs ; création par une phrase depuis le rail de la
   carte, ou à la main depuis la barre latérale.
 - **Sélection en masse** : mode sélection, puis « Ajouter à la collection », tags, favoris.
@@ -728,8 +739,6 @@ se fait une carte à la fois.
 ni « ajouter les autres » séparément.
 
 **§9 — Nitrate en sélection multiple.** Un post à la fois.
-
-**§9 — Complétion des tags.** Le champ est libre, sans suggestions.
 
 **§9 — Couverture de collection.** `collections.cover_post_id` existe en base, et rien ne le pose.
 

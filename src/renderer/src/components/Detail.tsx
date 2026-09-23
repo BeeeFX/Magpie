@@ -13,6 +13,8 @@ import {
 } from '../format'
 import { notifyError, notifySuccess, reportFailure } from '../notices'
 import { useStore, useT } from '../store'
+import { suggestTags, useAllTags } from '../tag-suggestions'
+import { normalizeTagName } from '@shared/tags'
 import { LabelPicker } from './LabelPicker'
 import { ConfirmButton } from './ConfirmButton'
 import { IconArchive } from './Icons'
@@ -92,6 +94,10 @@ export function Detail(): React.JSX.Element | null {
   const [mediaIndex, setMediaIndex] = useState(0)
   const [copied, setCopied] = useState(false)
   const [tagDraft, setTagDraft] = useState('')
+  /* Les tags existants ne sont demandés qu'au premier passage dans le champ : on parcourt
+     beaucoup de posts sans en taguer aucun. */
+  const [wantsTags, setWantsTags] = useState(false)
+  const allTags = useAllTags(wantsTags)
   const [collections, setCollections] = useState<CollectionInfo[]>([])
   const [inCollections, setInCollections] = useState<number[]>([])
   const [creatingCollection, setCreatingCollection] = useState(false)
@@ -349,7 +355,7 @@ export function Detail(): React.JSX.Element | null {
 
   const submitTag = (e: React.FormEvent): void => {
     e.preventDefault()
-    const name = tagDraft.trim()
+    const name = normalizeTagName(tagDraft)
     if (!name) return
     setTagDraft('')
     void addTag(post.id, name)
@@ -613,8 +619,24 @@ export function Detail(): React.JSX.Element | null {
                 className="detail__input"
                 value={tagDraft}
                 placeholder={t('detail.addTag')}
+                aria-label={t('detail.addTag')}
+                maxLength={120}
+                list="detail-tag-suggestions"
+                autoComplete="off"
+                onFocus={() => setWantsTags(true)}
                 onChange={(e) => setTagDraft(e.target.value)}
               />
+              {/* Les tags déjà en usage, sauf ceux que le post porte : taper « voy » propose
+                  « voyage » plutôt que de laisser naître « voyages » à côté. */}
+              <datalist id="detail-tag-suggestions">
+                {suggestTags(
+                  allTags,
+                  tagDraft,
+                  post.tags.map((tag) => tag.name)
+                ).map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
             </form>
           </section>
 

@@ -487,6 +487,14 @@ export interface LibraryStats {
   /** Nombre de posts par étiquette de couleur ; les teintes inutilisées sont absentes. */
   byLabel: Partial<Record<LabelColor, number>>
   topTags: { name: string; count: number; source: TagSource }[]
+  /**
+   * Combien de tags distincts existent, au-delà des quarante de `topTags`.
+   *
+   * Sans lui, « Voir les 40 tags » était tout ce que la barre latérale pouvait dire — alors
+   * qu'une vraie bibliothèque en porte des milliers, et que le quarante et unième n'était
+   * joignable nulle part.
+   */
+  tagCount: number
 }
 
 /** Surface IPC exposée au renderer via contextBridge. */
@@ -501,7 +509,8 @@ export interface MagpieApi {
   setFavoriteMany(ids: string[], value: boolean): Promise<void>
   removeTagMany(ids: string[], name: string): Promise<void>
   postUrls(ids: string[]): Promise<string[]>
-  addTagMany(ids: string[], name: string): Promise<void>
+  /** Rend le nom tel que la base le garde — sans dièse, et dans la casse d'un tag déjà connu. */
+  addTagMany(ids: string[], name: string): Promise<string | null>
   hasAiKey(provider: AiProvider): Promise<boolean>
   setAiKey(provider: AiProvider, key: string): Promise<void>
   startAiTagging(postIds?: string[]): Promise<AiTagProgress>
@@ -583,7 +592,7 @@ export interface MagpieApi {
 
   setLabel(postId: string, label: LabelColor | null): Promise<void>
   setCollectionColor(collectionId: number, color: LabelColor | null): Promise<void>
-  addTag(postId: string, name: string): Promise<void>
+  addTag(postId: string, name: string): Promise<string | null>
   removeTag(postId: string, name: string): Promise<void>
   listCollections(): Promise<CollectionInfo[]>
   createCollection(name: string): Promise<CollectionInfo>
@@ -632,7 +641,17 @@ export interface MagpieApi {
   loadDemoData(): Promise<number>
   removeDemoData(): Promise<number>
 
+  /** Tous les tags, du plus porté au moins porté : la complétion et « voir tout ». */
+  listTags(): Promise<TagTally[]>
+
   platform: NodeJS.Platform
+}
+
+/** Un tag et le nombre de posts visibles qui le portent. */
+export interface TagTally {
+  name: string
+  count: number
+  source: TagSource
 }
 
 export interface CacheProgress {

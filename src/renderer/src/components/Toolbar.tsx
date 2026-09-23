@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CollectionInfo, PostKind, SortKey } from '@shared/types'
 import { SORT_KEYS } from '@shared/types'
 import type { TranslationKey } from '../i18n'
@@ -6,6 +6,7 @@ import { notifyError, notifyInfo, notifySuccess, reportFailure } from '../notice
 import { activeFilterCount } from '../query'
 import { chunk } from '../selection'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
+import { suggestTags, useAllTags } from '../tag-suggestions'
 import { MODIFIER } from '../format'
 import { ConfirmButton } from './ConfirmButton'
 import { Popover } from './Popover'
@@ -130,6 +131,38 @@ export function Toolbar(): React.JSX.Element {
     if (bulkForm !== 'collection') return
     void magpie.listCollections().then(setBulkCollections).catch(reportFailure('notice.collectionFailed'))
   }, [bulkForm])
+  /**
+   * Les tags que porte la sélection, quand on peut les connaître sans rien demander.
+   *
+   * Retirer un tag que la sélection ne porte pas ne fait rien ; les proposer tous revenait à
+   * proposer surtout ceux-là. Quand chaque post sélectionné est déjà chargé, ses tags sont sous
+   * la main : on les propose, du plus fréquent au moins fréquent dans la sélection. Au-delà —
+   * « Tout » sur neuf mille posts, dont trois cents chargés — on retombe sur tous les tags
+   * plutôt que de faire croire que les trois cents disent tout.
+   *
+   * Lu dans l'état au moment d'ouvrir le formulaire, et non par abonnement : la barre se
+   * redessinerait sinon à chaque tranche de posts pendant une synchronisation.
+   */
+  const selectionTags = useMemo(() => {
+    if (bulkForm !== 'untag') return null
+    const byId = new Map(useStore.getState().posts.map((post) => [post.id, post]))
+    const counts = new Map<string, { name: string; count: number }>()
+    for (const id of selectedIds) {
+      const post = byId.get(id)
+      if (!post) return null
+      for (const tag of post.tags) {
+        const known = counts.get(tag.name)
+        if (known) known.count += 1
+        else counts.set(tag.name, { name: tag.name, count: 1 })
+      }
+    }
+    return [...counts.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+  }, [bulkForm, selectedIds])
+  const allTags = useAllTags(bulkForm === 'tag' || (bulkForm === 'untag' && selectionTags === null))
+  const tagOptions =
+    bulkForm === 'tag' || bulkForm === 'untag'
+      ? suggestTags(selectionTags ?? allTags, bulkDraft)
+      : []
   const inputRef = useRef<HTMLInputElement>(null)
 
   /* Ctrl/⌘+K place le curseur dans la recherche depuis n'importe où. */
@@ -600,7 +633,8 @@ export function Toolbar(): React.JSX.Element {
                 maxLength={80}
                 placeholder={t(BULK_PROMPT[bulkForm])}
                 aria-label={t(BULK_PROMPT[bulkForm])}
-                list={bulkForm === 'collection' ? 'bulk-collections' : undefined}
+                list={bulkForm === 'collection' ? 'bulk-collections' : 'bulk-tags'}
+                autoComplete="off"
                 onChange={(event) => setBulkDraft(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') setBulkForm(null)
@@ -615,7 +649,15 @@ export function Toolbar(): React.JSX.Element {
                     <option key={collection.id} value={collection.name} />
                   ))}
                 </datalist>
-              ) : null}
+              ) : (
+                /* Même raison pour les tags : une frappe approximative créait un tag voisin de
+                   celui qu'on visait, et le retrait ne proposait rien du tout. */
+                <datalist id="bulk-tags">
+                  {tagOptions.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+              )}
               <button
                 type="submit"
                 className="collection-create__submit"

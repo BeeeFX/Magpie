@@ -9,9 +9,11 @@ import type {
   PostPage,
   PostQuery,
   TagSource,
+  TagTally,
   VideoQuality
 } from '@shared/types'
 import { CONTENT_SOURCES, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
+import { normalizeTagName } from '@shared/tags'
 import { MEDIA_UPSERT_SQL } from './media-upsert'
 import { getDb } from './index'
 import { searchClause } from './search'
@@ -504,13 +506,6 @@ export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): L
          WHERE aps.post_id = p.id AND aps.source IN (${sourceSlots}))`
     : ''
 
-  // Une ligne par *lien de tag* : la même sous-requête corrélée serait évaluée autant de
-  // fois qu'il existe de liens — 135 000 sur une bibliothèque réellement taguée, soit
-  // 350 ms à elle seule. Sous forme d'ensemble, elle n'est construite qu'une fois.
-  const activeTagged = filtersSources
-    ? ` AND p.id IN (SELECT post_id FROM post_sources WHERE source IN (${sourceSlots}))`
-    : ''
-
   // Plateformes, favoris et étiquettes en une seule passe : trois requêtes parcouraient
   // trois fois la même table pour trois découpages du même décompte.
   const rollup = db
@@ -558,31 +553,9 @@ export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): L
     .all(...PUBLIC_PLATFORMS) as { source: ContentSource; n: number }[]
   for (const row of sourceRows) bySource[row.source] = row.n
 
-  const topTags = db
-    .prepare(
-      `SELECT t.name,
-              CASE
-                WHEN SUM(CASE WHEN pt.source = 'user' THEN 1 ELSE 0 END) > 0 THEN 'user'
-                WHEN SUM(CASE WHEN pt.source = 'ai' THEN 1 ELSE 0 END) > 0 THEN 'ai'
-                ELSE 'rule'
-              END AS source,
-              COUNT(*) AS count
-         FROM post_tags pt
-         JOIN tags t ON t.id = pt.tag_id
-         JOIN posts p ON p.id = pt.post_id AND p.is_archived = 0
-          AND p.platform IN (${PUBLIC_PLATFORM_SLOTS})
-        WHERE 1 = 1${activeTagged}
-        GROUP BY t.id
-        ORDER BY count DESC, t.name COLLATE NOCASE
-        LIMIT 40`
-    )
-    .all(...PUBLIC_PLATFORMS, ...sourceArgs) as {
-    name: string
-    count: number
-    source: TagSource
-  }[]
+  const { tags: topTags, distinct: tagCount } = tagTallies(sources as ContentSource[], TOP_TAGS)
 
-  return { total, favorites, archived, byPlatform, bySource, byLabel, topTags }
+  return { total, favorites, archived, byPlatform, bySource, byLabel, topTags, tagCount }
 }
 
 export function toggleFavorite(id: string): boolean {
@@ -622,22 +595,33 @@ export function setFavoriteMany(ids: string[], value: boolean): void {
   })()
 }
 
-export function addTagMany(ids: string[], name: string): void {
-  const clean = name.trim().slice(0, 80)
-  if (!clean || ids.length === 0) return
+/**
+ * Poser un tag sur un lot de posts. Rend le nom tel que la base le garde.
+ *
+ * Le nom passe par `normalizeTagName`, comme dans la vue détaillée : « #chats » tapé ici
+ * créait jusqu'alors un tag « #chats » distinct du « chats » que l'autre geste écrivait. Et la
+ * forme rendue est celle **déjà en base** quand le tag existe sous une autre casse — la colonne
+ * est `NOCASE`, donc « Chats » rejoint « chats » ; l'interface doit afficher ce qui est écrit,
+ * pas ce qui a été tapé.
+ */
+export function addTagMany(ids: string[], name: string): string | null {
+  const clean = normalizeTagName(name)
+  if (!clean || ids.length === 0) return null
   const db = getDb()
-  db.transaction(() => {
+  return db.transaction(() => {
     db.prepare(`INSERT INTO tags (name, source) VALUES (?, 'user') ON CONFLICT(name) DO NOTHING`).run(
       clean
     )
-    const tag = db.prepare('SELECT id FROM tags WHERE name = ? COLLATE NOCASE').get(clean) as {
+    const tag = db.prepare('SELECT id, name FROM tags WHERE name = ? COLLATE NOCASE').get(clean) as {
       id: number
+      name: string
     }
     const stmt = db.prepare(
       `INSERT INTO post_tags (post_id, tag_id, source) VALUES (?, ?, 'user')
        ON CONFLICT(post_id, tag_id) DO UPDATE SET source = 'user'`
     )
     for (const id of ids) stmt.run(id, tag.id)
+    return tag.name
   })()
 }
 
@@ -648,9 +632,9 @@ export function addTagMany(ids: string[], name: string): void {
  * ne se retirait qu'un post à la fois, depuis la vue détaillée, trois cents fois.
  */
 export function removeTagMany(ids: string[], name: string): void {
-  if (ids.length === 0 || !name.trim()) return
+  const clean = normalizeTagName(name)
+  if (ids.length === 0 || !clean) return
   const db = getDb()
-  const clean = name.trim()
   db.transaction(() => {
     const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(clean) as
       | { id: number }
@@ -661,6 +645,68 @@ export function removeTagMany(ids: string[], name: string): void {
   })()
 }
 
+/** Combien de tags la barre latérale montre d'emblée : au-delà, `listTags` prend le relais. */
+const TOP_TAGS = 40
+
+/**
+ * Chaque tag et le nombre de posts visibles qui le portent, du plus porté au moins porté.
+ *
+ * Une seule requête pour les deux usages — le haut de la barre latérale et la liste complète —
+ * pour que leurs chiffres ne puissent pas diverger. `distinct` compte **tous** les tags, limite
+ * ou non : c'est ce qui manquait pour dire « Voir les 137 tags » quand on n'en recevait que
+ * quarante, le bouton annonçant alors « les 40 » et le quarante et unième restant hors d'atteinte.
+ */
+function tagTallies(
+  sources: readonly ContentSource[],
+  limit: number | null
+): { tags: TagTally[]; distinct: number } {
+  const filtersSources = sources.length < CONTENT_SOURCES.length
+  // Une ligne par *lien de tag* : la même sous-requête corrélée serait évaluée autant de
+  // fois qu'il existe de liens — 135 000 sur une bibliothèque réellement taguée, soit
+  // 350 ms à elle seule. Sous forme d'ensemble, elle n'est construite qu'une fois.
+  const activeTagged = filtersSources
+    ? ` AND p.id IN (SELECT post_id FROM post_sources WHERE source IN (${sources.map(() => '?').join(', ')}))`
+    : ''
+  const rows = getDb()
+    .prepare(
+      /* `COUNT(*) OVER ()` est évalué après le regroupement et avant la limite : c'est le nombre
+         de tags distincts, obtenu dans la même passe que les quarante premiers. */
+      `SELECT t.name,
+              CASE
+                WHEN SUM(CASE WHEN pt.source = 'user' THEN 1 ELSE 0 END) > 0 THEN 'user'
+                WHEN SUM(CASE WHEN pt.source = 'ai' THEN 1 ELSE 0 END) > 0 THEN 'ai'
+                ELSE 'rule'
+              END AS source,
+              COUNT(*) AS count,
+              COUNT(*) OVER () AS distinct_tags
+         FROM post_tags pt
+         JOIN tags t ON t.id = pt.tag_id
+         JOIN posts p ON p.id = pt.post_id AND p.is_archived = 0
+          AND p.platform IN (${PUBLIC_PLATFORM_SLOTS})
+        WHERE 1 = 1${activeTagged}
+        GROUP BY t.id
+        ORDER BY count DESC, t.name COLLATE NOCASE${limit === null ? '' : `
+        LIMIT ${Math.max(1, Math.floor(limit))}`}`
+    )
+    .all(...PUBLIC_PLATFORMS, ...(filtersSources ? sources : [])) as (TagTally & {
+    distinct_tags: number
+  })[]
+  return {
+    tags: rows.map(({ name, source, count }) => ({ name, source, count })),
+    distinct: rows[0]?.distinct_tags ?? 0
+  }
+}
+
+/**
+ * Tous les tags, pour la complétion et pour « voir tout » dans la barre latérale.
+ *
+ * Mêmes règles que les compteurs voisins — ni les posts retirés, ni les origines décochées —
+ * parce qu'un tag proposé qui ne mène à aucun post visible serait une suggestion qui ment.
+ */
+export function listTags(activeSources: ContentSource[] = ['saved', 'liked']): TagTally[] {
+  const sources = activeSources.length > 0 ? activeSources : (['saved'] as ContentSource[])
+  return tagTallies(sources, null).tags
+}
 
 export interface AiCandidate {
   id: string
@@ -1454,10 +1500,15 @@ export function setTags(postId: string, tags: { name: string; source: TagSource 
   })()
 }
 
-export function addTag(postId: string, name: string, source: TagSource = 'user'): void {
-  const clean = name.trim().replace(/^#/, '')
-  if (!clean) return
+/** Rend le nom tel que la base le garde — voir `addTagMany`. */
+export function addTag(postId: string, name: string, source: TagSource = 'user'): string | null {
+  const clean = normalizeTagName(name)
+  if (!clean) return null
   setTags(postId, [{ name: clean, source }])
+  const stored = getDb().prepare('SELECT name FROM tags WHERE name = ? COLLATE NOCASE').get(clean) as
+    | { name: string }
+    | undefined
+  return stored?.name ?? clean
 }
 
 export function removeTag(postId: string, name: string): void {
@@ -1467,7 +1518,7 @@ export function removeTag(postId: string, name: string): void {
         WHERE post_id = ?
           AND tag_id = (SELECT id FROM tags WHERE name = ? COLLATE NOCASE)`
     )
-    .run(postId, name)
+    .run(postId, normalizeTagName(name))
 }
 
 export interface CollectionRow {

@@ -60,7 +60,8 @@ import {
   postUrls,
   removeTagMany,
   toggleFavorite,
-  writeAccount
+  writeAccount,
+  listTags
 } from './db/queries'
 import { seedIfEmpty } from './fixtures/seed'
 import { backgroundTasks } from './tasks'
@@ -293,7 +294,7 @@ export function registerIpc({
     if (!Array.isArray(ids) || ids.length > BULK_MAX || typeof name !== 'string') {
       throw new Error('Sélection invalide')
     }
-    addTagMany(ids.map(String), name)
+    return addTagMany(ids.map(String), name)
   })
   ipcMain.handle('tags:removeMany', (_event, ids: string[], name: string) => {
     if (!Array.isArray(ids) || ids.length > BULK_MAX || typeof name !== 'string') {
@@ -969,9 +970,7 @@ export function registerIpc({
     }
   )
 
-  ipcMain.handle('tags:add', (_event, postId: string, name: string) => {
-    addTag(postId, name)
-  })
+  ipcMain.handle('tags:add', (_event, postId: string, name: string) => addTag(postId, name))
 
   ipcMain.handle('tags:remove', (_event, postId: string, name: string) => {
     removeTag(postId, name)
@@ -1057,6 +1056,10 @@ export function registerIpc({
   })
 
   ipcMain.handle('library:removeDemo', () => deleteDemoPosts())
+
+  /* Tous les tags, pour la complétion et pour « voir tout » dans la barre latérale. */
+  ipcMain.handle('tags:list', () => listTags(readSettings().contentSources))
+
 }
 
 interface LibraryFile {

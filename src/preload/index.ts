@@ -35,7 +35,8 @@ import type {
   PostQuery,
   Settings,
   SyncState,
-  UpdateState
+  UpdateState,
+  TagTally
 } from '@shared/types'
 
 /**
@@ -93,7 +94,7 @@ const api: MagpieApi = {
   postUrls: (ids: string[]): Promise<string[]> => ipcRenderer.invoke('posts:urls', ids),
   setFavoriteMany: (ids: string[], value: boolean): Promise<void> =>
     ipcRenderer.invoke('posts:setFavoriteMany', ids, value),
-  addTagMany: (ids: string[], name: string): Promise<void> =>
+  addTagMany: (ids: string[], name: string): Promise<string | null> =>
     ipcRenderer.invoke('tags:addMany', ids, name),
   hasAiKey: (provider: AiProvider): Promise<boolean> => ipcRenderer.invoke('ai:hasKey', provider),
   setAiKey: (provider: AiProvider, key: string): Promise<void> =>
@@ -190,7 +191,7 @@ const api: MagpieApi = {
     ipcRenderer.invoke('posts:setLabel', postId, label),
   setCollectionColor: (collectionId: number, color: LabelColor | null): Promise<void> =>
     ipcRenderer.invoke('collections:setColor', collectionId, color),
-  addTag: (postId: string, name: string): Promise<void> =>
+  addTag: (postId: string, name: string): Promise<string | null> =>
     ipcRenderer.invoke('tags:add', postId, name),
   removeTag: (postId: string, name: string): Promise<void> =>
     ipcRenderer.invoke('tags:remove', postId, name),
@@ -221,6 +222,8 @@ const api: MagpieApi = {
   getSyncState: (): Promise<SyncState> => ipcRenderer.invoke('sync:state'),
   loadDemoData: (): Promise<number> => ipcRenderer.invoke('library:loadDemo'),
   removeDemoData: (): Promise<number> => ipcRenderer.invoke('library:removeDemo'),
+
+  listTags: (): Promise<TagTally[]> => ipcRenderer.invoke('tags:list'),
 
   platform: process.platform
 }
