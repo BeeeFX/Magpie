@@ -124,7 +124,7 @@ c'est une propriété qu'on peut vérifier mécaniquement, et pas seulement une 
 
 ## 4. Modèle de données
 
-SQLite, schéma en version **26**, une échelle de migrations dont l'invariant est tenu par
+SQLite, schéma en version **30**, une échelle de migrations dont l'invariant est tenu par
 `npm run check:schema` : une installation neuve exécute `SCHEMA_SQL` seul, donc `SCHEMA_SQL`
 doit déjà contenir tout ce que l'échelle produit. Le détail vit dans `src/main/db/schema.ts`,
 qui est commenté table par table ; ce qui suit dit **à quoi sert chaque groupe**.
@@ -218,6 +218,13 @@ page regénère un lien à chaque affichage. On fait la même chose (§7).
   qui arrive après le premier backfill. Le tri « par date de sauvegarde » est donc exact pour ce
   qui est capté après l'installation, et seulement *ordonné* pour l'historique antérieur. C'est
   une limite de la plateforme, pas de l'implémentation.
+- **`discovered_at` est l'horodatage d'une tournée, pas d'une page** : un seul par
+  synchronisation (plateforme × origine), gardé par la reprise d'un rattrapage à travers son
+  curseur, et le rang ordonne l'intérieur. Horodatée page par page, la page deux — plus ancienne
+  — passait devant la page un, et un import complet finissait avec les plus vieux signets en
+  haut du mur. Deux plateformes importées ensemble se rangent donc en deux blocs, l'une après
+  l'autre : sans date, il n'y a rien pour les entrelacer honnêtement. La migration 30 a rendu
+  cet ordre aux bibliothèques existantes.
 - **La plateforme la plus sensible** : c'est ici que la temporisation compte le plus.
 
 ### 5.2 X

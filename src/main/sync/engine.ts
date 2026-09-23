@@ -9,6 +9,7 @@ import {
   knownPostIds,
   readAccount,
   readAccountSource,
+  runEpochBefore,
   upsertPosts,
   writeAccount,
   writeAccountSource
@@ -16,6 +17,7 @@ import {
 import { say, platformLabel } from '../messages'
 import { readSettings } from '../settings'
 import { applyRuleTags } from '../tagging/rules'
+import { decodeResumeCursor, encodeResumeCursor } from './resume'
 
 /**
  * Moteur de synchronisation. Voir SPEC.md §6.
@@ -63,28 +65,6 @@ const STALE_PAGES_BEFORE_STOP = 3
  */
 const STALE_PAGES_BEFORE_STOP_BACKFILL = 8
 const MAX_RATE_LIMIT_RETRIES = 5
-
-interface ResumeCursor {
-  cursor: string
-  rank: number
-}
-
-function decodeResumeCursor(value: string | null): ResumeCursor | null {
-  if (!value) return null
-  try {
-    const parsed = JSON.parse(value) as Partial<ResumeCursor>
-    if (typeof parsed.cursor === 'string' && Number.isFinite(parsed.rank)) {
-      return { cursor: parsed.cursor, rank: Math.max(0, Number(parsed.rank)) }
-    }
-  } catch {
-    // Compatibilité avec un éventuel curseur brut écrit par une ancienne version.
-  }
-  return { cursor: value, rank: 0 }
-}
-
-function encodeResumeCursor(cursor: string, rank: number): string {
-  return JSON.stringify({ cursor, rank } satisfies ResumeCursor)
-}
 
 type Listener = (state: SyncState) => void
 
@@ -203,6 +183,15 @@ class SyncEngine {
     const isBackfill = resume !== null || !account?.lastSyncAt || account?.lastSyncStatus === 'partial'
     let cursor: string | null = resume?.cursor ?? null
     let rank = resume?.rank ?? 0
+    /* Un seul `discovered_at` pour toute la tournée, et le rang pour ordonner l'intérieur.
+       Horodatée page par page, la page deux — des signets plus anciens — passait devant la
+       page un, et un rattrapage complet finissait avec les plus anciens en haut du mur. Une
+       reprise garde l'horodatage de la tournée qu'elle continue : c'est le même historique,
+       lu en deux fois. Un curseur écrit avant cette règle n'en porte pas ; on le relit alors
+       sur la dernière ligne écrite avant le point de reprise. */
+    const epoch = resume
+      ? (resume.epoch ?? runEpochBefore(platform, source, resume.rank) ?? Date.now())
+      : Date.now()
     let fetched = 0
     let added = 0
     let stalePages = 0
@@ -298,7 +287,7 @@ class SyncEngine {
       for (const post of fresh) known.add(post.id)
 
       if (result.posts.length > 0) {
-        upsertPosts(result.posts, result.media, source)
+        upsertPosts(result.posts, result.media, source, epoch)
         // Les règles ne s'appliquent qu'aux nouveaux : les re-jouer sur du déjà connu
         // ressusciterait des tags que l'utilisateur a pu retirer à la main.
         if (fresh.length > 0) applyRuleTags(fresh)
@@ -313,7 +302,7 @@ class SyncEngine {
           ...(isBackfill
             ? {
                 cursor: result.nextCursor
-                  ? encodeResumeCursor(result.nextCursor, rank)
+                  ? encodeResumeCursor(result.nextCursor, rank, epoch)
                   : null
               }
             : {})
