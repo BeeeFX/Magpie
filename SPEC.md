@@ -685,7 +685,8 @@ personne. Au 2026-08-26, en version 0.42.0 :
 | Collections-requêtes, carte sémantique, régions | livré |
 | Export pour assistant | livré |
 | Tray, sync planifiée, réglages, mise à jour automatique | livré |
-| Build Windows NSIS + mises à jour différentielles | livré, **non signé** |
+| Build Windows NSIS + mises à jour différentielles | livré, **non signé** — signature branchée, inactive faute de certificat (§12) |
+| Fusibles, permissions, navigations gardées, journal sur disque (§10) | livré |
 | Reddit | en sommeil (§5.3) |
 | macOS, Linux | ni testés ni signés |
 | Import de bibliothèque | absent (§14) |
@@ -721,7 +722,24 @@ Deux outils non prévus par la spec initiale, tous deux justifiés :
 3. **Comptes multiples par plateforme.** Le modèle suppose un compte par plateforme. Le supporter
    coûte une colonne ; le rétro-adapter coûtera davantage à mesure que la base grossit.
 4. **Signature du binaire Windows.** SmartScreen avertit à chaque installation, et c'est le premier
-   frein à l'adoption qu'un utilisateur rencontre.
+   frein à l'adoption qu'un utilisateur rencontre. **Il ne manque plus que le certificat** : le
+   workflow de publication signe dès que ses secrets existent — un `.pfx` classique ou Azure
+   Trusted Signing, voir « Signing » dans le README — et construit non signé sinon, comme
+   aujourd'hui. Il vérifie ensuite la signature de l'installateur et de `Magpie.exe`, et que
+   `app-update.yml` nomme bien le signataire.
+
+   Le piège est dans electron-updater : une version signée inscrit son éditeur
+   (`publisherName`) dans `app-update.yml`, et **refuse ensuite toute mise à jour qui n'est pas
+   signée de ce nom**. Le passage du non signé au signé est sans danger — une installation non
+   signée n'a pas d'éditeur et accepte la première version signée. Le retour ne l'est pas : une
+   seule release partie sans ses secrets bloquerait toutes les installations signées. D'où la
+   variable `REQUIRE_SIGNING=true` à poser après la première version signée, qui fait échouer
+   la publication plutôt que de la laisser partir. Changer d'identité (de CN) demande une
+   version de transition **encore signée par l'ancien certificat** et qui nomme les deux éditeurs
+   (`WINDOWS_PUBLISHER_NAME`, séparés par `;`) : une installation juge une mise à jour avec les
+   noms de la version qu'elle fait tourner, donc seule la suivante peut changer de certificat —
+   et il faut s'y prendre avant que l'ancien expire. Le renouvellement quotidien d'Azure Trusted
+   Signing garde le même CN : ce n'est pas un changement d'identité.
 5. **Reddit.** Le remettre suppose de décider ce qu'un post textuel devient dans un mur d'images et
    dans la carte, pas seulement de rallumer l'adaptateur.
 
