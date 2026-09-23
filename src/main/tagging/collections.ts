@@ -120,6 +120,17 @@ export function recompute(id: number): Membership | null {
   /* Une liste posée à la main n'a rien à recalculer, et surtout rien à perdre : la réécrire
      depuis un score qu'elle n'a pas la viderait. */
   if (definition.kind !== 'query') return null
+  /* Des mots qui n'ont pas encore de vecteur ne savent noter personne. Deux chemins en rangent
+     ainsi — l'import d'une bibliothèque et le rétablissement de « Que garder ? » — et le
+     premier recalcul venu vidait la collection : `scoreKeywords` écartait tous ses mots, rien ne
+     passait la coupe, et `collection_posts` était réécrite vide. L'appartenance connue tient
+     donc jusqu'à ce que `encodeMissingKeywords` leur en ait donné un. */
+  if (
+    definition.keywords.length > 0 &&
+    definition.keywords.every((entry) => !entry.vector.text && !entry.vector.meaning)
+  ) {
+    return null
+  }
   const scores = scoreKeywords(definition.keywords)
   const verdict = verdicts(id)
   const forcedOut = new Set(verdict.no)
@@ -203,6 +214,9 @@ export async function addKeyword(
 ): Promise<Membership | null> {
   const clean = word.trim()
   if (!clean) return recompute(id)
+  /* Les mots déjà là d'abord : sans vecteur, seul le nouveau noterait, et la collection se
+     réduirait à lui. */
+  await encodeMissingKeywords(id)
   const vector = await encodePhrase(clean)
   const order = (
     getDb()
@@ -213,6 +227,45 @@ export async function addKeyword(
   ).next
   saveKeyword(id, clean, weight, vector, order)
   return recompute(id)
+}
+
+/**
+ * Donne un vecteur aux mots rangés sans — ceux d'une bibliothèque importée, ceux d'une
+ * collection rétablie. Rend combien en ont reçu un.
+ *
+ * Appelé là où les modèles servent déjà — le rejeu d'après synchronisation, l'ajout d'un mot —
+ * et jamais à l'import lui-même : importer ne doit pas déclencher le téléchargement de
+ * centaines de mégaoctets de modèles. Un mot que l'encodage ne sait pas traiter reste tel quel,
+ * et `recompute` garde alors l'appartenance connue plutôt que de la vider.
+ */
+export async function encodeMissingKeywords(id?: number): Promise<number> {
+  const db = getDb()
+  const rows = (
+    id === undefined
+      ? db
+          .prepare(
+            `SELECT collection_id AS id, word FROM collection_keywords
+              WHERE vector_text IS NULL AND vector_meaning IS NULL`
+          )
+          .all()
+      : db
+          .prepare(
+            `SELECT collection_id AS id, word FROM collection_keywords
+              WHERE vector_text IS NULL AND vector_meaning IS NULL AND collection_id = ?`
+          )
+          .all(id)
+  ) as { id: number; word: string }[]
+  let encoded = 0
+  for (const row of rows) {
+    const vector = await encodePhrase(row.word)
+    if (!vector.text && !vector.meaning) continue
+    db.prepare(
+      `UPDATE collection_keywords SET vector_text = ?, vector_meaning = ?
+        WHERE collection_id = ? AND word = ?`
+    ).run(toBlob(vector.text), toBlob(vector.meaning), row.id, row.word)
+    encoded += 1
+  }
+  return encoded
 }
 
 /** Changer le poids d'un mot. Aucun encodage : seul le facteur bouge. */
@@ -401,6 +454,7 @@ export async function refreshQueryCollections(): Promise<{ collections: number; 
   if (ids.length === 0) return { collections: 0, members: 0 }
 
   await embedItems(organizationItems(), () => new Promise((resolve) => setImmediate(resolve)))
+  await encodeMissingKeywords()
 
   let members = 0
   for (const id of ids) {
