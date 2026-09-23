@@ -451,6 +451,23 @@ const fr = {
   'settings.cachePartial':
     '{count} fichier était encore ouvert et n’a pas pu être supprimé. Refermez la vue détaillée puis réessayez.|{count} fichiers étaient encore ouverts et n’ont pas pu être supprimés. Refermez la vue détaillée puis réessayez.',
   'settings.cacheError': 'Le cache n’a pas pu être vidé.',
+  /* Sauvegardes de la base et secours d'ouverture. */
+  'settings.backups': 'Sauvegardes de la base',
+  'settings.backupsLast':
+    'Dernière le {date} · {count} copie · {size}|Dernière le {date} · {count} copies · {size}',
+  'settings.backupsNone': 'Aucune pour l’instant',
+  'settings.backupsPolicy':
+    'Une copie par jour, dans le dossier de la bibliothèque : les sept derniers jours, puis une par semaine sur un mois.',
+  'settings.backupsFailed': 'La dernière sauvegarde automatique a échoué : {detail}',
+  'settings.backupNow': 'Sauvegarder maintenant',
+  'settings.backingUp': 'Sauvegarde…',
+  'settings.openBackups': 'Ouvrir le dossier des sauvegardes',
+  'notice.backupDone': 'Base sauvegardée · {date}',
+  'notice.backupFailed': 'La sauvegarde n’a pas pu être écrite.',
+  'notice.libraryRestored':
+    'Votre bibliothèque ne s’ouvrait plus. Magpie l’a restaurée depuis la sauvegarde du {date} : ce qui a changé depuis est perdu. Le fichier d’origine est gardé à part, dans le dossier de la bibliothèque.',
+  'notice.libraryReset':
+    'Votre bibliothèque ne s’ouvrait plus, et aucune sauvegarde saine ne pouvait la remplacer : Magpie repart d’une bibliothèque vide. Le fichier d’origine est gardé à part, dans le dossier de la bibliothèque.',
   'actions.more': 'Autres actions',
   'actions.organize': 'Organiser en collections',
   'actions.autoOrganize': 'Ranger après chaque synchronisation',
@@ -1186,6 +1203,22 @@ const en: Record<TranslationKey, string> = {
   'settings.cachePartial':
     '{count} file was still open and could not be deleted. Close the detail view and try again.|{count} files were still open and could not be deleted. Close the detail view and try again.',
   'settings.cacheError': 'The cache could not be cleared.',
+  'settings.backups': 'Database backups',
+  'settings.backupsLast':
+    'Latest on {date} · {count} copy · {size}|Latest on {date} · {count} copies · {size}',
+  'settings.backupsNone': 'None yet',
+  'settings.backupsPolicy':
+    'One copy a day, inside the library folder: the last seven days, then one a week for a month.',
+  'settings.backupsFailed': 'The last automatic backup failed: {detail}',
+  'settings.backupNow': 'Back up now',
+  'settings.backingUp': 'Backing up…',
+  'settings.openBackups': 'Open backups folder',
+  'notice.backupDone': 'Database backed up · {date}',
+  'notice.backupFailed': 'The backup could not be written.',
+  'notice.libraryRestored':
+    'Your library would no longer open. Magpie restored it from the backup of {date}: anything changed since then is lost. The original file is kept aside, in the library folder.',
+  'notice.libraryReset':
+    'Your library would no longer open, and no sound backup could replace it: Magpie is starting from an empty library. The original file is kept aside, in the library folder.',
   'actions.more': 'More actions',
   'actions.organize': 'Organise into collections',
   'actions.autoOrganize': 'Organise after every sync',

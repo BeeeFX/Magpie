@@ -312,7 +312,14 @@ Dans les deux cas :
   garder une CSP stricte sans jamais ouvrir `file://`. Il gère les requêtes par plage, donc le
   déplacement dans une vidéo fonctionne.
 - **Les liens expirés sont renouvelés** à la volée (§5). Les requêtes concurrentes pour un même
-  post partagent le même renouvellement.
+  post partagent le même renouvellement, un échec n'est pas rejoué avant deux minutes, et rien
+  ne part vers un compte en vérification de sécurité. Le renouvellement ne réécrit que les
+  médias : un post seulement liké ne devient pas un signet parce qu'on a lu sa vidéo.
+- **Une vignette dont le lien a expiré attend un lien neuf**, elle n'échoue pas. Un lien
+  périmé ou un disque plein ne coûtent aucune des trois tentatives d'une vignette. Ce qui est
+  à l'écran se renouvelle par une file courte — quarante posts, une requête à la fois, au plus
+  cent vingt par heure —, et tout lien neuf, rapporté par une synchronisation ou un
+  renouvellement, rend ses tentatives à une vignette qui n'existe pas encore.
 - **Un lien resigné ne doit pas invalider le cache.** C'est le piège qui a coûté le plus cher :
   l'identité d'un média avait été dérivée de son URL, donc une URL resignée produisait un nouveau
   nom de fichier, et chaque synchronisation effaçait vignettes et clips pour les refaire. L'identité
@@ -629,6 +636,16 @@ déclencher un schéma applicatif arbitraire.
   connexion : « voir en vrai » ouvre le navigateur du système.
 - La bibliothèque entière est un dossier déplaçable : base, médias, réglages. Rien n'est captif —
   sous la réserve du §14 sur l'import.
+- **La base est sauvegardée chaque jour**, dans `backups/` à l'intérieur de la bibliothèque —
+  le déplacement l'emporte. Au démarrage si la dernière copie a plus d'un jour, puis toutes les
+  heures à la même condition, par l'API de sauvegarde de SQLite, sans figer l'interface. On
+  garde une copie par jour sur les sept derniers jours, puis une par semaine sur les quatre
+  semaines d'avant : onze au plus, chacune du poids de la base. Les réglages montrent la date
+  de la dernière, et permettent d'en faire une ou d'ouvrir le dossier.
+- **Une base qui ne s'ouvre pas n'est pas forcément abîmée.** Un verrou ou un refus d'accès se
+  disent et ne touchent à rien ; seul un fichier que SQLite déclare abîmé, ou qui échoue à
+  `quick_check`, est mis de côté. Il est alors remplacé par la sauvegarde saine **la plus
+  récente**, régulière ou d'avant migration, et l'interface dit à quelle date on est revenu.
 
 ---
 
@@ -659,7 +676,8 @@ Deux outils non prévus par la spec initiale, tous deux justifiés :
   fenêtre de virtualisation à une recherche exhaustive à chaque position de scroll ;
   `check:schema` tient l'invariant des migrations ; `check:map`, `check:islands`, `check:map-*`
   exercent la carte ; `check:library-guard` vérifie qu'une base venue du futur n'est pas
-  « réparée ». Plus une famille de bancs (`bench:*`) dont les mesures sont citées dans ce document.
+  « réparée », qu'une base verrouillée n'est pas mise de côté, et que le secours restaure la
+  sauvegarde saine la plus récente. Plus une famille de bancs (`bench:*`) dont les mesures sont citées dans ce document.
 - Un **aperçu navigateur** sur `localhost:5173` pendant `npm run dev`, alimenté par un instantané
   que le processus principal dépose au démarrage. Sert à itérer sur le CSS avec de vraies devtools.
   Volontairement dégradé : filtres, tri et recherche y sont ignorés, pour ne pas dupliquer de

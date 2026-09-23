@@ -15,7 +15,8 @@ import { pathToFileURL } from 'node:url'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { Readable } from 'node:stream'
-import { closeDb, getDb, mediaDir } from './db'
+import { closeDb, getDb, LibraryUnavailable, mediaDir } from './db'
+import { startBackupSchedule, stopBackupSchedule } from './db/backups'
 import { registerIpc } from './ipc'
 import {
   countPendingClips,
@@ -52,7 +53,7 @@ import { backgroundTasks } from './tasks'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
-import { parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
+import { linkRefresher, parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
 import { streamMedia } from './adapters/http'
 
 const isDev = !app.isPackaged
@@ -514,6 +515,9 @@ const requestedThumbnailPostIds = new Set<string>()
 function requestThumbnailDrain(postIds: string[]): void {
   void touchCachedThumbnails(postIds)
   for (const id of postIds) requestedThumbnailPostIds.add(id)
+  /* Ce qu'on regarde et dont le lien a passé part se faire renouveler, au rythme de la
+     plateforme ; le renouvellement rappelle cette fonction pour ces posts-là. */
+  linkRefresher.request(postIds)
   void drainMediaQueue()
 }
 
@@ -770,7 +774,9 @@ async function drainMediaQueue(): Promise<void> {
       // mais *derrière* les identifiants arrivés entre-temps. Un Set conserve son ordre
       // d'insertion, si bien que la position courante repasse naturellement devant ce
       // qu'on a déjà dépassé.
-      if (result.hasMore && !sweeping) {
+      /* Sauf quand une vignette n'a pas trouvé de place : elle ne perd plus de tentative, donc
+         rien ne l'userait, et la reprendre aussitôt ferait tourner la file contre le même mur. */
+      if (result.hasMore && !sweeping && !result.thumbnailQuota) {
         for (const id of requested) requestedThumbnailPostIds.add(id)
       }
 
@@ -902,6 +908,7 @@ async function bootstrap(): Promise<void> {
 
 if (isPrimaryInstance) void app.whenReady().then(async () => {
   registerMediaProtocol()
+  linkRefresher.onRefreshed(requestThumbnailDrain)
   registerIpc({
     onThemeChange: syncTheme,
     drainMedia: () => void drainMediaQueue(),
@@ -1042,6 +1049,8 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
   nativeTheme.on('updated', () => syncTheme())
 
   await bootstrap()
+  /* Une copie de la base par jour, dans la bibliothèque. Voir db/backups.ts. */
+  startBackupSchedule()
 
   // Une vérification incrémentale au lancement ne reparcourt pas tout l'historique : le
   // moteur s'arrête dès qu'il retrouve quelques pages déjà connues. Le premier compte
@@ -1056,7 +1065,20 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 }).catch((error: unknown) => {
-  dialog.showErrorBox(say('library.unreachable'), (error as Error).message)
+  /* Une base intacte qu'on n'a pas pu ouvrir le dit dans la langue de l'interface, avec ce
+     qu'il faut faire : ce n'est pas la même situation qu'une base abîmée, et rien n'a bougé. */
+  const message =
+    error instanceof LibraryUnavailable
+      ? say(
+          error.reason === 'locked'
+            ? 'library.locked'
+            : error.reason === 'denied'
+              ? 'library.denied'
+              : 'library.openFailed',
+          { detail: error.detail }
+        )
+      : (error as Error).message
+  dialog.showErrorBox(say('library.unreachable'), message)
   app.quit()
 })
 
@@ -1073,5 +1095,6 @@ app.on('before-quit', () => {
   if (organizerAfterSyncTimer) clearTimeout(organizerAfterSyncTimer)
   if (windowInteractionTimer) clearTimeout(windowInteractionTimer)
   stopUpdater()
+  stopBackupSchedule()
   closeDb()
 })
