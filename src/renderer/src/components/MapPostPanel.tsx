@@ -17,7 +17,7 @@ import { VideoPlayer } from './VideoPlayer'
  * l'autre remplace le contenu, sans rien à refermer entre deux.
  *
  * Volontairement plus mince que `Detail` : celui-ci est piloté par le store — il lit
- * `posts`, `detailIndex`, et navigue de proche en proche dans la grille filtrée. Or les
+ * `posts`, `detailId`, et navigue de proche en proche dans la grille filtrée. Or les
  * points de la carte ne sont pas cette liste : la carte porte la bibliothèque entière, la
  * grille ce que les filtres ont laissé. Le brancher ici l'aurait fait naviguer dans une
  * liste sans rapport avec ce qu'on voit.

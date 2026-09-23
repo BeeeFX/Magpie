@@ -7,7 +7,6 @@ import {
   nativeTheme,
   net,
   protocol,
-  shell,
   Tray
 } from 'electron'
 import { join } from 'node:path'
@@ -15,7 +14,8 @@ import { pathToFileURL } from 'node:url'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { Readable } from 'node:stream'
-import { closeDb, getDb, mediaDir } from './db'
+import { closeDb, getDb, LibraryUnavailable, mediaDir } from './db'
+import { startBackupSchedule, stopBackupSchedule } from './db/backups'
 import { registerIpc } from './ipc'
 import {
   countPendingClips,
@@ -40,6 +40,7 @@ import { aiTagger } from './tagging/ai'
 import { applyRememberedOrganizerRules, localOrganizer } from './tagging/organize'
 import { stopInference } from './tagging/inference'
 import { refreshQueryCollections } from './tagging/collections'
+import { sweepPartialDownloads } from './models/store'
 import type {
   AfterSyncStep,
   BackgroundState,
@@ -52,8 +53,18 @@ import { backgroundTasks } from './tasks'
 import { initializeUpdater, stopUpdater } from './updater'
 import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
-import { parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
+import { linkRefresher, parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
 import { streamMedia } from './adapters/http'
+import { installLogFile } from './log'
+import { installCrashLogging, watchRenderer } from './recovery'
+import { guardWebContents, hardenSessions } from './security'
+import { encryptPlaintextCookies } from './adapters/session'
+import {
+  migrateUiStorage,
+  registerRendererProtocol,
+  RENDERER_ENTRY,
+  RENDERER_SCHEME_PRIVILEGES
+} from './renderer-protocol'
 
 const isDev = !app.isPackaged
 const APP_ID = 'tv.electrictheatre.magpie'
@@ -92,13 +103,24 @@ if (isDev && process.env['MAGPIE_DEV_DATA_DIR']) {
   app.setPath('userData', process.env['MAGPIE_DEV_DATA_DIR'])
 }
 
+/* Le journal sur disque, dès que son dossier est connu : c'est lui qui donne une destination
+   aux deux filets ci-dessus dans la version installée, qui n'a pas de console. Une seconde
+   instance ne fait que passer la main : elle n'écrit rien. */
+if (isPrimaryInstance) {
+  installLogFile()
+  installCrashLogging()
+  guardWebContents()
+}
+
 // Doit être déclaré avant `app.whenReady()`. `magpie://` sert les médias en cache au
-// renderer sans avoir à ouvrir `file://`, ce qui permet de garder une CSP stricte.
+// renderer sans avoir à ouvrir `file://`, ce qui permet de garder une CSP stricte ; `app://`
+// sert le renderer lui-même (voir `renderer-protocol.ts`).
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'magpie',
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
-  }
+  },
+  RENDERER_SCHEME_PRIVILEGES
 ])
 
 let mainWindow: BrowserWindow | null = null
@@ -202,25 +224,15 @@ function createWindow(): void {
     mainWindow?.webContents.send('window:fullscreen', false)
   })
 
-  // Un lien cliqué dans le renderer part dans le navigateur, jamais dans une fenêtre
-  // Electron sans garde-fou.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http:') || url.startsWith('https:')) void shell.openExternal(url)
-    return { action: 'deny' }
-  })
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    const rendererUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).toString()
-    const allowed = isDev
-      ? url.startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'http://localhost')
-      : url.startsWith(rendererUrl)
-    if (!allowed) event.preventDefault()
-  })
+  /* Liens et navigations : la garde de `security.ts`, posée sur chaque contenu web à sa
+     création — celle-ci comprise. Un renderer qui meurt : `recovery.ts`. */
+  watchRenderer(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
     void mainWindow.loadURL(devUrl)
   } else {
-    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    void mainWindow.loadURL(RENDERER_ENTRY)
   }
 }
 
@@ -378,7 +390,7 @@ function refreshBackgroundFeatures(): void {
     scheduleTimer = setInterval(() => {
       if (Date.now() - lastScheduledSync < interval || syncEngine.isRunning()) return
       lastScheduledSync = Date.now()
-      void syncEngine.syncAll()
+      void syncEngine.syncAll(undefined, { automatic: true })
     }, 60 * 1000)
   }
 }
@@ -514,6 +526,9 @@ const requestedThumbnailPostIds = new Set<string>()
 function requestThumbnailDrain(postIds: string[]): void {
   void touchCachedThumbnails(postIds)
   for (const id of postIds) requestedThumbnailPostIds.add(id)
+  /* Ce qu'on regarde et dont le lien a passé part se faire renouveler, au rythme de la
+     plateforme ; le renouvellement rappelle cette fonction pour ces posts-là. */
+  linkRefresher.request(postIds)
   void drainMediaQueue()
 }
 
@@ -770,7 +785,9 @@ async function drainMediaQueue(): Promise<void> {
       // mais *derrière* les identifiants arrivés entre-temps. Un Set conserve son ordre
       // d'insertion, si bien que la position courante repasse naturellement devant ce
       // qu'on a déjà dépassé.
-      if (result.hasMore && !sweeping) {
+      /* Sauf quand une vignette n'a pas trouvé de place : elle ne perd plus de tentative, donc
+         rien ne l'userait, et la reprendre aussitôt ferait tourner la file contre le même mur. */
+      if (result.hasMore && !sweeping && !result.thumbnailQuota) {
         for (const id of requested) requestedThumbnailPostIds.add(id)
       }
 
@@ -901,7 +918,10 @@ async function bootstrap(): Promise<void> {
 }
 
 if (isPrimaryInstance) void app.whenReady().then(async () => {
+  hardenSessions()
   registerMediaProtocol()
+  linkRefresher.onRefreshed(requestThumbnailDrain)
+  registerRendererProtocol()
   registerIpc({
     onThemeChange: syncTheme,
     drainMedia: () => void drainMediaQueue(),
@@ -924,8 +944,23 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
       void drainMediaQueue()
     }
   })
+  /* Deux reprises à faire une fois par profil, avant que la fenêtre ne s'ouvre : les cookies
+     laissés en clair par les versions sans fusible, et les préférences d'affichage, qui
+     vivaient dans le stockage de `file://` — inutile quand Vite sert la page. */
+  await encryptPlaintextCookies()
+  if (!(isDev && process.env['ELECTRON_RENDERER_URL'])) await migrateUiStorage()
   createWindow()
   refreshBackgroundFeatures()
+  /* Les téléchargements de modèles interrompus laissent des `*.tmp.*` que rien ne reprend et que
+     l'écran de stockage comptait comme des modèles. Le processus des modèles ne démarre qu'au
+     premier encodage : à cet instant, aucun partiel n'a d'auteur vivant. */
+  void sweepPartialDownloads()
+    .then(({ removed, freed }) => {
+      if (removed > 0) {
+        console.log(`[magpie] ${removed} téléchargements de modèles interrompus effacés (${freed} octets)`)
+      }
+    })
+    .catch((error: unknown) => console.warn('[magpie] Partiels de modèles non effacés :', error))
   initializeUpdater({
     getWindow: () => mainWindow,
     beforeInstall: () => {
@@ -1042,6 +1077,8 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
   nativeTheme.on('updated', () => syncTheme())
 
   await bootstrap()
+  /* Une copie de la base par jour, dans la bibliothèque. Voir db/backups.ts. */
+  startBackupSchedule()
 
   // Une vérification incrémentale au lancement ne reparcourt pas tout l'historique : le
   // moteur s'arrête dès qu'il retrouve quelques pages déjà connues. Le premier compte
@@ -1049,14 +1086,27 @@ if (isPrimaryInstance) void app.whenReady().then(async () => {
   const startupSettings = readSettings()
   if (startupSettings.onboardingDone && startupSettings.syncOnLaunch) {
     lastScheduledSync = Date.now()
-    void syncEngine.syncAll()
+    void syncEngine.syncAll(undefined, { automatic: true })
   }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 }).catch((error: unknown) => {
-  dialog.showErrorBox(say('library.unreachable'), (error as Error).message)
+  /* Une base intacte qu'on n'a pas pu ouvrir le dit dans la langue de l'interface, avec ce
+     qu'il faut faire : ce n'est pas la même situation qu'une base abîmée, et rien n'a bougé. */
+  const message =
+    error instanceof LibraryUnavailable
+      ? say(
+          error.reason === 'locked'
+            ? 'library.locked'
+            : error.reason === 'denied'
+              ? 'library.denied'
+              : 'library.openFailed',
+          { detail: error.detail }
+        )
+      : (error as Error).message
+  dialog.showErrorBox(say('library.unreachable'), message)
   app.quit()
 })
 
@@ -1073,5 +1123,6 @@ app.on('before-quit', () => {
   if (organizerAfterSyncTimer) clearTimeout(organizerAfterSyncTimer)
   if (windowInteractionTimer) clearTimeout(windowInteractionTimer)
   stopUpdater()
+  stopBackupSchedule()
   closeDb()
 })

@@ -32,6 +32,9 @@ const fr = {
   'sidebar.noTagsYet': 'Aucun pour l’instant',
   'sidebar.showAllTags': 'Voir {count} tag|Voir les {count} tags',
   'sidebar.collapse': 'Réduire',
+  'sidebar.filterTags': 'Filtrer les tags',
+  'sidebar.noTagMatch': 'Aucun tag ne correspond',
+  'sidebar.moreTags': 'Encore {count} — précisez le filtre|Encore {count} — précisez le filtre',
   'sidebar.settings': 'Réglages',
   'sidebar.newCollection': 'Nouvelle collection',
   'sidebar.collectionName': 'Nom de la collection',
@@ -451,6 +454,23 @@ const fr = {
   'settings.cachePartial':
     '{count} fichier était encore ouvert et n’a pas pu être supprimé. Refermez la vue détaillée puis réessayez.|{count} fichiers étaient encore ouverts et n’ont pas pu être supprimés. Refermez la vue détaillée puis réessayez.',
   'settings.cacheError': 'Le cache n’a pas pu être vidé.',
+  /* Sauvegardes de la base et secours d'ouverture. */
+  'settings.backups': 'Sauvegardes de la base',
+  'settings.backupsLast':
+    'Dernière le {date} · {count} copie · {size}|Dernière le {date} · {count} copies · {size}',
+  'settings.backupsNone': 'Aucune pour l’instant',
+  'settings.backupsPolicy':
+    'Une copie par jour, dans le dossier de la bibliothèque : les sept derniers jours, puis une par semaine sur un mois.',
+  'settings.backupsFailed': 'La dernière sauvegarde automatique a échoué : {detail}',
+  'settings.backupNow': 'Sauvegarder maintenant',
+  'settings.backingUp': 'Sauvegarde…',
+  'settings.openBackups': 'Ouvrir le dossier des sauvegardes',
+  'notice.backupDone': 'Base sauvegardée · {date}',
+  'notice.backupFailed': 'La sauvegarde n’a pas pu être écrite.',
+  'notice.libraryRestored':
+    'Votre bibliothèque ne s’ouvrait plus. Magpie l’a restaurée depuis la sauvegarde du {date} : ce qui a changé depuis est perdu. Le fichier d’origine est gardé à part, dans le dossier de la bibliothèque.',
+  'notice.libraryReset':
+    'Votre bibliothèque ne s’ouvrait plus, et aucune sauvegarde saine ne pouvait la remplacer : Magpie repart d’une bibliothèque vide. Le fichier d’origine est gardé à part, dans le dossier de la bibliothèque.',
   'actions.more': 'Autres actions',
   'actions.organize': 'Organiser en collections',
   'actions.autoOrganize': 'Ranger après chaque synchronisation',
@@ -480,6 +500,48 @@ const fr = {
     'Ce texte est écrit dans PROMPT.md. Vous pouvez l’adapter avant de le copier — c’est vous qui conversez, pas Magpie.',
   'export.done':
     '{posts} posts exportés · {collections} collections · {transcripts} transcriptions · {size}',
+
+  /* L'export JSON et l'import, dans les réglages — voir LibraryTransfer. */
+  'transfer.title': 'Exporter ou importer la bibliothèque',
+  'transfer.lead':
+    'Un seul fichier JSON avec tout ce que vous avez rangé : posts, tags, favoris, étiquettes, transcriptions et collections. De quoi changer d’ordinateur, garder une copie ou réunir deux bibliothèques.',
+  'transfer.export': 'Exporter en JSON…',
+  'transfer.import': 'Importer…',
+  'transfer.includeRaw':
+    'Inclure les réponses brutes des plateformes (fichier bien plus lourd, utile pour relire un post plus tard)',
+  'transfer.stop': 'Arrêter',
+  'transfer.exporting': 'Export en cours…',
+  'transfer.reading': 'Lecture du fichier…',
+  'transfer.importing': 'Import en cours…',
+  'transfer.undoing': 'Annulation en cours…',
+  'transfer.progress': '{done} / {total} posts',
+  'transfer.exported':
+    '{count} post exporté dans {path} ({size}).|{count} posts exportés dans {path} ({size}).',
+  'transfer.exportStopped': 'Export arrêté : aucun fichier n’a été écrit.',
+  'transfer.previewFile': '{file} — exporté le {date} par Magpie {version}',
+  'transfer.previewNew': '{count} nouveau post|{count} nouveaux posts',
+  'transfer.previewExisting':
+    '{count} post déjà là : ses tags, son favori et sa transcription s’y ajoutent, rien n’est remplacé|{count} posts déjà là : leurs tags, favoris et transcriptions s’y ajoutent, rien n’est remplacé',
+  'transfer.previewCollections':
+    '{count} collection · nouvelles : {fresh} · rejointes par leur nom : {matched}|{count} collections · nouvelles : {fresh} · rejointes par leur nom : {matched}',
+  'transfer.previewInvalid':
+    '{count} entrée illisible ou en double, ignorée|{count} entrées illisibles ou en double, ignorées',
+  'transfer.confirm': 'Importer',
+  'transfer.cancel': 'Annuler',
+  'transfer.done': 'Import terminé',
+  'transfer.stopped': 'Import arrêté en route : ce qui précède est importé',
+  'transfer.lastImport': 'Dernier import : {file}, le {date}',
+  'transfer.reportNothing':
+    'Rien de neuf : cette bibliothèque contenait déjà tout ce que ce fichier apporte.',
+  'transfer.reportAdded': '{count} post ajouté|{count} posts ajoutés',
+  'transfer.reportMerged': '{count} post existant enrichi|{count} posts existants enrichis',
+  'transfer.reportDetail':
+    'tags : {tags} · favoris : {favourites} · étiquettes : {labels} · transcriptions : {transcripts}',
+  'transfer.reportCollections': 'collections créées : {created} · complétées : {completed}',
+  'transfer.undo': 'Annuler cet import',
+  'transfer.undoYes':
+    'Retirer {count} post ajouté et défaire le reste|Retirer les {count} posts ajoutés et défaire le reste',
+  'transfer.undone': 'Import annulé : {count} post retiré|Import annulé : {count} posts retirés',
   'actions.prepareThumbs': 'Télécharger les images des tuiles',
   'actions.prepareClips': 'Télécharger les vidéos en {quality}',
   'actions.recheck': 'Revérifier toute la bibliothèque',
@@ -518,6 +580,7 @@ const fr = {
   'downloads.queued': 'En attente · {count} à faire',
   'downloads.kind.models': 'Téléchargement des modèles',
   'downloads.kind.export': 'Export',
+  'downloads.kind.import': 'Import',
   'downloads.kind.sync': 'Synchronisation',
   'downloads.kind.thumbnails': 'Images des tuiles',
   'downloads.kind.images': 'Lecture des images',
@@ -546,6 +609,12 @@ const fr = {
     'Vider le cache conserve les posts, tags et favoris. Les vignettes se régénèrent tant que le lien de la plateforme est encore valide — sur une bibliothèque ancienne, une resynchronisation complète du compte peut être nécessaire pour les renouveler.',
   'settings.guide': 'Aide et prise en main',
   'settings.guideHint': 'Revoir les principales fonctions de Magpie et la connexion des comptes.',
+  'settings.support': 'Dépannage',
+  'settings.supportHint':
+    'Le journal de Magpie et l’état de cette installation, à joindre à un signalement. Ni cookie, ni jeton, ni légende n’y figure.',
+  'settings.openLogs': 'Ouvrir le dossier des journaux',
+  'settings.copyDiagnostics': 'Copier le diagnostic',
+  'notice.diagnosticsCopied': 'Diagnostic copié dans le presse-papier.',
   'settings.updates': 'Mises à jour',
   'settings.updatesHint':
     'Magpie vérifie automatiquement les nouvelles versions et les télécharge en arrière-plan.',
@@ -679,7 +748,20 @@ const fr = {
   'shortcuts.media': 'Image précédente ou suivante d’un carrousel',
   'shortcuts.fullscreen': 'Plein écran',
   'shortcuts.closePost': 'Fermer, ou quitter le plein écran',
-  'shortcuts.openPost': 'Ouvrir le post sélectionné',
+  'shortcuts.openPost': 'Ouvrir le post de la carte active',
+  /* Le mur au clavier : flèches, aperçu, sélection. */
+  'shortcuts.space': 'Espace',
+  'shortcuts.shift': 'Maj',
+  'shortcuts.click': 'clic',
+  'shortcuts.wallMove': 'Passer à la carte voisine',
+  'shortcuts.wallPreview': 'Aperçu : la vidéo se lit, le carrousel défile (en sélection : cocher)',
+  'shortcuts.selectAll': 'Sélectionner tout le résultat',
+  'shortcuts.selectRange': 'Sélectionner jusqu’à cette carte',
+  'shortcuts.selectOne': 'Ajouter une carte à la sélection, ou l’en retirer',
+  'shortcuts.wallEscape': 'Arrêter l’aperçu, puis quitter la sélection',
+  'card.openLabel': 'Post de {who} : {excerpt}',
+  'card.openLabelBare': 'Post de {who}',
+  'notice.collectionsReadFailed': 'Les collections n’ont pas pu être lues.',
 
   'welcome.tagline':
     'Vos signets et likes Instagram et X, enfin réunis au même endroit.',
@@ -772,6 +854,9 @@ const en: Record<TranslationKey, string> = {
   'sidebar.noTagsYet': 'None yet',
   'sidebar.showAllTags': 'Show {count} tag|Show all {count} tags',
   'sidebar.collapse': 'Show fewer',
+  'sidebar.filterTags': 'Filter tags',
+  'sidebar.noTagMatch': 'No tag matches',
+  'sidebar.moreTags': '{count} more — narrow the filter|{count} more — narrow the filter',
   'sidebar.settings': 'Settings',
   'sidebar.newCollection': 'New collection',
   'sidebar.collectionName': 'Collection name',
@@ -1186,6 +1271,22 @@ const en: Record<TranslationKey, string> = {
   'settings.cachePartial':
     '{count} file was still open and could not be deleted. Close the detail view and try again.|{count} files were still open and could not be deleted. Close the detail view and try again.',
   'settings.cacheError': 'The cache could not be cleared.',
+  'settings.backups': 'Database backups',
+  'settings.backupsLast':
+    'Latest on {date} · {count} copy · {size}|Latest on {date} · {count} copies · {size}',
+  'settings.backupsNone': 'None yet',
+  'settings.backupsPolicy':
+    'One copy a day, inside the library folder: the last seven days, then one a week for a month.',
+  'settings.backupsFailed': 'The last automatic backup failed: {detail}',
+  'settings.backupNow': 'Back up now',
+  'settings.backingUp': 'Backing up…',
+  'settings.openBackups': 'Open backups folder',
+  'notice.backupDone': 'Database backed up · {date}',
+  'notice.backupFailed': 'The backup could not be written.',
+  'notice.libraryRestored':
+    'Your library would no longer open. Magpie restored it from the backup of {date}: anything changed since then is lost. The original file is kept aside, in the library folder.',
+  'notice.libraryReset':
+    'Your library would no longer open, and no sound backup could replace it: Magpie is starting from an empty library. The original file is kept aside, in the library folder.',
   'actions.more': 'More actions',
   'actions.organize': 'Organise into collections',
   'actions.autoOrganize': 'Organise after every sync',
@@ -1215,6 +1316,46 @@ const en: Record<TranslationKey, string> = {
     'This text is written to PROMPT.md. Adapt it before copying — you are the one having the conversation, not Magpie.',
   'export.done':
     '{posts} posts exported · {collections} collections · {transcripts} transcripts · {size}',
+
+  'transfer.title': 'Export or import the library',
+  'transfer.lead':
+    'A single JSON file with everything you organised: posts, tags, favourites, labels, transcripts and collections. Enough to move to another computer, keep a copy or merge two libraries.',
+  'transfer.export': 'Export as JSON…',
+  'transfer.import': 'Import…',
+  'transfer.includeRaw':
+    'Include the platforms’ raw responses (a much larger file, useful to re-read a post later)',
+  'transfer.stop': 'Stop',
+  'transfer.exporting': 'Exporting…',
+  'transfer.reading': 'Reading the file…',
+  'transfer.importing': 'Importing…',
+  'transfer.undoing': 'Undoing…',
+  'transfer.progress': '{done} / {total} posts',
+  'transfer.exported':
+    '{count} post exported to {path} ({size}).|{count} posts exported to {path} ({size}).',
+  'transfer.exportStopped': 'Export stopped: no file was written.',
+  'transfer.previewFile': '{file} — exported on {date} by Magpie {version}',
+  'transfer.previewNew': '{count} new post|{count} new posts',
+  'transfer.previewExisting':
+    '{count} post already here: its tags, favourite and transcript are added, nothing is replaced|{count} posts already here: their tags, favourites and transcripts are added, nothing is replaced',
+  'transfer.previewCollections':
+    '{count} collection · new: {fresh} · joined by name: {matched}|{count} collections · new: {fresh} · joined by name: {matched}',
+  'transfer.previewInvalid':
+    '{count} unreadable or duplicate entry, skipped|{count} unreadable or duplicate entries, skipped',
+  'transfer.confirm': 'Import',
+  'transfer.cancel': 'Cancel',
+  'transfer.done': 'Import finished',
+  'transfer.stopped': 'Import stopped midway: what came before is imported',
+  'transfer.lastImport': 'Last import: {file}, on {date}',
+  'transfer.reportNothing': 'Nothing new: this library already held everything this file brings.',
+  'transfer.reportAdded': '{count} post added|{count} posts added',
+  'transfer.reportMerged': '{count} existing post enriched|{count} existing posts enriched',
+  'transfer.reportDetail':
+    'tags: {tags} · favourites: {favourites} · labels: {labels} · transcripts: {transcripts}',
+  'transfer.reportCollections': 'collections created: {created} · completed: {completed}',
+  'transfer.undo': 'Undo this import',
+  'transfer.undoYes':
+    'Remove {count} added post and undo the rest|Remove the {count} added posts and undo the rest',
+  'transfer.undone': 'Import undone: {count} post removed|Import undone: {count} posts removed',
   'actions.prepareThumbs': 'Download tile images',
   'actions.prepareClips': 'Download videos in {quality}',
   'actions.recheck': 'Re-check the whole library',
@@ -1253,6 +1394,7 @@ const en: Record<TranslationKey, string> = {
   'downloads.queued': 'Queued · {count} to go',
   'downloads.kind.models': 'Downloading the models',
   'downloads.kind.export': 'Export',
+  'downloads.kind.import': 'Import',
   'downloads.kind.sync': 'Syncing',
   'downloads.kind.thumbnails': 'Tile images',
   'downloads.kind.images': 'Reading images',
@@ -1281,6 +1423,12 @@ const en: Record<TranslationKey, string> = {
     'Clearing the cache keeps posts, tags and favourites. Thumbnails regenerate as long as the platform link is still valid — on an older library, a full account re-sync may be needed to renew them.',
   'settings.guide': 'Help and getting started',
   'settings.guideHint': 'Review Magpie\'s main features and account connection.',
+  'settings.support': 'Troubleshooting',
+  'settings.supportHint':
+    'Magpie’s log and the state of this installation, to attach to a report. No cookie, token or caption is ever written to them.',
+  'settings.openLogs': 'Open logs folder',
+  'settings.copyDiagnostics': 'Copy diagnostics',
+  'notice.diagnosticsCopied': 'Diagnostics copied to the clipboard.',
   'settings.updates': 'Updates',
   'settings.updatesHint':
     'Magpie automatically checks for new versions and downloads them in the background.',
@@ -1414,7 +1562,20 @@ const en: Record<TranslationKey, string> = {
   'shortcuts.media': 'Previous or next image in a carousel',
   'shortcuts.fullscreen': 'Full screen',
   'shortcuts.closePost': 'Close, or leave full screen',
-  'shortcuts.openPost': 'Open the selected post',
+  'shortcuts.openPost': 'Open the active card’s post',
+  /* Le mur au clavier : flèches, aperçu, sélection. */
+  'shortcuts.space': 'Space',
+  'shortcuts.shift': 'Shift',
+  'shortcuts.click': 'click',
+  'shortcuts.wallMove': 'Move to the neighbouring card',
+  'shortcuts.wallPreview': 'Preview: the video plays, the carousel turns (when selecting: tick)',
+  'shortcuts.selectAll': 'Select the whole result',
+  'shortcuts.selectRange': 'Select up to this card',
+  'shortcuts.selectOne': 'Add a card to the selection, or take it out',
+  'shortcuts.wallEscape': 'Stop the preview, then leave the selection',
+  'card.openLabel': 'Post by {who}: {excerpt}',
+  'card.openLabelBare': 'Post by {who}',
+  'notice.collectionsReadFailed': 'The collections could not be read.',
 
   'welcome.tagline':
     'Your Instagram and X bookmarks and likes, finally together in one place.',

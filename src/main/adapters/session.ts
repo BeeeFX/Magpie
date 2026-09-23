@@ -1,18 +1,41 @@
-import { BrowserWindow, session, type Session } from 'electron'
+import { app, BrowserWindow, session, type Session } from 'electron'
+import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Platform } from '@shared/types'
+import { PLATFORMS } from '@shared/types'
 
 /**
  * Sessions par plateforme. Voir SPEC.md §5 et §10.
  *
  * Chaque plateforme vit dans une partition Electron isolée : ses cookies ne fuient pas
- * vers les autres, et « Déconnecter » purge réellement quelque chose. Le stockage est
- * celui, chiffré, de Chromium.
+ * vers les autres, et « Déconnecter » purge réellement quelque chose.
+ *
+ * Ce commentaire affirmait que le stockage était « celui, chiffré, de Chromium ». Il ne
+ * l'était pas : Electron écrit ses cookies **en clair** tant que le fusible
+ * `EnableCookieEncryption` n'est pas posé, et il ne l'était pas — le `sessionid` d'Instagram et
+ * l'`auth_token` de X se lisaient dans `userData/Partitions/magpie-*`. Le fusible est
+ * désormais posé à l'empaquetage (`electron-builder.yml`) : la version installée chiffre avec
+ * la clé du système (DPAPI sous Windows). Un lancement de développement, qui tourne sur le
+ * binaire Electron non modifié, les écrit toujours en clair.
+ *
+ * Ce que ces fenêtres ont le droit d'ouvrir, de demander et de visiter se décide dans
+ * `security.ts`, pour elles comme pour toutes les autres.
  */
 
-const PARTITION: Record<Platform, string> = {
-  instagram: 'persist:magpie-instagram',
-  x: 'persist:magpie-x',
-  reddit: 'persist:magpie-reddit'
+/**
+ * Le développement ne se connecte pas dans les partitions de la version installée.
+ *
+ * Le fusible de chiffrement n'est posé que sur le binaire empaqueté. Un Electron sans lui,
+ * devant un magasin chiffré, ne sait pas en lire les cookies — et **les efface** (constaté :
+ * la table était vide après un seul lancement). Or le développement et l'application
+ * installée partagent le même profil — les deux s'appellent `magpie` dans leur `package.json`,
+ * donc `%APPDATA%\magpie` : un `npm run dev` aurait déconnecté l'application installée. Le
+ * développement a donc ses propres partitions, et s'y connecte une fois.
+ */
+function partition(platform: Platform): string {
+  // Lu à l'appel, pas au chargement : les contrôles importent ce module hors d'Electron.
+  return `${app.isPackaged ? 'persist:magpie-' : 'persist:magpie-dev-'}${platform}`
 }
 
 /** Cookie dont la présence atteste d'une session ouverte. */
@@ -50,10 +73,76 @@ export function userAgent(): string {
   return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`
 }
 
+/** Les trois partitions, pour leur poser la même politique (`security.ts`). */
+export function platformSessions(): Session[] {
+  return PLATFORMS.map((platform) => session.fromPartition(partition(platform)))
+}
+
+/**
+ * Réécrit, chiffrés, les cookies qu'une version antérieure a laissés en clair.
+ *
+ * Le fusible chiffre ce qui s'écrit, pas ce qui est déjà là : Chromium relit un cookie en
+ * clair sans jamais le réécrire (constaté : après un lancement de la version chiffrante, le
+ * `sessionid` était toujours en clair dans la base). Or le `sessionid` d'Instagram et
+ * l'`auth_token` de X vivent des mois sans être redéposés — ils le seraient restés jusqu'à la
+ * prochaine connexion. On les repose donc une fois, à l'identique : Chromium remplace la
+ * ligne, chiffrée cette fois (`v10…`). Les cookies des fournisseurs de connexion — Google,
+ * Apple, Facebook — vivent dans les mêmes partitions et suivent le même chemin.
+ *
+ * Seulement dans la version installée, la seule qui chiffre. Un échec laisse le marqueur
+ * absent : on réessaiera au prochain lancement, et d'ici là rien n'est perdu.
+ */
+export async function encryptPlaintextCookies(): Promise<void> {
+  if (!app.isPackaged) return
+  const marker = join(app.getPath('userData'), 'cookies-encrypted')
+  if (existsSync(marker)) return
+  let rewritten = 0
+  let skipped = 0
+  try {
+    for (const ses of platformSessions()) {
+      for (const cookie of await ses.cookies.get({})) {
+        if (!cookie.domain) {
+          skipped++
+          continue
+        }
+        const host = cookie.domain.replace(/^\./, '')
+        try {
+          await ses.cookies.set({
+            url: `${cookie.secure ? 'https' : 'http'}://${host}${cookie.path ?? '/'}`,
+            name: cookie.name,
+            value: cookie.value,
+            // Un cookie d'hôte reste d'hôte : lui donner un domaine l'étendrait aux sous-domaines.
+            ...(cookie.hostOnly ? {} : { domain: cookie.domain }),
+            path: cookie.path,
+            secure: cookie.secure,
+            httpOnly: cookie.httpOnly,
+            ...(cookie.session || cookie.expirationDate === undefined
+              ? {}
+              : { expirationDate: cookie.expirationDate }),
+            sameSite: cookie.sameSite
+          })
+          rewritten++
+        } catch {
+          skipped++
+        }
+      }
+      await ses.cookies.flushStore()
+    }
+    await writeFile(marker, 'EnableCookieEncryption\n')
+    // Des nombres seulement : ni nom, ni valeur de cookie n'ont à passer par le journal.
+    console.log(
+      `[magpie] Cookies des plateformes réécrits chiffrés : ${rewritten}` +
+        (skipped > 0 ? `, ${skipped} laissé(s) tel(s) quel(s).` : '.')
+    )
+  } catch (error) {
+    console.warn('[magpie] Chiffrement des cookies existants reporté :', error)
+  }
+}
+
 export function sessionFor(platform: Platform): Session {
-  const partition = session.fromPartition(PARTITION[platform])
-  partition.setUserAgent(userAgent())
-  return partition
+  const ses = session.fromPartition(partition(platform))
+  ses.setUserAgent(userAgent())
+  return ses
 }
 
 export async function cookiesFor(platform: Platform, url?: string): Promise<Map<string, string>> {
@@ -104,24 +193,10 @@ export function openLogin(platform: Platform, parent?: BrowserWindow): Promise<v
       webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true }
     })
 
-    win.webContents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith('https://') || url.startsWith('http://')) {
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            parent: win,
-            autoHideMenuBar: true,
-            webPreferences: {
-              session: ses,
-              contextIsolation: true,
-              nodeIntegration: false,
-              sandbox: true
-            }
-          }
-        }
-      }
-      return { action: 'deny' }
-    })
+    /* Les popups — la connexion Facebook d'Instagram, Google et Apple pour X — et les
+       navigations de cette fenêtre sont gardés par `security.ts` : `https:` seulement, dans
+       cette même partition, sans aucune permission. Ce gestionnaire-ci acceptait aussi le
+       `http:` en clair, et ne regardait pas où la fenêtre elle-même partait. */
 
     let settled = false
     const finish = (fn: () => void): void => {

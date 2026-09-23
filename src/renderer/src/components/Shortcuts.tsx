@@ -17,12 +17,14 @@ import { IconClose } from './Icons'
  * La liste est tenue à la main, et c'est un engagement : elle ne doit décrire que des touches
  * qui font réellement quelque chose. Une liste qui ment coûte plus cher que pas de liste.
  * Les sources, dans l'ordre : `App.tsx` pour les trois globales, `Toolbar.tsx` pour la
- * recherche, `Detail.tsx` pour le lecteur, `Card.tsx` pour l'ouverture au clavier.
+ * recherche, `Detail.tsx` pour le lecteur, `Grid.tsx` et `Card.tsx` pour le mur. Celles du mur
+ * sont tenues par `check:shortcuts`, qui refuse une ligne dont il ne trouve pas le câblage.
  */
 
 interface Row {
   keys: (string | TranslationKey)[]
-  /** Les touches nommées se traduisent — « Échap » n'est pas « Esc ». */
+  /** Les touches nommées se traduisent — « Échap » n'est pas « Esc ». `mod` reste la touche
+   *  de commande de la machine, traduite ou non. */
   translateKeys?: boolean
   label: TranslationKey
 }
@@ -50,8 +52,23 @@ const GROUPS: { title: TranslationKey; rows: Row[] }[] = [
     ]
   },
   {
+    /* Le mur n'avait que l'Entrée. Les flèches suivent la géométrie du mur plutôt qu'un
+       index — voir `neighbourItem` —, et la sélection gagne les deux gestes qu'on attend de
+       n'importe quelle liste : tout, et une plage. */
     title: 'shortcuts.groupWall',
-    rows: [{ keys: ['shortcuts.enter'], translateKeys: true, label: 'shortcuts.openPost' }]
+    rows: [
+      { keys: ['←', '→', '↑', '↓'], label: 'shortcuts.wallMove' },
+      { keys: ['shortcuts.space'], translateKeys: true, label: 'shortcuts.wallPreview' },
+      { keys: ['shortcuts.enter'], translateKeys: true, label: 'shortcuts.openPost' },
+      { keys: ['mod', 'A'], label: 'shortcuts.selectAll' },
+      {
+        keys: ['shortcuts.shift', 'shortcuts.click'],
+        translateKeys: true,
+        label: 'shortcuts.selectRange'
+      },
+      { keys: ['mod', 'shortcuts.click'], translateKeys: true, label: 'shortcuts.selectOne' },
+      { keys: ['shortcuts.esc'], translateKeys: true, label: 'shortcuts.wallEscape' }
+    ]
   },
   {
     /* Les deux gestes de la carte que rien n'annonçait. Le clic droit est le **seul** geste
@@ -127,10 +144,10 @@ export function Shortcuts(): React.JSX.Element | null {
                   <span className="shortcuts__keys">
                     {row.keys.map((key) => (
                       <kbd key={key}>
-                        {row.translateKeys
-                          ? t(key as TranslationKey)
-                          : key === 'mod'
-                            ? modifier
+                        {key === 'mod'
+                          ? modifier
+                          : row.translateKeys
+                            ? t(key as TranslationKey)
                             : key}
                       </kbd>
                     ))}

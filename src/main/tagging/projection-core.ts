@@ -749,6 +749,232 @@ export function projectSync(
   return normalise(umap.getEmbedding()).map((point, index) => ({ id: ids[index], ...point }))
 }
 
+/** Voisins consultés pour poser un post nouveau sur la carte figée. */
+export const PLACEMENT_NEIGHBOURS = 12
+
+/**
+ * Ce que le placement reçoit : des lignes à plat, et lesquelles ont déjà une place.
+ *
+ * Des indices plutôt que des identifiants : le fil n'a pas à reconstruire de table, et tout
+ * traverse en quelques transferts au lieu de dix mille objets sérialisés.
+ */
+export interface PlacementInput {
+  /** Un vecteur par ligne, ancres et nouveaux mêlés, dans l'ordre de l'appelant. */
+  flat: Float32Array
+  width: number
+  /** Les lignes déjà placées, **dans l'ordre de la carte figée** — il départage les égalités. */
+  anchors: Int32Array
+  anchorX: Float64Array
+  anchorY: Float64Array
+  /** Les lignes à placer. */
+  fresh: Int32Array
+}
+
+/** Les dimensions nulles pour toutes les lignes : un regard qui annule un bloc en a 384. */
+function liveDimensions(flat: Float32Array, width: number, rows: Int32Array): Int32Array | null {
+  const live = new Uint8Array(width)
+  for (const row of rows) {
+    const base = row * width
+    for (let i = 0; i < width; i += 1) if (flat[base + i] !== 0) live[i] = 1
+  }
+  let count = 0
+  for (let i = 0; i < width; i += 1) count += live[i]
+  if (count === width) return null
+  const kept = new Int32Array(count)
+  for (let i = 0, k = 0; i < width; i += 1) if (live[i]) kept[k++] = i
+  return kept
+}
+
+/** La longueur utile d'un vecteur : au-delà, il n'y a que des zéros. */
+function usefulLength(vector: Float32Array): number {
+  let end = vector.length
+  while (end > 0 && vector[end - 1] === 0) end -= 1
+  return end
+}
+
+/**
+ * Place les posts nouveaux contre une carte déjà figée.
+ *
+ * Ceux qui y sont déjà gardent leur place, au pixel près — l'appelant ne les envoie même pas.
+ * Les nouveaux se posent à la moyenne pondérée de leurs douze plus proches voisins **dans
+ * l'espace des vecteurs**, ce qui est au fond ce que fait `umap.transform` — sauf que celui-ci
+ * exige le modèle en mémoire, et umap-js ne sait pas le sérialiser : il ne survivrait pas à la
+ * fermeture de l'application, alors que les positions, elles, sont en base. Le poids décroît
+ * avec la distance, donc un post qui ressemble beaucoup à un voisin se pose sur lui plutôt
+ * qu'au milieu d'un groupe hétéroclite.
+ *
+ * **Le résultat est celui de la version d'origine, au bit près** — celle qui tournait sur le
+ * processus principal et comparait chaque nouveau à chaque ancre, sur toute la largeur, sans
+ * jamais rendre la main : 1,9 s de fenêtre figée pour cinquante posts contre 9 500 ancres, une
+ * minute et demie à la limite du quart de posts nouveaux. Trois économies, aucune approchée :
+ *
+ *   - **quatre nouveaux contre deux ancres à la fois.** Chaque valeur lue sert huit produits au
+ *     lieu d'un ; chaque somme reste parcourue dans l'ordre, un terme après l'autre, donc chaque
+ *     distance est exactement celle d'avant. Mesuré : 2,8 fois plus rapide ;
+ *   - **les zéros sautés.** Un post sans image n'a que 384 dimensions utiles sur 1 536, et un
+ *     regard qui annule un bloc l'annule pour tous. Ajouter un produit nul à une somme ne la
+ *     change pas, donc ne pas l'ajouter non plus ;
+ *   - **les douze meilleurs tenus par insertion**, sans trier à chaque remplacement. L'insertion
+ *     place un nouveau venu après ses égaux, exactement là où le tri stable le mettait : les
+ *     égalités se départagent dans le même ordre, et la moyenne finale s'additionne dans le même
+ *     ordre. Un tas aurait rendu le même ensemble, mais pas le même ordre de sommation.
+ *
+ * Rend `[x, y]` à plat, dans l'ordre de `fresh`. Les vecteurs doivent être finis : c'est ce qui
+ * permet de dire qu'un produit par zéro est nul.
+ */
+export function placeSync(
+  input: PlacementInput,
+  onProgress?: (done: number, total: number) => void
+): Float64Array {
+  const { flat, width, anchors, anchorX, anchorY, fresh } = input
+  const out = new Float64Array(fresh.length * 2)
+  if (fresh.length === 0) return out
+  if (anchors.length === 0) {
+    // Aucune ancre : rien pour dire où poser, et le centre vaut mieux qu'un coin.
+    out.fill(0.5)
+    return out
+  }
+
+  const every = new Int32Array(anchors.length + fresh.length)
+  every.set(anchors)
+  every.set(fresh, anchors.length)
+  const live = liveDimensions(flat, width, every)
+  const span = live ? live.length : width
+  const rowOf = (row: number): Float32Array => {
+    const whole = flat.subarray(row * width, (row + 1) * width)
+    if (!live) return whole
+    const packed = new Float32Array(span)
+    for (let k = 0; k < span; k += 1) packed[k] = whole[live[k]]
+    return packed
+  }
+  const anchorRows = Array.from(anchors, rowOf)
+  const anchorEnd = Int32Array.from(anchorRows, usefulLength)
+  const queryRows = Array.from(fresh, rowOf)
+  const queryEnd = Int32Array.from(queryRows, usefulLength)
+  const nothing = new Float32Array(span)
+
+  const K = PLACEMENT_NEIGHBOURS
+  const bestD = new Float64Array(4 * K)
+  const bestI = new Int32Array(4 * K)
+  const count = new Int32Array(4)
+  /* Tri stable par insertion : un nouveau venu passe après ses égaux, et chasse le dernier
+     quand la liste est pleine — ce que faisaient `push` puis `sort`, et le remplacement du
+     dernier puis `sort`. */
+  const offer = (slot: number, distance: number, anchor: number): void => {
+    const base = slot * K
+    let at = count[slot]
+    if (at === K) {
+      if (!(distance < bestD[base + K - 1])) return
+      at = K - 1
+    } else {
+      count[slot] = at + 1
+    }
+    while (at > 0 && bestD[base + at - 1] > distance) {
+      bestD[base + at] = bestD[base + at - 1]
+      bestI[base + at] = bestI[base + at - 1]
+      at -= 1
+    }
+    bestD[base + at] = distance
+    bestI[base + at] = anchor
+  }
+
+  let lastReport = Date.now()
+  for (let start = 0; start < fresh.length; start += 4) {
+    const size = Math.min(4, fresh.length - start)
+    /* Un bloc incomplet se complète de zéros : leurs sommes sont calculées puis ignorées. */
+    const q0 = queryRows[start]
+    const q1 = size > 1 ? queryRows[start + 1] : nothing
+    const q2 = size > 2 ? queryRows[start + 2] : nothing
+    const q3 = size > 3 ? queryRows[start + 3] : nothing
+    let reach = 0
+    for (let j = 0; j < size; j += 1) reach = Math.max(reach, queryEnd[start + j])
+    count.fill(0)
+
+    let a = 0
+    for (; a + 1 < anchorRows.length; a += 2) {
+      const u = anchorRows[a]
+      const v = anchorRows[a + 1]
+      /* Au-delà, chaque produit a un facteur nul : celui de l'ancre, ou celui du post. */
+      const end = Math.min(reach, Math.max(anchorEnd[a], anchorEnd[a + 1]))
+      let u0 = 0
+      let u1 = 0
+      let u2 = 0
+      let u3 = 0
+      let v0 = 0
+      let v1 = 0
+      let v2 = 0
+      let v3 = 0
+      for (let i = 0; i < end; i += 1) {
+        const x = u[i]
+        const y = v[i]
+        const w0 = q0[i]
+        const w1 = q1[i]
+        const w2 = q2[i]
+        const w3 = q3[i]
+        u0 += w0 * x
+        u1 += w1 * x
+        u2 += w2 * x
+        u3 += w3 * x
+        v0 += w0 * y
+        v1 += w1 * y
+        v2 += w2 * y
+        v3 += w3 * y
+      }
+      /* Ancre par ancre, dans l'ordre : c'est l'ordre des offres qui départage les égalités. */
+      offer(0, 1 - u0, a)
+      offer(0, 1 - v0, a + 1)
+      if (size > 1) {
+        offer(1, 1 - u1, a)
+        offer(1, 1 - v1, a + 1)
+      }
+      if (size > 2) {
+        offer(2, 1 - u2, a)
+        offer(2, 1 - v2, a + 1)
+      }
+      if (size > 3) {
+        offer(3, 1 - u3, a)
+        offer(3, 1 - v3, a + 1)
+      }
+    }
+    if (a < anchorRows.length) {
+      const u = anchorRows[a]
+      const end = Math.min(reach, anchorEnd[a])
+      const dots = [0, 0, 0, 0]
+      for (let i = 0; i < end; i += 1) {
+        const x = u[i]
+        dots[0] += q0[i] * x
+        dots[1] += q1[i] * x
+        dots[2] += q2[i] * x
+        dots[3] += q3[i] * x
+      }
+      for (let j = 0; j < size; j += 1) offer(j, 1 - dots[j], a)
+    }
+
+    for (let j = 0; j < size; j += 1) {
+      let weight = 0
+      let x = 0
+      let y = 0
+      for (let k = 0; k < count[j]; k += 1) {
+        const w = 1 / (bestD[j * K + k] + 0.05)
+        const anchor = bestI[j * K + k]
+        weight += w
+        x += anchorX[anchor] * w
+        y += anchorY[anchor] * w
+      }
+      out[(start + j) * 2] = x / weight
+      out[(start + j) * 2 + 1] = y / weight
+    }
+
+    const now = Date.now()
+    if (now - lastReport >= 200) {
+      lastReport = now
+      onProgress?.(start + size, fresh.length)
+    }
+  }
+  onProgress?.(fresh.length, fresh.length)
+  return out
+}
+
 /**
  * Lance la projection dans un fil et rend la main tout du long.
  *

@@ -1,6 +1,6 @@
 import { getDb } from '../db'
 import { BLEND, blockMean, centreBy, encodeTopicPrompts, toVector } from './vision'
-import { embedTexts } from './embeddings'
+import { embedTexts, textVectorsRevision } from './embeddings'
 
 /**
  * Une collection est une requête, pas une région.
@@ -75,6 +75,8 @@ export interface Scores {
  * bibliothèque immobile ne le change pas.
  */
 interface Blocks {
+  /** Les réécritures de vecteurs de texte connues au moment du calcul. Voir `libraryBlocks`. */
+  revision: number
   ids: string[]
   text: Map<string, Float32Array>
   meaning: Map<string, Float32Array>
@@ -105,9 +107,20 @@ function libraryBlocks(): Blocks {
     )
     .all() as { id: string; meaning: Buffer }[]
 
-  if (blocks && blocks.ids.length === textRows.length && blocks.meaning.size === meaningRows.length) {
+  /* Le compte ne suffit pas : un post réencodé — sa transcription vient d'arriver — garde sa
+     ligne, et les collections le notaient sur son ancien vecteur jusqu'au redémarrage. */
+  const revision = textVectorsRevision()
+  if (
+    blocks &&
+    blocks.revision === revision &&
+    blocks.ids.length === textRows.length &&
+    blocks.meaning.size === meaningRows.length
+  ) {
     return blocks
   }
+  /* Les scores de mots ont été calculés contre les blocs qu'on remplace. Ils ne s'invalidaient
+     que par leur longueur, donc jamais quand seul le contenu bougeait. */
+  wordScores.clear()
 
   const rawText = textRows.map((row) => toVector(row.vector))
   const rawMeaning = meaningRows.map((row) => toVector(row.meaning))
@@ -115,6 +128,7 @@ function libraryBlocks(): Blocks {
   const meaningMean = blockMean(rawMeaning)
 
   blocks = {
+    revision,
     ids: textRows.map((row) => row.id),
     text: new Map(textRows.map((row, at) => [row.id, centreBy(rawText[at], textMean)])),
     meaning: new Map(meaningRows.map((row, at) => [row.id, centreBy(rawMeaning[at], meaningMean)])),

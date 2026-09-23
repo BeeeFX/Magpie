@@ -5,9 +5,10 @@ import { spawn } from 'node:child_process'
 import sharp from 'sharp'
 import ffmpegPath from 'ffmpeg-static'
 import type { Platform, PostQuery } from '@shared/types'
-import { downloadMediaToFile, fetchMedia, MediaLimitExceeded } from '../adapters/http'
+import { downloadMediaToFile, fetchMedia, HttpError, MediaLimitExceeded } from '../adapters/http'
 import { mediaDir } from '../db'
 import {
+  awaitFreshThumbnailLink,
   pendingClips,
   pendingThumbnails,
   pendingThumbnailsForPosts,
@@ -21,6 +22,7 @@ import {
   thumbnailPathsForPosts,
 } from '../db/queries'
 import { readSettings } from '../settings'
+import { isMediaUrlExpired, mediaUrlExpiry } from './freshness'
 import { THUMB_NAME_PATTERN, VIDEO_NAME_PATTERN, thumbName, videoName } from './names'
 
 /**
@@ -53,7 +55,47 @@ function warnMedia(postId: string, idx: number, error: unknown): void {
 
 export { THUMB_NAME_PATTERN, VIDEO_NAME_PATTERN } from './names'
 
-class CacheQuotaReached extends Error {}
+export class CacheQuotaReached extends Error {}
+
+/**
+ * La vignette n'a qu'un lien distant, et ce lien a déjà passé sa date.
+ *
+ * Le télécharger quand même, c'était recevoir un 403 à coup sûr — et le compter comme un échec.
+ * On ne le tente donc pas : la vignette attend un lien neuf (voir `THUMB_AWAITING_LINK`).
+ */
+export function thumbnailLinkExpired(
+  sourcePath: string | null,
+  remoteUrl: string | null,
+  now = Date.now()
+): boolean {
+  if (sourcePath && existsSync(sourcePath)) return false
+  return Boolean(remoteUrl && /^https?:/.test(remoteUrl) && isMediaUrlExpired(remoteUrl, 60_000, now))
+}
+
+/**
+ * Ce qu'un échec de vignette dit du média.
+ *
+ * - `quota` : le disque, pas le média. Le compter comme une tentative faisait perdre ses trois
+ *   chances à chaque vignette croisée pendant que le cache débordait ;
+ * - `link` : un refus du CDN sur un lien signé. La date inscrite dans le lien peut encore
+ *   courir — Instagram révoque aussi des signatures avant terme —, mais un 403 sur un lien
+ *   signé est la signature même d'un lien périmé, pas d'un média perdu ;
+ * - `attempt` : tout le reste, qui compte.
+ */
+export type ThumbnailFailure = 'attempt' | 'link' | 'quota'
+
+export function thumbnailFailure(error: unknown, remoteUrl: string | null): ThumbnailFailure {
+  if (error instanceof CacheQuotaReached) return 'quota'
+  if (
+    error instanceof HttpError &&
+    (error.status === 403 || error.status === 410) &&
+    remoteUrl !== null &&
+    mediaUrlExpiry(remoteUrl) !== null
+  ) {
+    return 'link'
+  }
+  return 'attempt'
+}
 
 /**
  * Part du disque alloué réservée aux vignettes.
@@ -482,7 +524,14 @@ export interface CacheOutcome extends CacheProgress {
   hasMore: boolean
   /** Les vignettes se chassent entre elles : leur part est pleine, l'étape ne finira pas. */
   thumbnailsCapped: boolean
+  /** Le quota des clips. Celui des vignettes a son propre drapeau, juste en dessous. */
   quotaReached: boolean
+  /**
+   * Une vignette n'a pas trouvé de place même après éviction. Elle ne compte plus de tentative,
+   * donc rien ne l'use jusqu'à l'abandon : sans ce drapeau, la file la reprendrait aussitôt, en
+   * boucle, contre le même mur.
+   */
+  thumbnailQuota: boolean
 }
 
 /**
@@ -564,30 +613,51 @@ export async function processPendingMedia({
   const changedPostIds = new Set<string>()
 
   if (total === 0) {
-    return { done: 0, total: 0, hasMore: false, quotaReached: false, thumbnailsCapped: false }
+    return {
+      done: 0,
+      total: 0,
+      hasMore: false,
+      quotaReached: false,
+      thumbnailsCapped: false,
+      thumbnailQuota: false
+    }
   }
 
+  let thumbnailQuota = false
   let cursor = 0
   const worker = async (): Promise<void> => {
-    while (cursor < pending.length && !shouldPause?.() && !quotaReached) {
+    while (cursor < pending.length && !shouldPause?.() && !quotaReached && !thumbnailQuota) {
       const item = pending[cursor++]
       try {
         if (item.type === 'thumb') {
-          await buildThumbnail(
-            item.platform,
-            item.post_id,
-            item.idx,
-            item.source_path,
-            item.remote_url,
-            signal
-          )
+          if (thumbnailLinkExpired(item.source_path, item.remote_url)) {
+            /* Hors file jusqu'au lien neuf, sans tentative perdue. Le renouvellement vient de
+               la grille — ce qu'on regarde — ou de la prochaine synchronisation. */
+            awaitFreshThumbnailLink(item.post_id, item.idx, item.remote_url)
+          } else {
+            await buildThumbnail(
+              item.platform,
+              item.post_id,
+              item.idx,
+              item.source_path,
+              item.remote_url,
+              signal
+            )
+          }
         } else if (item.video_source && (clips || readSettings().mediaStorageMode === 'offline')) {
           await cacheVideo(item.platform, item.post_id, item.idx, item.video_source, signal)
         }
       } catch (err) {
-        if (err instanceof CacheQuotaReached) quotaReached = true
-        if (item.type === 'thumb' && !signal?.aborted) {
-          markThumbnailFailure(item.post_id, item.idx)
+        if (err instanceof CacheQuotaReached) {
+          if (item.type === 'thumb') thumbnailQuota = true
+          else quotaReached = true
+        }
+        const verdict = item.type === 'thumb' ? thumbnailFailure(err, item.remote_url) : null
+        if (verdict && !signal?.aborted) {
+          if (verdict === 'attempt') markThumbnailFailure(item.post_id, item.idx)
+          else if (verdict === 'link') {
+            awaitFreshThumbnailLink(item.post_id, item.idx, item.remote_url)
+          }
         }
         if (item.type === 'video' && !signal?.aborted) {
           markVideoCacheResult(
@@ -596,7 +666,8 @@ export async function processPendingMedia({
             err instanceof CacheQuotaReached ? 'skipped' : 'pending'
           )
         }
-        if (!signal?.aborted) warnMedia(item.post_id, item.idx, err)
+        /* Un lien périmé n'est pas une panne : il ne mérite pas une ligne de journal par carte. */
+        if (!signal?.aborted && verdict !== 'link') warnMedia(item.post_id, item.idx, err)
       }
       done++
       changedPostIds.add(item.post_id)
@@ -609,5 +680,14 @@ export async function processPendingMedia({
 
   await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker))
   if (changedPostIds.size > 0) onProgress?.({ done, total, postIds: [...changedPostIds] })
-  return { done, total, hasMore, quotaReached, thumbnailsCapped: takeThumbnailPressure() }
+  return {
+    done,
+    total,
+    hasMore,
+    quotaReached,
+    /* Une vignette qui ne trouve pas de place même après éviction dit la même chose qu'une
+       vignette qui en chasse une autre : la part des vignettes est trop petite. */
+    thumbnailsCapped: takeThumbnailPressure() || thumbnailQuota,
+    thumbnailQuota
+  }
 }

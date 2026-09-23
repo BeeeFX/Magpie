@@ -12,11 +12,15 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { registerFunctions } from './functions'
+import type { LibraryRecovery } from '@shared/types'
+import { listRestoreCandidates, type BackupFile } from './backup-files'
+import { backfillFoldedNames, registerFunctions } from './functions'
 import { MIGRATIONS, SCHEMA_SQL, SCHEMA_VERSION } from './schema'
 
 let db: Database.Database | null = null
 let openFailure: Error | null = null
+/** Ce que le secours a fait à l'ouverture, en attendant que l'interface le demande. */
+let recovery: LibraryRecovery | null = null
 
 /**
  * Où vit la bibliothèque, par défaut.
@@ -135,6 +139,84 @@ class LibraryFromTheFuture extends Error {}
 class LibraryMigrationFailed extends Error {}
 
 /**
+ * Une base en schéma plus ancien que celui déjà ouvert ici : une copie ancienne a pris la place
+ * de la vraie. Le fichier est sain, mais ce n'est plus la bibliothèque — on la remplace comme
+ * une base abîmée. Sa propre classe, parce que `quick_check` ne la distinguerait de rien.
+ */
+class LibraryRegressed extends Error {}
+
+/**
+ * Une base qu'on n'a pas pu ouvrir, et qui **n'est pas abîmée** : verrouillée par un autre
+ * programme, interdite d'accès, ou tombée sur une erreur qui ne dit rien du fichier.
+ *
+ * Le secours prenait tout échec d'ouverture pour une corruption. Un antivirus ou un outil de
+ * synchronisation qui tenait le fichier suffisait donc à mettre de côté une bibliothèque
+ * intacte et à restaurer une sauvegarde — qui pouvait dater de plusieurs mois. Ce cas-là se dit,
+ * et on ne touche à rien : relancer une fois le verrou levé rend tout.
+ */
+export class LibraryUnavailable extends Error {
+  constructor(
+    readonly reason: 'locked' | 'denied' | 'other',
+    readonly detail: string
+  ) {
+    super(`Bibliothèque non ouverte (${reason}) : ${detail}. Elle n’a pas été modifiée.`)
+    this.name = 'LibraryUnavailable'
+  }
+}
+
+/** Le secours d'ouverture, une seule fois : l'interface l'annonce au premier écran. */
+export function takeLibraryRecovery(): LibraryRecovery | null {
+  const taken = recovery
+  recovery = null
+  return taken
+}
+
+const CORRUPT_CODES = /^SQLITE_(CORRUPT|NOTADB)/
+const LOCK_CODES = /^(SQLITE_(BUSY|LOCKED)|EBUSY$)/
+const DENIED_CODES = /^(SQLITE_(CANTOPEN|PERM|READONLY|AUTH)|EACCES$|EPERM$|EROFS$)/
+
+function errorCode(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code
+  return typeof code === 'string' ? code : ''
+}
+
+function isCorruption(error: unknown): boolean {
+  return CORRUPT_CODES.test(errorCode(error))
+}
+
+/**
+ * Ce qu'un échec d'ouverture dit du fichier.
+ *
+ * Le code SQLite tranche le plus souvent : `SQLITE_NOTADB` et `SQLITE_CORRUPT` désignent le
+ * fichier, un verrou ou un refus d'accès désignent son environnement. Quand il ne tranche pas,
+ * on demande au fichier lui-même, en lecture seule : `quick_check` parcourt chaque page sans
+ * rien écrire. Seul un fichier qui échoue à ce contrôle — ou qu'on ne peut même pas lire comme
+ * une base — est déclaré abîmé.
+ */
+function diagnose(path: string, error: unknown): 'corrupt' | LibraryUnavailable['reason'] {
+  const verdict = (code: string): 'corrupt' | LibraryUnavailable['reason'] | null =>
+    CORRUPT_CODES.test(code)
+      ? 'corrupt'
+      : LOCK_CODES.test(code)
+        ? 'locked'
+        : DENIED_CODES.test(code)
+          ? 'denied'
+          : null
+  const fromError = verdict(errorCode(error))
+  if (fromError) return fromError
+
+  let probe: Database.Database | null = null
+  try {
+    probe = new Database(path, { readonly: true, fileMustExist: true, timeout: 1000 })
+    return probe.pragma('quick_check', { simple: true }) === 'ok' ? 'other' : 'corrupt'
+  } catch (probeError) {
+    return verdict(errorCode(probeError)) ?? 'other'
+  } finally {
+    probe?.close()
+  }
+}
+
+/**
  * Ouvre la bibliothèque, et la remet debout si elle ne s'ouvre pas.
  *
  * Un cas réel : le fichier principal s'est retrouvé remplacé par une base bien plus
@@ -161,12 +243,22 @@ function openLibrary(): Database.Database {
   } catch (error) {
     if (error instanceof LibraryFromTheFuture) throw error
     if (error instanceof LibraryMigrationFailed) throw error
+    /* Un échec n'est pas une corruption. Seule une base abîmée — ou remplacée par une copie
+       plus ancienne — justifie qu'on la mette de côté ; le reste se dit, sans rien toucher. */
+    if (!(error instanceof LibraryRegressed)) {
+      const verdict = diagnose(path, error)
+      if (verdict !== 'corrupt') {
+        console.error('[magpie] Bibliothèque non ouverte, et pas abîmée :', error)
+        throw new LibraryUnavailable(verdict, error instanceof Error ? error.message : String(error))
+      }
+    }
     console.error('[magpie] Bibliothèque illisible :', error)
-    quarantineLibrary(path)
+    const setAside = quarantineLibrary(path)
     const restored = restoreNewestBackup(path)
+    recovery = { restoredAt: restored?.at ?? null, setAside }
     console.log(
       restored
-        ? `[magpie] Bibliothèque restaurée depuis ${restored}.`
+        ? `[magpie] Bibliothèque restaurée depuis ${restored.name} (${new Date(restored.at).toISOString()}).`
         : '[magpie] Aucune sauvegarde exploitable : nouvelle bibliothèque vide.'
     )
     // Une sauvegarde d'avant-migration est légitimement d'un schéma antérieur : lui
@@ -226,7 +318,7 @@ function prepareConnection(
    */
   const seen = readLibraryState()
   if (!acceptOlderSchema && seen && current > 0 && current < seen.schemaVersion) {
-    throw new Error(
+    throw new LibraryRegressed(
       `Base en schéma v${current} alors que v${seen.schemaVersion} a déjà été ouvert ici ` +
         `(${seen.posts} posts connus). Fichier probablement remplacé par une copie plus ancienne.`
     )
@@ -237,6 +329,9 @@ function prepareConnection(
     try {
       conn.exec(`VACUUM INTO '${join(dataDir(), name).replaceAll("'", "''")}'`)
     } catch (error) {
+      /* Une base abîmée fait échouer la copie aussi : ce n'est pas le disque qu'il faut
+         accuser, c'est le fichier, et le secours de `openLibrary` doit le savoir. */
+      if (isCorruption(error)) throw error
       /* Le filet est une copie intégrale : 285 Mo sur la bibliothèque de référence, écrits
          hors transaction, juste à côté d’un dossier média qui pèse dix-huit gigaoctets. Un
          disque plein le fait échouer — et faisait alors écarter une base parfaitement saine.
@@ -255,10 +350,22 @@ function prepareConnection(
     migrate(conn)
   } catch (error) {
     if (error instanceof LibraryFromTheFuture) throw error
+    if (isCorruption(error)) throw error
     throw new LibraryMigrationFailed(
       `La migration du schéma a échoué : ${error instanceof Error ? error.message : String(error)}. ` +
         `Votre bibliothèque n’a pas été modifiée.`
     )
+  }
+  /* Ce que l'échelle ne peut pas faire en SQL pur : le repli des noms d'auteur, voir
+     `backfillFoldedNames`. Un échec ne ferme pas la bibliothèque — la recherche perd seulement
+     les noms pas encore repliés, et le prochain démarrage reprend où celui-ci s'est arrêté. */
+  try {
+    const folded = backfillFoldedNames(conn)
+    if (folded > 0) console.log(`[magpie] Noms d’auteur repliés pour la recherche : ${folded}.`)
+  } catch (error) {
+    // Une page abîmée découverte ici relève du secours d'ouverture, comme ailleurs.
+    if (isCorruption(error)) throw error
+    console.warn('[magpie] Repli des noms d’auteur impossible', error)
   }
   rememberLibraryState(conn)
   /* Le ménage se fait à chaque ouverture réussie, et c’est le changement qui compte.
@@ -305,6 +412,10 @@ function rememberLibraryState(conn: Database.Database): void {
     )
     renameSync(temporary, libraryStateFile())
   } catch (error) {
+    /* Ce comptage parcourt toute la table des posts, à chaque ouverture : c'est le seul endroit
+       où une page abîmée peut se révéler avant que l'interface ne tombe dessus. Il ne faut pas
+       l'avaler avec le reste. */
+    if (isCorruption(error)) throw error
     // L'empreinte est un garde-fou, pas une dépendance : son absence ne bloque rien.
     console.warn('[magpie] Empreinte de bibliothèque non écrite', error)
   }
@@ -322,21 +433,37 @@ const QUARANTINE_NAME_PATTERN = /^magpie-illisible-[\dTZ.:-]+\.db$/
  */
 const QUARANTINE_KEEP = 2
 
-/** Écarte la base illisible et ses journaux, sans jamais supprimer ce qu'on vient d'écarter. */
-function quarantineLibrary(path: string): void {
+/**
+ * Écarte la base illisible et ses journaux, sans jamais supprimer ce qu'on vient d'écarter.
+ * Rend le nom sous lequel la base a été mise de côté.
+ *
+ * Si la base elle-même ne se laisse pas déplacer, on s'arrête là : restaurer par-dessus
+ * écraserait le seul exemplaire de ce qu'on voulait garder.
+ */
+function quarantineLibrary(path: string): string | null {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const name = `magpie-illisible-${stamp}.db`
+  let setAside: string | null = null
   for (const suffix of ['', '-wal', '-shm']) {
     const source = `${path}${suffix}`
     if (!existsSync(source)) continue
-    const target = join(dataDir(), `magpie-illisible-${stamp}.db${suffix}`)
+    const target = join(dataDir(), `${name}${suffix}`)
     try {
       renameSync(source, target)
+      if (suffix === '') setAside = name
       console.log(`[magpie] Mis de côté : ${target}`)
     } catch (error) {
       console.warn(`[magpie] Impossible d'écarter ${source}`, error)
+      if (suffix === '') {
+        throw new LibraryUnavailable(
+          LOCK_CODES.test(errorCode(error)) ? 'locked' : 'denied',
+          error instanceof Error ? error.message : String(error)
+        )
+      }
     }
   }
   pruneQuarantine()
+  return setAside
 }
 
 /** Ne garde que les mises à l'écart les plus récentes. Voir `QUARANTINE_KEEP`. */
@@ -370,30 +497,42 @@ function pruneQuarantine(): void {
   }
 }
 
-/** Remet en place la sauvegarde la plus récente qui passe un contrôle d'intégrité. */
-function restoreNewestBackup(path: string): string | null {
-  let candidates: string[]
+/**
+ * Une sauvegarde qu'on peut remettre en place : lisible, saine, et d'un schéma que cette
+ * version sait ouvrir — une copie venue du futur ne vaudrait pas mieux que la base qu'elle
+ * remplacerait.
+ */
+function backupIsSound(path: string): boolean {
+  let probe: Database.Database | null = null
   try {
-    candidates = readdirSync(dataDir()).filter((name) => BACKUP_NAME_PATTERN.test(name))
+    probe = new Database(path, { readonly: true, fileMustExist: true })
+    if ((probe.pragma('user_version', { simple: true }) as number) > SCHEMA_VERSION) return false
+    return probe.pragma('quick_check', { simple: true }) === 'ok'
   } catch {
-    return null
+    // Sauvegarde elle-même abîmée : on essaiera la précédente.
+    return false
+  } finally {
+    probe?.close()
   }
+}
 
-  const ordered = candidates
-    .map((name) => ({ name, at: statSync(join(dataDir(), name)).mtimeMs }))
-    .sort((a, b) => b.at - a.at)
-
-  for (const { name } of ordered) {
-    const source = join(dataDir(), name)
+/**
+ * Remet en place la sauvegarde **la plus récente** qui passe le contrôle — régulière ou d'avant
+ * migration, peu importe.
+ *
+ * Seules les secondes existaient, et elles ne naissent qu'à un changement de schéma : le
+ * secours restaurait donc une copie qui pouvait dater de plusieurs mois, choisie de surcroît
+ * sur la date du fichier, que le moindre déplacement de bibliothèque réécrit. Les dates
+ * viennent désormais des noms.
+ */
+function restoreNewestBackup(path: string): BackupFile | null {
+  for (const candidate of listRestoreCandidates(dataDir())) {
+    if (!backupIsSound(candidate.path)) continue
     try {
-      const probe = new Database(source, { readonly: true })
-      const integrity = probe.pragma('integrity_check', { simple: true }) as string
-      probe.close()
-      if (integrity !== 'ok') continue
-      copyFileSync(source, path)
-      return name
-    } catch {
-      // Sauvegarde elle-même abîmée : on essaie la précédente.
+      copyFileSync(candidate.path, path)
+      return candidate
+    } catch (error) {
+      console.warn(`[magpie] ${candidate.name} n’a pas pu être remise en place`, error)
     }
   }
   return null
@@ -469,7 +608,30 @@ function migrate(conn: Database.Database): void {
   }
 }
 
+/**
+ * Rafraîchit les statistiques du planificateur, quand il y a lieu.
+ *
+ * `PRAGMA optimize` ne relance `ANALYZE` que sur les tables qui ont assez changé, et
+ * `analysis_limit` le borne à quelques centaines de lignes par index : 2,4 ms mesurées sur cent
+ * mille posts, rien quand rien n'a bougé. SQLite le recommande à la fermeture et, pour une
+ * connexion qui dure — l'application vit des jours dans la barre système —, de temps en temps :
+ * après une synchronisation, qui est ce qui change la base. Relevé sur cent mille posts, le
+ * comptage d'une recherche sans résultat passe de 18 à 7 ms ; les plans du mur, eux, ne bougent
+ * pas.
+ */
+export function optimizeDb(): void {
+  if (!db) return
+  try {
+    db.pragma('analysis_limit = 400')
+    db.pragma('optimize')
+  } catch (error) {
+    // Des statistiques périmées ralentissent un peu ; elles n'empêchent rien.
+    console.warn('[magpie] Statistiques du planificateur non rafraîchies', error)
+  }
+}
+
 export function closeDb(): void {
+  optimizeDb()
   db?.close()
   db = null
 }

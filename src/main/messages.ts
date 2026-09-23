@@ -54,13 +54,42 @@ const FR = {
   'library.noSpace': 'Espace libre insuffisant dans le dossier choisi.',
   'library.nested': 'Le nouveau dossier ne peut pas se trouver dans la bibliothèque actuelle.',
   'library.unreachable': 'Bibliothèque Magpie inaccessible',
+  /* Une base qu'on n'a pas pu ouvrir sans qu'elle soit abîmée : rien n'a été touché. */
+  'library.locked':
+    'Un autre programme utilise la base de la bibliothèque — un outil de synchronisation de fichiers, un antivirus. Fermez-le, puis relancez Magpie : la bibliothèque n’a pas été modifiée.\n\n{detail}',
+  'library.denied':
+    'Magpie n’a pas le droit d’ouvrir la base de la bibliothèque. Vérifiez les autorisations du dossier, puis relancez Magpie : la bibliothèque n’a pas été modifiée.\n\n{detail}',
+  'library.openFailed':
+    'La base de la bibliothèque n’a pas pu être ouverte, mais elle n’est pas abîmée : Magpie ne l’a pas touchée. Relancez Magpie ; si le problème revient, signalez-le avec ce détail.\n\n{detail}',
 
   'media.linkExpired':
     'La source en ligne de ce média a expiré. Synchronisez à nouveau le compte.',
   'media.noSource': 'Aucune source en ligne enregistrée pour ce média.',
 
   'vault.unavailable': 'Le coffre sécurisé du système n’est pas disponible sur cet ordinateur.',
-  'vault.noKey': 'Aucune clé API enregistrée pour ce fournisseur.'
+  'vault.noKey': 'Aucune clé API enregistrée pour ce fournisseur.',
+
+  /* L'export JSON et l'import : les boîtes du système, et ce qu'un fichier refusé dit de lui. */
+  'transfer.exportTitle': 'Exporter la bibliothèque',
+  'transfer.importTitle': 'Importer une bibliothèque Magpie',
+  'transfer.fileFilter': 'Bibliothèque Magpie',
+  'transfer.notMagpie': 'Ce fichier n’est pas un export de bibliothèque Magpie.',
+  'transfer.newerVersion':
+    'Ce fichier vient d’une version plus récente de Magpie (format {version}). Mettez l’application à jour pour l’importer.',
+  'transfer.invalidJson':
+    'Ce fichier est abîmé ou tronqué : sa lecture échoue vers le caractère {at}.',
+  'transfer.tooLarge': 'Ce fichier dépasse ce que Magpie accepte d’importer.',
+  'transfer.unreadable': 'Ce fichier ne peut pas être lu.',
+  'transfer.busy': 'Un export ou un import est déjà en cours.',
+  'transfer.changed': 'Le fichier a changé depuis son aperçu. Choisissez-le de nouveau.',
+  'transfer.noUndo': 'Il n’y a pas d’import à annuler.',
+  /* La fenêtre principale tombée deux fois de suite (`recovery.ts`). */
+  'crash.relapse': 'La fenêtre de Magpie s’est arrêtée deux fois de suite.',
+  'crash.relapseDetail':
+    'Votre bibliothèque n’est pas touchée. Le journal dit ce qui s’est passé : joignez-le à un signalement si cela se reproduit.',
+  'crash.reload': 'Recharger',
+  'crash.openLogs': 'Ouvrir le dossier des journaux',
+  'crash.quit': 'Quitter'
 } as const
 
 export type MessageKey = keyof typeof FR
@@ -88,12 +117,37 @@ const EN: Record<MessageKey, string> = {
   'library.noSpace': 'Not enough free space in the chosen folder.',
   'library.nested': 'The new folder cannot sit inside the current library.',
   'library.unreachable': 'Magpie library unreachable',
+  'library.locked':
+    'Another program is using the library database — a file-sync tool or an antivirus. Close it, then restart Magpie: your library has not been changed.\n\n{detail}',
+  'library.denied':
+    'Magpie is not allowed to open the library database. Check the folder’s permissions, then restart Magpie: your library has not been changed.\n\n{detail}',
+  'library.openFailed':
+    'The library database could not be opened, but it is not damaged: Magpie left it untouched. Restart Magpie; if this happens again, report it with this detail.\n\n{detail}',
 
   'media.linkExpired': 'The online source for this media expired. Sync the account again.',
   'media.noSource': 'No online source recorded for this media.',
 
   'vault.unavailable': 'The system’s secure store is not available on this computer.',
-  'vault.noKey': 'No API key saved for this provider.'
+  'vault.noKey': 'No API key saved for this provider.',
+
+  'transfer.exportTitle': 'Export the library',
+  'transfer.importTitle': 'Import a Magpie library',
+  'transfer.fileFilter': 'Magpie library',
+  'transfer.notMagpie': 'This file is not a Magpie library export.',
+  'transfer.newerVersion':
+    'This file comes from a newer version of Magpie (format {version}). Update the app to import it.',
+  'transfer.invalidJson': 'This file is damaged or truncated: reading fails around character {at}.',
+  'transfer.tooLarge': 'This file is larger than Magpie accepts to import.',
+  'transfer.unreadable': 'This file cannot be read.',
+  'transfer.busy': 'An export or an import is already running.',
+  'transfer.changed': 'The file changed since its preview. Choose it again.',
+  'transfer.noUndo': 'There is no import to undo.',
+  'crash.relapse': 'Magpie’s window stopped twice in a row.',
+  'crash.relapseDetail':
+    'Your library is untouched. The log says what happened: attach it to a report if this happens again.',
+  'crash.reload': 'Reload',
+  'crash.openLogs': 'Open logs folder',
+  'crash.quit': 'Quit'
 }
 
 const DICTIONARIES: Record<'fr' | 'en', Record<MessageKey, string>> = { fr: FR, en: EN }

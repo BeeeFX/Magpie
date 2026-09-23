@@ -1,5 +1,6 @@
 import { code, read } from './source'
-import { readdirSync } from 'node:fs'
+import { mkdtempSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /**
@@ -56,7 +57,8 @@ const DESTRUCTIVE: Record<string, string> = {
   untagSelection: 'retire un tag sur toute la sélection, et perd son origine',
   deleteCollection: 'supprime une collection et son contenu',
   mergeCollections: 'fond deux collections, la source disparaît',
-  archivePosts: 'retire des posts de la bibliothèque — ils quittent toutes les vues et tous les calculs'
+  archivePosts: 'retire des posts de la bibliothèque — ils quittent toutes les vues et tous les calculs',
+  undoLibraryImport: 'supprime les posts qu’un import a ajoutés, avec ce qu’on leur a fait depuis'
 }
 
 /** Ce qui couvre chaque site d'appel, nommément. */
@@ -132,6 +134,12 @@ const GUARDS: { file: string; call: string; guard: RegExp | null; why: string }[
     call: 'archiveSelection',
     guard: /confirm=\{query\.archived/,
     why: 'un ConfirmButton qui compte les posts, et la notification porte l’annulation'
+  },
+  {
+    file: 'LibraryTransfer.tsx',
+    call: 'undoLibraryImport',
+    guard: /confirm="transfer\.undoYes"/,
+    why: 'un ConfirmButton qui compte les posts qui vont partir'
   }
 ]
 
@@ -219,5 +227,116 @@ console.log('\nla confirmation nomme la conséquence, pas « oui »')
   else fail('le défaut de « Que garder ? » ne garde rien, donc il détruit par inadvertance')
 }
 
-console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} manquement(s).`)
-process.exitCode = failures === 0 ? 0 : 1
+/**
+ * Le filet, rejoué sur une vraie base.
+ *
+ * Le contrôle de source ci-dessus attestait qu'un instantané existe, pas qu'il rende quoi que ce
+ * soit d'utilisable. Il ne rendait pas les vecteurs des mots-clés : une collection rétablie
+ * revenait avec ses mots et sans rien pour noter, et le recalcul qui suit chaque synchronisation
+ * la vidait. Retaper le mot ne réparait rien — seul le poids se mettait à jour. On rejoue donc le
+ * geste entier dans une bibliothèque jetable, par les fonctions livrées.
+ */
+async function restoreRoundTrip(): Promise<void> {
+  console.log('\nune collection rétablie sait encore noter')
+  process.env.MAGPIE_DATA_DIR = mkdtempSync(join(tmpdir(), 'magpie-restore-'))
+  const { getDb } = await import('../src/main/db/index')
+  const collections = await import('../src/main/tagging/collections')
+  const db = getDb()
+  const now = Date.now()
+  const post = db.prepare(
+    `INSERT INTO posts (id, platform, native_id, url, kind, discovered_at, updated_at)
+     VALUES (?, 'x', ?, ?, 'text', ?, ?)`
+  )
+  for (const id of ['p1', 'p2', 'p3']) post.run(id, id, `https://x.com/i/${id}`, now, now)
+  const collection = db.prepare(
+    "INSERT INTO collections (name, sort_index, kind, target_size) VALUES (?, 0, 'query', 10)"
+  )
+  const keyword = db.prepare(
+    `INSERT INTO collection_keywords (collection_id, word, weight, vector_text, vector_meaning, sort_index)
+     VALUES (?, ?, ?, ?, ?, 0)`
+  )
+  const member = db.prepare(
+    'INSERT INTO collection_posts (collection_id, post_id, added_at) VALUES (?, ?, ?)'
+  )
+  const blob = (values: number[]): Buffer => Buffer.from(new Float32Array(values).buffer)
+  const text = blob([0.25, -0.5, 0.125])
+  const meaning = blob([0.75, 0.0625])
+  const synths = Number(collection.run('Synthés').lastInsertRowid)
+  keyword.run(synths, 'synthé modulaire', 1.5, text, meaning)
+  member.run(synths, 'p1', now)
+  member.run(synths, 'p2', now)
+
+  collections.keepOnly([])
+  const gone = db.prepare('SELECT COUNT(*) AS n FROM collections').get() as { n: number }
+  if (gone.n !== 0) fail('« ne rien garder » a laissé des collections derrière lui')
+  collections.restoreRemovedCollections()
+  const back = db.prepare("SELECT id FROM collections WHERE name = 'Synthés'").get() as
+    | { id: number }
+    | undefined
+  const word = back
+    ? (db
+        .prepare(
+          'SELECT weight, vector_text AS text, vector_meaning AS meaning FROM collection_keywords WHERE collection_id = ?'
+        )
+        .get(back.id) as { weight: number; text: Buffer | null; meaning: Buffer | null } | undefined)
+    : undefined
+  if (!back || !word) fail('la collection ou son mot-clé n’est pas revenu')
+  else if (word.text?.equals(text) && word.meaning?.equals(meaning) && word.weight === 1.5) {
+    pass('ses mots-clés reviennent avec leurs vecteurs, à l’octet près')
+  } else fail('ses mots-clés reviennent sans leurs vecteurs : le prochain recalcul la videra')
+
+  /* Un instantané pris avant ce correctif n'a pas de vecteurs. La collection revient quand
+     même, et le recalcul — celui qui suit chaque synchronisation — ne doit pas la vider tant
+     qu'elle ne sait pas noter. Le réencodage échoue ici, faute de modèle : c'est le cas réel
+     d'une machine hors ligne. */
+  db.prepare('INSERT INTO collection_snapshots (id, taken_at, payload) VALUES (1, ?, ?)').run(
+    now,
+    JSON.stringify([
+      {
+        name: 'Vinyles',
+        color: null,
+        kind: 'query',
+        query: null,
+        targetSize: 10,
+        sortIndex: 0,
+        keywords: [{ word: 'vinyle', weight: 1, sortIndex: 0 }],
+        postIds: ['p2', 'p3']
+      }
+    ])
+  )
+  collections.restoreRemovedCollections()
+  /* Le réencodage part en tâche de fond et échoue faute d'Electron : on le laisse le dire ici,
+     à sa place, plutôt qu'après le verdict. */
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  console.log('  (avertissement attendu : pas de modèle ici, le réencodage ne peut qu’échouer)')
+  const vinyls = (db.prepare("SELECT id FROM collections WHERE name = 'Vinyles'").get() as {
+    id: number
+  }).id
+  collections.recompute(vinyls)
+  const kept = db
+    .prepare('SELECT COUNT(*) AS n FROM collection_posts WHERE collection_id = ?')
+    .get(vinyls) as { n: number }
+  if (kept.n === 2) pass('un mot sans vecteur ne vide pas la collection au recalcul')
+  else fail(`le recalcul a vidé une collection qu’il ne sait pas noter (${kept.n} posts sur 2)`)
+
+  /* Et le même mot apporté d'ailleurs remplit le trou au lieu de n'en mettre à jour que le
+     poids — c'est la même clause que l'ajout d'un mot. */
+  const donor = Number(collection.run('Platines').lastInsertRowid)
+  keyword.run(donor, 'vinyle', 2, text, meaning)
+  collections.merge(donor, vinyls)
+  const filled = db
+    .prepare('SELECT vector_text AS text, weight FROM collection_keywords WHERE collection_id = ? AND word = ?')
+    .get(vinyls, 'vinyle') as { text: Buffer | null; weight: number }
+  if (filled.text?.equals(text) && filled.weight === 2) {
+    pass('un mot déjà présent mais sans vecteur reçoit celui qu’on lui apporte')
+  } else fail('un mot sans vecteur le reste même quand on lui en apporte un')
+}
+
+void restoreRoundTrip()
+  .catch((error: unknown) => {
+    fail(`le rétablissement n’a pas pu être rejoué : ${error instanceof Error ? error.message : String(error)}`)
+  })
+  .finally(() => {
+    console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} manquement(s).`)
+    process.exitCode = failures === 0 ? 0 : 1
+  })

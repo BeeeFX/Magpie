@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { join } from 'node:path'
 import ffmpegPath from 'ffmpeg-static'
 import { getDb, mediaDir } from '../db'
@@ -10,7 +10,13 @@ import {
   type Listening
 } from './transcript-text'
 import { transcribeAudio } from './inference'
-import { audioLevel, looksMute, MuteStreak } from './transcript-guard'
+import {
+  audioLevel,
+  extractionOverdue,
+  looksMute,
+  MuteStreak,
+  NETWORK_STALL_MS
+} from './transcript-guard'
 import { clearTranscripts } from '../db/queries'
 import { backgroundTasks } from '../tasks'
 
@@ -20,7 +26,9 @@ import { backgroundTasks } from '../tasks'
  * Sur la bibliothèque de référence, un quart des vidéos n'a aucune prose exploitable : la
  * légende médiane fait douze mots d'accroche là où trente secondes de parole en portent
  * quatre-vingts sur le sujet réel. C'est le plus gros gain de signal disponible, et il sert
- * trois choses à la fois — le regroupement, la recherche plein texte, et l'export.
+ * trois choses à la fois — le regroupement, la recherche plein texte, et l'export. Le
+ * regroupement la lit dans le vecteur de texte, après la légende (`embeddingText`) : c'était
+ * annoncé ici bien avant d'être vrai, `organizationItems` ne la sélectionnait pas.
  *
  * Tout est local : le modèle est téléchargé une fois puis lu depuis le disque, et aucun
  * audio ne quitte la machine. Le seul trafic est la descente des vidéos elles-mêmes.
@@ -53,23 +61,65 @@ const GIVE_UP = 5
  * tableau d'échantillons en mémoire lui survit — et rien ne touche la limite de cache.
  */
 export function extractAudio(source: string, signal?: AbortSignal): Promise<Float32Array> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      ffmpegPath as string,
-      [
-        '-nostdin',
-        '-loglevel', 'error',
-        '-t', String(MAX_SECONDS),
-        '-i', source,
-        '-vn',
-        '-ac', '1',
-        '-ar', String(SAMPLE_RATE),
-        '-f', 'f32le',
-        'pipe:1'
-      ],
-      { windowsHide: true }
-    )
+  /* Arrêté avant d'avoir commencé : l'écouteur d'abandon ne se déclencherait jamais, et ffmpeg
+     irait au bout d'un clip que personne n'attend plus. */
+  if (signal?.aborted) return Promise.reject(new Error('Transcription interrompue.'))
+  const remote = /^https?:\/\//i.test(source)
+  const child = spawn(
+    ffmpegPath as string,
+    [
+      '-nostdin',
+      '-loglevel', 'error',
+      /* Le lecteur HTTP de ffmpeg attend indéfiniment un serveur muet. Réservé au réseau : sur
+         un fichier local l'option n'a rien à borner, et le chien de garde s'en charge. */
+      ...(remote ? ['-rw_timeout', String(NETWORK_STALL_MS * 1000)] : []),
+      '-t', String(MAX_SECONDS),
+      '-i', source,
+      '-vn',
+      '-ac', '1',
+      '-ar', String(SAMPLE_RATE),
+      '-f', 'f32le',
+      'pipe:1'
+    ],
+    { windowsHide: true }
+  )
+  return collectAudio(child, signal)
+}
 
+/**
+ * Une extraction qui a échoué sans rien apprendre de la vidéo.
+ *
+ * Abandonnée faute d'avancer, ou ffmpeg qui ne démarre pas : ni l'un ni l'autre ne dit que le
+ * fichier est illisible ou qu'il n'a pas de son. C'est la machine, le disque ou la connexion.
+ * Sa propre classe, parce que `transcribeAll` tranche sur elle : un échec ordinaire, jamais un
+ * verdict — et un verdict est définitif (voir `transcript-guard.ts`). Un ffmpeg introuvable
+ * déclarait jusqu'ici muet chaque clip en cache qu'on lui présentait.
+ */
+export class ExtractionFault extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ExtractionFault'
+  }
+}
+
+/**
+ * Recueille le son que rend ffmpeg, sous un chien de garde.
+ *
+ * Sans lui, un ffmpeg qui ne rendait plus rien — URL de CDN muette, disque réseau figé —
+ * attendait pour toujours. La transcription s'arrêtait avec lui, et `runAfterSyncSteps` rendait
+ * ensuite la même promesse en suspens à chaque synchronisation : plus aucun rangement
+ * automatique jusqu'au redémarrage. Le budget suit le son déjà rendu (`extractionOverdue`) ;
+ * l'abandon tue le processus, et l'arrêt demandé aussi.
+ *
+ * Séparé du lancement pour que `check:transcribe` l'éprouve sur un processus qui ne rend rien,
+ * sans ffmpeg.
+ */
+export function collectAudio(
+  child: ChildProcessWithoutNullStreams,
+  signal?: AbortSignal,
+  overdue: (elapsedMs: number, audioSeconds: number) => boolean = extractionOverdue
+): Promise<Float32Array> {
+  return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let bytes = 0
     child.stdout.on('data', (chunk: Buffer) => {
@@ -81,17 +131,42 @@ export function extractAudio(source: string, signal?: AbortSignal): Promise<Floa
       stderr += chunk.toString('utf8').slice(0, 400)
     })
 
+    let settled = false
+    const settle = (error: Error | null, audio?: Float32Array): void => {
+      if (settled) return
+      settled = true
+      clearInterval(watchdog)
+      signal?.removeEventListener('abort', stop)
+      if (error) reject(error)
+      else resolve(audio as Float32Array)
+    }
+    const started = Date.now()
+    const watchdog = setInterval(() => {
+      const elapsed = Date.now() - started
+      const heard = bytes / 4 / SAMPLE_RATE
+      if (!overdue(elapsed, heard)) return
+      child.kill('SIGKILL')
+      settle(
+        new ExtractionFault(
+          `ffmpeg n'a rendu que ${Math.round(heard)} s de son en ${Math.round(elapsed / 1000)} s : ` +
+            `extraction abandonnée, la vidéo sera réessayée.`
+        )
+      )
+    }, 1000)
     const stop = (): void => {
       child.kill('SIGKILL')
-      reject(new Error('Transcription interrompue.'))
+      settle(new Error('Transcription interrompue.'))
     }
     signal?.addEventListener('abort', stop, { once: true })
+    if (signal?.aborted) stop()
 
-    child.on('error', reject)
+    child.on('error', (error) => {
+      child.kill('SIGKILL')
+      settle(new ExtractionFault(`ffmpeg n'a pas pu être lancé : ${error.message}`))
+    })
     child.on('close', (code) => {
-      signal?.removeEventListener('abort', stop)
       if (code !== 0 && bytes === 0) {
-        reject(new Error(stderr.trim() || `ffmpeg a échoué (code ${code}).`))
+        settle(new Error(stderr.trim() || `ffmpeg a échoué (code ${code}).`))
         return
       }
       const buffer = Buffer.concat(chunks)
@@ -100,7 +175,7 @@ export function extractAudio(source: string, signal?: AbortSignal): Promise<Floa
       const samples = Math.floor(buffer.byteLength / 4)
       const audio = new Float32Array(samples)
       for (let index = 0; index < samples; index += 1) audio[index] = buffer.readFloatLE(index * 4)
-      resolve(audio)
+      settle(null, audio)
     })
   })
 }
@@ -300,8 +375,12 @@ export function transcribeAll(): Promise<void> {
         } catch (error) {
           if (controller.signal.aborted) break
           console.warn('[magpie] Son inextractible', candidate.postId, error)
-          if (candidate.videoPath) saveTranscript(candidate.postId, null)
-          else noteTranscriptFailure(candidate.postId)
+          /* L'exception à la règle du fichier local : un délai dépassé ou un ffmpeg qui ne
+             démarre pas ne disent rien de la vidéo, seulement que la machine n'a pas suivi.
+             Tentative, jamais verdict. */
+          if (candidate.videoPath && !(error instanceof ExtractionFault)) {
+            saveTranscript(candidate.postId, null)
+          } else noteTranscriptFailure(candidate.postId)
           continue
         }
 

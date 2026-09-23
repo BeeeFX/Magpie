@@ -36,6 +36,34 @@ asarUnpack:
   - 'out/main/projection.worker.js'
   - 'out/main/chunks/**'
 
+# Les fusibles sont gravés dans le binaire d'Electron à l'empaquetage : ce que la version
+# installée ne sait plus faire, aucune variable d'environnement ni option de ligne de commande
+# ne peut le lui rendre. Tous étaient à leur valeur par défaut, c'est-à-dire ouverts.
+electronFuses:
+  # Les cookies des partitions — le `sessionid` d'Instagram, l'`auth_token` de X — étaient
+  # écrits en clair sur le disque. Chiffrés désormais avec la clé du système (DPAPI sous
+  # Windows). Les cookies en clair d'une version antérieure restent lisibles mais Chromium ne
+  # les réécrit pas de lui-même : `encryptPlaintextCookies` (src/main/adapters/session.ts) les
+  # repose une fois, chiffrés. Passage à sens unique : un binaire sans ce fusible, devant un
+  # magasin chiffré, efface ses cookies — le retirer déconnecterait tout le monde.
+  enableCookieEncryption: true
+  # Sans eux, n'importe qui pouvait lancer `Magpie.exe` comme un Node nu, avec du code
+  # arbitraire signé de notre nom (`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, `--inspect`).
+  # Rien dans l'application ne s'en sert : les modèles tournent dans un `utilityProcess`, la
+  # projection dans un `worker_thread`, ffmpeg est un exécutable à part.
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  # L'archive est vérifiée contre l'empreinte qu'electron-builder inscrit dans l'exécutable,
+  # et c'est la seule que l'application accepte de charger — un dossier `app/` posé à côté ne
+  # passe plus devant. Ce qui est déballé (`asarUnpack`) n'est pas couvert : ce sont des
+  # binaires natifs et le fil de projection, qui se lisent hors de l'archive par nature.
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  # Le renderer est servi par `app://magpie` (voir `src/main/renderer-protocol.ts`) : plus
+  # aucune page n'a besoin des privilèges historiques de `file://`.
+  grantFileProtocolExtraPrivileges: false
+
 # L'icône est aussi lue au runtime pour la fenêtre et la zone de notification. Les
 # ressources de build servent normalement seulement à l'installateur, donc on l'embarque
 # explicitement à côté de l'application.

@@ -211,6 +211,86 @@ console.log('l’échelle rejouée en entier')
   check('aucune migration ne lève', errors.length === 0, errors.join(' | '))
 }
 
+/* Le même nom ne suffit pas. Un index homonyme mais défini autrement passait le contrôle
+   précédent — c'est arrivé à `idx_collections_name`, posé par SCHEMA_SQL avec la condition de
+   l'index voisin : il ne couvrait aucune ligne, et une installation neuve acceptait deux
+   collections du même nom. La dernière définition que l'échelle donne d'un index doit donc
+   être, au texte près, celle d'une installation neuve.
+
+   Les déclencheurs et les tables virtuelles suivent la même règle, pour la même raison : la
+   migration 30 redéfinit `posts_fts_au` pour ne plus réindexer à chaque `UPDATE`, et un
+   SCHEMA_SQL resté sur l'ancien texte aurait rendu aux installations neuves exactement le coût
+   qu'elle retire — sans qu'aucun nom ne manque. Les tables ordinaires restent hors du jeu :
+   `ALTER TABLE … ADD COLUMN` les fait grandir sans réécrire leur `CREATE`, et leurs colonnes
+   sont déjà comparées plus haut. */
+console.log('')
+console.log('les index, déclencheurs et tables virtuelles de l’échelle ont leur définition dans SCHEMA_SQL')
+{
+  const normalise = (sql: string): string =>
+    sql
+      .replace(/--[^\n]*/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\bIF\s+(NOT\s+)?EXISTS\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .replace(/\s*([(),])\s*/g, '$1')
+      .replace(/;\s*$/, '')
+      .trim()
+      .toLowerCase()
+
+  const KINDS = [
+    { kind: 'index', label: 'aucun index homonyme défini autrement', create: /^create (?:unique )?index (\w+)/, drop: /^drop index (\w+)/ },
+    { kind: 'trigger', label: 'aucun déclencheur homonyme défini autrement', create: /^create trigger (\w+)/, drop: /^drop trigger (\w+)/ },
+    { kind: 'virtual', label: 'aucune table virtuelle homonyme définie autrement', create: /^create virtual table (\w+)/, drop: /^drop table (\w+)/ }
+  ] as const
+
+  /* Clé `genre:nom` ; `null` : l'objet a été retiré plus loin dans l'échelle. */
+  const last = new Map<string, { sql: string; version: number } | null>()
+  for (const version of versions) {
+    for (const statement of splitStatements(MIGRATIONS[version])) {
+      const text = normalise(statement)
+      for (const { kind, create, drop } of KINDS) {
+        const created = create.exec(text)
+        const dropped = drop.exec(text)
+        if (created) last.set(`${kind}:${created[1]}`, { sql: text, version })
+        else if (dropped) last.set(`${kind}:${dropped[1]}`, null)
+      }
+    }
+  }
+
+  const conn = fresh()
+  const installed = new Map(
+    (
+      conn
+        .prepare(
+          `SELECT type, name, sql FROM sqlite_master
+            WHERE sql IS NOT NULL
+              AND (type IN ('index', 'trigger') OR (type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'))`
+        )
+        .all() as { type: string; name: string; sql: string }[]
+    ).map((row) => [`${row.type === 'table' ? 'virtual' : row.type}:${row.name}`, normalise(row.sql)])
+  )
+  conn.close()
+
+  for (const { kind, label } of KINDS) {
+    const differing: string[] = []
+    let compared = 0
+    for (const [key, definition] of last) {
+      if (!definition || !key.startsWith(`${kind}:`)) continue
+      compared += 1
+      const name = key.slice(kind.length + 1)
+      const fresh = installed.get(key)
+      if (fresh !== undefined && fresh !== definition.sql) {
+        differing.push(`${name} (v${definition.version}) : « ${definition.sql} » ≠ « ${fresh} »`)
+      }
+    }
+    check(
+      label,
+      differing.length === 0,
+      differing.length === 0 ? `${compared} comparé(s)` : differing.join(' | ')
+    )
+  }
+}
+
 console.log('')
 console.log(
   failures === 0

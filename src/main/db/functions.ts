@@ -49,3 +49,25 @@ export function registerFunctions(conn: Database): void {
   )
   conn.function('fold', { deterministic: true }, fold)
 }
+
+/**
+ * Replie les noms d'auteur qui ne le sont pas encore. Rend combien il en a repliés.
+ *
+ * `author_name_folded` est ce que la recherche compare, en `LIKE` natif, à la place d'un
+ * `fold(author_name)` évalué sur chaque post à chaque frappe — voir MIGRATION_31_SQL. La
+ * migration pose la colonne mais ne peut pas la remplir : le repli est du JavaScript, et
+ * l'échelle reste du SQL pur que `check:schema` rejoue sur une connexion nue. D'où ce passage,
+ * à chaque ouverture, juste après l'échelle.
+ *
+ * Il ne coûte qu'une fois. Ensuite `upsertPosts` écrit le repli avec le nom, et la recherche des
+ * lignes restantes passe par `idx_posts_author_folded` : `IS NULL` s'y cherche, et il ne reste
+ * que les posts sans auteur à relire.
+ */
+export function backfillFoldedNames(conn: Database): number {
+  return conn
+    .prepare(
+      `UPDATE posts SET author_name_folded = fold(author_name)
+        WHERE author_name_folded IS NULL AND author_name IS NOT NULL`
+    )
+    .run().changes
+}

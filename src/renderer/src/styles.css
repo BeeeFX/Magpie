@@ -447,6 +447,75 @@ h1, h2, h3 {
   scrollbar-color: var(--field-hover) transparent;
 }
 
+/* Le filtre de la liste dépliée : des milliers de tags ne se parcourent pas à l'œil. Même
+   champ que la création d'une collection, pour que les deux se lisent comme une seule famille. */
+.tag-filter {
+  margin: 0 2px 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.tag-filter:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--hairline));
+}
+
+/* L'aperçu et le compte rendu d'un import : un fait sur le disque, dans la même boîte que
+   l'emplacement de la bibliothèque. */
+.transfer-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 13px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--field);
+  font-size: 11.5px;
+}
+
+.transfer-card strong {
+  color: var(--text);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.transfer-card ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.transfer-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Un bouton de même fond que la boîte qui le porte ne se voit plus comme un bouton. */
+.transfer-card .btn:not(.btn--primary):not(.btn--danger) {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.transfer-raw {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.transfer-raw input {
+  margin-top: 2px;
+}
+
 .sidebar__foot {
   display: flex;
   flex-direction: column;
@@ -1317,6 +1386,40 @@ h1, h2, h3 {
   color: var(--faint);
   font-size: 10.5px;
   font-style: normal;
+}
+
+/* Les sauvegardes de la base : la même boîte, pour la même nature d'information — un fait sur
+   le disque, et les deux gestes qui s'y rapportent. */
+.library-backups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 13px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--field);
+  font-size: 11.5px;
+}
+
+.library-backups > span {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 3px;
+  color: var(--text);
+}
+
+.library-backups em {
+  color: var(--faint);
+  font-size: 10.5px;
+  font-style: normal;
+}
+
+.library-backups__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .library-location {
@@ -7081,4 +7184,30 @@ html.window-is-moving .app *::after {
 .card__why,
 .card__diagnostic {
   z-index: 3;
+}
+
+/* Le clavier voit ce que voit la souris. Les actions et les flèches de carrousel n'existaient
+   qu'au survol : en tabulant dans une carte, on posait le focus sur « Copier le lien » sans
+   rien voir s'allumer, à l'aveugle. `:has(:focus-visible)` plutôt que `:focus-within` : le clic
+   de souris sur l'étoile donne lui aussi le focus, et les actions restaient alors affichées
+   une fois la souris partie. L'aperçu lancé par `Espace` montre les points du carrousel,
+   comme le survol. */
+.card:has(:focus-visible) {
+  z-index: 4;
+}
+
+.card:has(:focus-visible) .card__actions,
+.card:has(:focus-visible) .card__media-nav,
+.card:has(:focus-visible) .card__dots,
+.card:has(:focus-visible) .card__overlay,
+.card.is-previewing .card__dots {
+  opacity: 1;
+}
+
+.card:has(:focus-visible) .icon-btn {
+  transform: scale(1);
+}
+
+.card:has(:focus-visible) .card__badge {
+  opacity: 0;
 }
