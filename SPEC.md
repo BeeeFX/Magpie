@@ -867,7 +867,8 @@ Deux outils non prévus par la spec initiale, tous deux justifiés :
 
 ## 14. Ce que ce document décrit et que l'application ne fait pas
 
-*Relevé le 2026-08-26, à la version 0.42.0. Vérifié dans le code, pas de mémoire.*
+*Relevé le 2026-08-26, à la version 0.42.0 ; revu le 2026-09-23, après les raccourcis du mur,
+l'import JSON et les suggestions de tags. Vérifié dans le code, pas de mémoire.*
 
 Les intentions ci-dessous gardent leur raison d'être — elles restent écrites plus haut, avec leur
 justification — mais elles ne sont **pas** livrées, et aucune n'est en cours.
