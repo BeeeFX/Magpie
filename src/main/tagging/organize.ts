@@ -1139,9 +1139,14 @@ export async function buildOrganizerMap(layout: MapLayout = 'equilibre'): Promis
 /**
  * Les noms qui se découvrent au zoom, sous ceux des amas.
  *
- * Les mots viennent d'où viennent déjà les catégories — légende, tags, transcription — et passent
- * le même tamis que dans `createChoices` : ni facettes, ni mots vides, ni mots qui *sont* déjà un
- * thème. Un sous-amas nommé « vidéo » à l'intérieur de « Film et vidéo » n'apprendrait rien.
+ * Les mots viennent d'où viennent déjà les catégories — légende et tags — et passent le même
+ * tamis que dans `createChoices` : ni facettes, ni mots vides, ni mots qui *sont* déjà un thème.
+ * Un sous-amas nommé « vidéo » à l'intérieur de « Film et vidéo » n'apprendrait rien.
+ *
+ * La transcription n'y est pas, et ce commentaire affirmait le contraire : elle n'a jamais été
+ * lue ici. Elle entre dans le vecteur de texte (`embeddingText`), donc dans ce qui rapproche les
+ * posts, mais pas dans ce qui les *nomme* — voir là-bas pourquoi un mot mal entendu est sans
+ * conséquence dans un vecteur et visible sur une étiquette.
  */
 function nestedLabels(points: OrganizerMap['points']): MapLabel[] {
   const terms = new Map<string, Set<string>>()

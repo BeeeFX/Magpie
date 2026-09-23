@@ -681,6 +681,12 @@ export interface OrganizationItem {
   authorHandle: string | null
   thumbPath: string | null
   tags: string[]
+  /**
+   * Ce que la vidéo dit, quand Whisper l'a écoutée. `null` : pas encore transcrite ; chaîne
+   * vide : écoutée, rien à en tirer. Elle était annoncée partout comme une entrée du
+   * regroupement et n'était pourtant lue nulle part ici — voir `embeddingText`.
+   */
+  transcript: string | null
 }
 
 export function videoAiCandidateIds(): string[] {
@@ -710,7 +716,7 @@ export function videoAiCandidateIds(): string[] {
 export function organizationItems(): OrganizationItem[] {
   const rows = getDb()
     .prepare(
-      `SELECT p.id, p.platform, p.kind, p.text, p.author_handle,
+      `SELECT p.id, p.platform, p.kind, p.text, p.author_handle, p.transcript,
               (SELECT m2.thumb_path FROM media m2
                 WHERE m2.post_id = p.id AND m2.thumb_path IS NOT NULL
                 ORDER BY m2.idx LIMIT 1) AS thumb_path,
@@ -733,6 +739,7 @@ export function organizationItems(): OrganizationItem[] {
     thumb_path: string | null
     sources: string | null
     tags: string | null
+    transcript: string | null
   }[]
   return rows.map((row) => ({
     id: row.id,
@@ -742,7 +749,8 @@ export function organizationItems(): OrganizationItem[] {
     text: row.text,
     authorHandle: row.author_handle,
     thumbPath: row.thumb_path,
-    tags: row.tags?.split(',').filter(Boolean) ?? []
+    tags: row.tags?.split(',').filter(Boolean) ?? [],
+    transcript: row.transcript
   }))
 }
 

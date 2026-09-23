@@ -20,7 +20,9 @@ import { backgroundTasks } from '../tasks'
  * Sur la bibliothèque de référence, un quart des vidéos n'a aucune prose exploitable : la
  * légende médiane fait douze mots d'accroche là où trente secondes de parole en portent
  * quatre-vingts sur le sujet réel. C'est le plus gros gain de signal disponible, et il sert
- * trois choses à la fois — le regroupement, la recherche plein texte, et l'export.
+ * trois choses à la fois — le regroupement, la recherche plein texte, et l'export. Le
+ * regroupement la lit dans le vecteur de texte, après la légende (`embeddingText`) : c'était
+ * annoncé ici bien avant d'être vrai, `organizationItems` ne la sélectionnait pas.
  *
  * Tout est local : le modèle est téléchargé une fois puis lu depuis le disque, et aucun
  * audio ne quitte la machine. Le seul trafic est la descente des vidéos elles-mêmes.

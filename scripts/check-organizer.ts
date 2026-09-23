@@ -10,6 +10,7 @@ import {
   withoutRemovedPosts
 } from '../src/main/tagging/organize'
 import { propagateByImage } from '../src/main/tagging/propagate'
+import { embeddingText } from '../src/main/tagging/embeddings'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Échec : ${message}`)
@@ -32,6 +33,7 @@ function item(
     authorHandle,
     thumbPath: null,
     tags,
+    transcript: null,
     ...extra
   }
 }
@@ -376,6 +378,57 @@ console.log('\nrappel sémantique')
       (entry) => entry.name === 'Music production' && entry.postIds.includes('n1')
     ),
     'un post étranger n’est pas aspiré au passage'
+  )
+}
+
+console.log('\nla parole entre dans le vecteur de texte')
+{
+  /* La transcription était annoncée comme une entrée du regroupement sans qu'aucune ligne ne la
+     lise. Trois choses à tenir : un post sans transcription garde son texte à l'octet près — sans
+     quoi toute la bibliothèque repasserait par le modèle —, la légende n'est jamais évincée, et
+     une légende vide laisse toute la place à la parole. */
+  const before = (entry: OrganizationItem): string => {
+    const text = entry.text?.replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim()
+    const handle = entry.authorHandle?.replace(/^@+/, '')
+    return [text, entry.tags.length > 0 ? entry.tags.join(', ') : null, handle ? `@${handle}` : null]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 512)
+  }
+  const speech =
+    'aujourd hui je vous montre comment on règle un compresseur sur une piste de batterie, ' +
+    'on commence par le seuil puis on règle l attaque et le relâchement pour garder le claquant ' +
+    'de la caisse claire sans écraser le reste du mix, ensuite on compense le gain et on compare '.repeat(4)
+  const plain = item('e1', 'Mixing drums https://t.co/x in Ableton', '@@beats', ['music'])
+  assert(embeddingText(plain) === before(plain), 'sans transcription, le texte est celui d’avant')
+  assert(
+    embeddingText({ ...plain, transcript: '' }) === before(plain),
+    'une transcription vide — « rien à entendre » — ne change rien non plus'
+  )
+  const long = item('e2', `${'Une très longue légende sur le mixage. '.repeat(13)}`, 'beats')
+  assert(
+    embeddingText({ ...long, transcript: speech }) === before(long),
+    'une légende qui remplit le budget ne se laisse pas pousser'
+  )
+
+  const spoken = embeddingText({ ...plain, transcript: speech })
+  assert(spoken.startsWith('Mixing drums in Ableton\n'), 'la légende passe d’abord, intacte')
+  assert(spoken.endsWith('\nmusic\n@beats'), 'les tags et l’auteur restent en place')
+  assert(spoken.length <= 512, `le budget est tenu (${spoken.length} caractères)`)
+  const heard = spoken.split('\n')[1]
+  assert(speech.startsWith(heard) && heard.length >= 48, 'la parole suit la légende')
+  assert(heard.length <= 160, `une légende courte garde la main (${heard.length} caractères de parole)`)
+  assert(!/\S$/.test(speech.slice(0, heard.length + 1)), 'la parole est coupée entre deux mots')
+
+  const mute = item('e3', '😂🔥 wait', null)
+  const alone = embeddingText({ ...mute, transcript: speech })
+  assert(
+    alone.length > 400 && alone.length <= 512,
+    `une légende sans prose laisse toute la place à la parole (${alone.length} caractères)`
+  )
+  assert(
+    embeddingText({ ...item('e4', null), transcript: speech }).length > 400,
+    'un post sans aucun texte est encodé sur sa seule parole'
   )
 }
 
