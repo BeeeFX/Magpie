@@ -176,6 +176,21 @@ export function Grid(): React.JSX.Element {
     setResultsKey((k) => k + 1)
   }, [query])
 
+  /* Un autre filtre, tri ou disposition : un autre mur, qui commence en haut. Le store remet
+     bien `scrollTop` à zéro, mais seule la restauration initiale écrit dans l'élément — on
+     restait au même décalage en pixels, au milieu des nouveaux résultats, les premiers hors
+     de vue au-dessus. Comparé à la valeur précédente plutôt qu'à « premier passage » :
+     StrictMode rejoue les effets au montage, et la restauration n'y survivrait pas. */
+  const shown = useRef({ query, mode })
+  useLayoutEffect(() => {
+    if (shown.current.query === query && shown.current.mode === mode) return
+    shown.current = { query, mode }
+    const element = scrollerRef.current
+    if (!element) return
+    element.scrollTop = 0
+    setScroll(0)
+  }, [query, mode])
+
   /*
    * Une vignette terminée remplace le contenu d'une carte, mais ses dimensions restent
    * celles déjà réservées. La géométrie ne doit donc pas être recalculée pour les milliers
