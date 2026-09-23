@@ -60,7 +60,15 @@ const FR = {
   'media.noSource': 'Aucune source en ligne enregistrée pour ce média.',
 
   'vault.unavailable': 'Le coffre sécurisé du système n’est pas disponible sur cet ordinateur.',
-  'vault.noKey': 'Aucune clé API enregistrée pour ce fournisseur.'
+  'vault.noKey': 'Aucune clé API enregistrée pour ce fournisseur.',
+
+  /* La fenêtre principale tombée deux fois de suite (`recovery.ts`). */
+  'crash.relapse': 'La fenêtre de Magpie s’est arrêtée deux fois de suite.',
+  'crash.relapseDetail':
+    'Votre bibliothèque n’est pas touchée. Le journal dit ce qui s’est passé : joignez-le à un signalement si cela se reproduit.',
+  'crash.reload': 'Recharger',
+  'crash.openLogs': 'Ouvrir le dossier des journaux',
+  'crash.quit': 'Quitter'
 } as const
 
 export type MessageKey = keyof typeof FR
@@ -93,7 +101,14 @@ const EN: Record<MessageKey, string> = {
   'media.noSource': 'No online source recorded for this media.',
 
   'vault.unavailable': 'The system’s secure store is not available on this computer.',
-  'vault.noKey': 'No API key saved for this provider.'
+  'vault.noKey': 'No API key saved for this provider.',
+
+  'crash.relapse': 'Magpie’s window stopped twice in a row.',
+  'crash.relapseDetail':
+    'Your library is untouched. The log says what happened: attach it to a report if this happens again.',
+  'crash.reload': 'Reload',
+  'crash.openLogs': 'Open logs folder',
+  'crash.quit': 'Quit'
 }
 
 const DICTIONARIES: Record<'fr' | 'en', Record<MessageKey, string>> = { fr: FR, en: EN }

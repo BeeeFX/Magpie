@@ -750,6 +750,38 @@ export function Settings(): React.JSX.Element | null {
 
           <div className="modal__sep" />
 
+          {/* Dépannage : ce qu'on joint à un signalement. La version installée n'a pas de
+              console, et le journal n'était écrit nulle part — puis nulle part où le trouver. */}
+          <section className="setting setting--stack">
+            <div className="setting__label">
+              <h3>{t('settings.support')}</h3>
+              <p>{t('settings.supportHint')}</p>
+            </div>
+            <div className="setting__actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void magpie.openLogsFolder().catch(reportFailure('notice.openFailed'))}
+              >
+                {t('settings.openLogs')}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  void magpie
+                    .copyDiagnostics()
+                    .then(() => notifySuccess('notice.diagnosticsCopied'))
+                    .catch(reportFailure('notice.copyFailed'))
+                }
+              >
+                {t('settings.copyDiagnostics')}
+              </button>
+            </div>
+          </section>
+
+          <div className="modal__sep" />
+
           <section className="setting setting--stack">
             <div className="setting__label">
               <h3>{t('settings.guide')}</h3>

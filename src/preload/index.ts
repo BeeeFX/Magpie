@@ -158,6 +158,8 @@ const api: MagpieApi = {
   pruneModels: (): Promise<{ removed: string[]; freed: number }> =>
     ipcRenderer.invoke('models:prune'),
   openDataFolder: (): Promise<void> => ipcRenderer.invoke('app:openDataFolder'),
+  openLogsFolder: (): Promise<void> => ipcRenderer.invoke('app:openLogsFolder'),
+  copyDiagnostics: (): Promise<void> => ipcRenderer.invoke('app:copyDiagnostics'),
   chooseLibraryFolder: (): Promise<{ moved: boolean; path: string }> =>
     ipcRenderer.invoke('library:chooseFolder'),
   getMediaPlaybackUrl: (

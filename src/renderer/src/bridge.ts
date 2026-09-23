@@ -413,6 +413,10 @@ const previewApi: MagpieApi = {
   pruneModels: async () => ({ removed: ['Xenova/clip-vit-base-patch32'], freed: 380 * 1024 ** 2 }),
   clearMediaCache: async () => ({ removed: 0, failed: 0 }),
   openDataFolder: async () => {},
+  openLogsFolder: async () => {},
+  copyDiagnostics: async () => {
+    await navigator.clipboard.writeText('Magpie — aperçu navigateur, sans diagnostic')
+  },
   chooseLibraryFolder: async () => ({ moved: false, path: 'aperçu navigateur' }),
   getMediaPlaybackUrl: async () => '',
   requestThumbnails: async () => {},

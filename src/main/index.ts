@@ -54,6 +54,8 @@ import { seedIfEmpty } from './fixtures/seed'
 import { parseByteRange } from './media/range'
 import { parseRemoteMediaUrl, resolveFreshMedia } from './media/remote'
 import { streamMedia } from './adapters/http'
+import { installLogFile } from './log'
+import { installCrashLogging, watchRenderer } from './recovery'
 
 const isDev = !app.isPackaged
 const APP_ID = 'tv.electrictheatre.magpie'
@@ -90,6 +92,14 @@ if (process.platform === 'win32') app.setAppUserModelId(APP_ID)
 // développeur. Ces deux variables n'ont aucun effet dans l'application distribuée.
 if (isDev && process.env['MAGPIE_DEV_DATA_DIR']) {
   app.setPath('userData', process.env['MAGPIE_DEV_DATA_DIR'])
+}
+
+/* Le journal sur disque, dès que son dossier est connu : c'est lui qui donne une destination
+   aux deux filets ci-dessus dans la version installée, qui n'a pas de console. Une seconde
+   instance ne fait que passer la main : elle n'écrit rien. */
+if (isPrimaryInstance) {
+  installLogFile()
+  installCrashLogging()
 }
 
 // Doit être déclaré avant `app.whenReady()`. `magpie://` sert les médias en cache au
@@ -215,6 +225,8 @@ function createWindow(): void {
       : url.startsWith(rendererUrl)
     if (!allowed) event.preventDefault()
   })
+  // Un renderer qui meurt : `recovery.ts`.
+  watchRenderer(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {

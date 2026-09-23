@@ -546,6 +546,12 @@ const fr = {
     'Vider le cache conserve les posts, tags et favoris. Les vignettes se régénèrent tant que le lien de la plateforme est encore valide — sur une bibliothèque ancienne, une resynchronisation complète du compte peut être nécessaire pour les renouveler.',
   'settings.guide': 'Aide et prise en main',
   'settings.guideHint': 'Revoir les principales fonctions de Magpie et la connexion des comptes.',
+  'settings.support': 'Dépannage',
+  'settings.supportHint':
+    'Le journal de Magpie et l’état de cette installation, à joindre à un signalement. Ni cookie, ni jeton, ni légende n’y figure.',
+  'settings.openLogs': 'Ouvrir le dossier des journaux',
+  'settings.copyDiagnostics': 'Copier le diagnostic',
+  'notice.diagnosticsCopied': 'Diagnostic copié dans le presse-papier.',
   'settings.updates': 'Mises à jour',
   'settings.updatesHint':
     'Magpie vérifie automatiquement les nouvelles versions et les télécharge en arrière-plan.',
@@ -1281,6 +1287,12 @@ const en: Record<TranslationKey, string> = {
     'Clearing the cache keeps posts, tags and favourites. Thumbnails regenerate as long as the platform link is still valid — on an older library, a full account re-sync may be needed to renew them.',
   'settings.guide': 'Help and getting started',
   'settings.guideHint': 'Review Magpie\'s main features and account connection.',
+  'settings.support': 'Troubleshooting',
+  'settings.supportHint':
+    'Magpie’s log and the state of this installation, to attach to a report. No cookie, token or caption is ever written to them.',
+  'settings.openLogs': 'Open logs folder',
+  'settings.copyDiagnostics': 'Copy diagnostics',
+  'notice.diagnosticsCopied': 'Diagnostics copied to the clipboard.',
   'settings.updates': 'Updates',
   'settings.updatesHint':
     'Magpie automatically checks for new versions and downloads them in the background.',
