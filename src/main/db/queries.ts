@@ -1147,11 +1147,11 @@ const upsertPostStmt = () =>
     INSERT INTO posts (id, platform, native_id, url, author_handle, author_name,
                        author_name_folded, text,
                        kind, media_count, published_at, saved_at, discovered_at,
-                       saved_rank, raw, is_demo, updated_at)
+                       saved_rank, raw, is_demo, updated_at, synced_at)
     VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name,
             @author_name_folded, @text,
             @kind, @media_count, @published_at, @saved_at, @discovered_at,
-            @saved_rank, @raw, @is_demo, @updated_at)
+            @saved_rank, @raw, @is_demo, @updated_at, @updated_at)
     ON CONFLICT(id) DO UPDATE SET
       url          = excluded.url,
       author_handle= excluded.author_handle,
@@ -1164,7 +1164,8 @@ const upsertPostStmt = () =>
       saved_at     = COALESCE(posts.saved_at, excluded.saved_at),
       saved_rank   = COALESCE(posts.saved_rank, excluded.saved_rank),
       raw          = excluded.raw,
-      updated_at   = excluded.updated_at
+      updated_at   = excluded.updated_at,
+      synced_at    = excluded.synced_at
   `)
 
 /**
@@ -2184,6 +2185,24 @@ export function awaitFreshThumbnailLink(postId: string, idx: number, remoteUrl: 
         WHERE post_id = ? AND idx = ? AND thumb_path IS NULL AND remote_url IS ?`
     )
     .run(THUMB_AWAITING_LINK, postId, idx, remoteUrl)
+}
+
+/**
+ * Le post n'existe plus côté plateforme : ses vignettes manquantes passent en échec.
+ *
+ * Elles restaient « en préparation » — en attente d'un lien qui ne viendrait jamais —, et la
+ * grille, qui redemande tout ce qui se prépare, relançait leur renouvellement à chaque passage.
+ * Une synchronisation qui retrouverait le post rapporterait un lien neuf, ce qui rend ses
+ * tentatives à la vignette (voir l'upsert des médias).
+ */
+export function abandonThumbnailLinks(postId: string): void {
+  getDb()
+    .prepare(
+      `UPDATE media SET thumb_attempts = 3
+        WHERE post_id = ? AND thumb_path IS NULL AND source_path IS NULL
+          AND (thumb_attempts < 3 OR thumb_attempts = ?)`
+    )
+    .run(postId, THUMB_AWAITING_LINK)
 }
 
 export interface ThumbnailLinkRow {

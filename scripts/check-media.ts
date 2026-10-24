@@ -327,6 +327,22 @@ async function main(): Promise<void> {
     'un post retiré entre-temps n’est pas recréé par un renouvellement'
   )
 
+  queries.awaitFreshThumbnailLink(POST, 0, FRESH.replace('oh=00_B', 'oh=00_C'))
+  queries.abandonThumbnailLinks(POST)
+  assert(
+    status(0) === 'failed' && attempts(0) === 3,
+    'un post disparu ne laisse pas sa vignette « en préparation » pour toujours'
+  )
+  queries.upsertPosts(
+    [POST_INPUT],
+    [
+      { postId: POST, idx: 0, kind: 'image', remoteUrl: FRESH.replace('oh=00_B', 'oh=00_D') },
+      { postId: POST, idx: 1, kind: 'image', remoteUrl: FRESH.replace('555_', '556_') }
+    ],
+    'liked'
+  )
+  assert(attempts(0) === 0, 'et une synchronisation qui le retrouve lui rend sa chance')
+
   getDb()
     .prepare(`INSERT INTO media (post_id, idx, kind, remote_url, video_source) VALUES (?, 2, 'video', ?, ?)`)
     .run(POST, FRESH, 'https://scontent.cdninstagram.com/o1/v/clip.mp4?oe=FFFFFFFF')
@@ -353,21 +369,27 @@ async function main(): Promise<void> {
   const warn = console.warn
   console.warn = () => {}
 
+  type Fresh = Awaited<ReturnType<LinkRefresherDeps['fetch']>>
+  const livePost = (nativeId: string): Fresh =>
+    ({ posts: [{ id: `instagram:${nativeId}` }], media: [] }) as unknown as Fresh
+
   interface Scene {
     refresher: LinkRefresher
     fetched: string[]
+    abandoned: string[]
     clock: { now: number }
     state: { status: string | null; challenged: boolean }
   }
 
   function scene(overrides: (fetched: string[]) => Partial<LinkRefresherDeps> = () => ({})): Scene {
     const fetched: string[] = []
+    const abandoned: string[] = []
     const clock = { now }
     const state = { status: null as string | null, challenged: false }
     const refresher = new LinkRefresher({
       fetch: async (_platform: Platform, nativeId: string) => {
         fetched.push(nativeId)
-        return { posts: [], media: [] }
+        return livePost(nativeId)
       },
       available: async () => true,
       accountStatus: () => state.status,
@@ -380,6 +402,7 @@ async function main(): Promise<void> {
           thumb_attempts: 0
         })),
       save: () => {},
+      abandon: (postId: string) => abandoned.push(postId),
       markChallenge: () => {
         state.challenged = true
         state.status = 'challenge'
@@ -388,7 +411,7 @@ async function main(): Promise<void> {
       now: () => clock.now,
       ...overrides(fetched)
     })
-    return { refresher, fetched, clock, state }
+    return { refresher, fetched, abandoned, clock, state }
   }
   const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
   const postIds = (count: number, from = 0): string[] =>
@@ -462,7 +485,7 @@ async function main(): Promise<void> {
       fetch: async (_platform: Platform, nativeId: string) => {
         fetched.push(nativeId)
         if (nativeId === '2') throw new ChallengeRequired('instagram')
-        return { posts: [], media: [] }
+        return livePost(nativeId)
       }
     }))
     challenged.refresher.request(postIds(10))
@@ -481,6 +504,61 @@ async function main(): Promise<void> {
     })
     await refresher.refreshNow('instagram:42')
     assert(heard.join() === 'instagram:42', 'un renouvellement réussi relance la file média pour ce post')
+  }
+
+  {
+    for (const [label, gone] of [
+      ['une réponse sans le post', async () => ({ posts: [], media: [] })],
+      ['un 404', async () => Promise.reject(new HttpError(404, ''))],
+      [
+        'un 400 « Media not found »',
+        async () => Promise.reject(new HttpError(400, '{"message":"Media not found or unavailable"}'))
+      ]
+    ] as const) {
+      const dead = scene((fetched) => ({
+        fetch: async (_platform: Platform, nativeId: string) => {
+          fetched.push(nativeId)
+          return gone()
+        }
+      }))
+      const played = await dead.refresher.refreshNow('instagram:mort')
+      assert(!played && dead.abandoned.join() === 'instagram:mort', `${label} : le post disparu passe en échec`)
+      dead.clock.now += LINK_FAILURE_COOLDOWN_MS * 10
+      dead.refresher.request(['instagram:mort'])
+      await settle()
+      assert(dead.fetched.length === 1, `${label} : et la grille ne le redemande plus à chaque passage`)
+    }
+    const flaky = scene((fetched) => ({
+      fetch: async (_platform: Platform, nativeId: string) => {
+        fetched.push(nativeId)
+        throw new HttpError(500, '')
+      }
+    }))
+    await flaky.refresher.refreshNow('instagram:6')
+    assert(flaky.abandoned.length === 0, 'une panne du serveur, elle, n’abandonne rien')
+  }
+  {
+    const probe = { checks: 0 }
+    /* Une fonction, pas une lecture : l'assertion précédente figerait le type du compteur. */
+    const checks = (): number => probe.checks
+    const offline = scene(() => ({
+      available: async () => {
+        probe.checks += 1
+        return false
+      }
+    }))
+    for (let i = 0; i < 5; i += 1) {
+      offline.refresher.request(postIds(3))
+      await settle()
+    }
+    assert(
+      checks() === 1 && offline.fetched.length === 0,
+      `un compte déconnecté n’est pas revérifié à chaque défilement (${checks()})`
+    )
+    offline.clock.now += 61_000
+    offline.refresher.request(postIds(3))
+    await settle()
+    assert(checks() === 2, 'mais une reconnexion se voit à la minute suivante')
   }
 
   console.warn = warn

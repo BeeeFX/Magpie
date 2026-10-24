@@ -1,5 +1,6 @@
 import type { PlaybackQuality } from '@shared/types'
 import {
+  abandonThumbnailLinks,
   playbackMediaSource,
   readAccount,
   refreshPostMedia,
@@ -39,6 +40,7 @@ export const linkRefresher = new LinkRefresher({
   save: (fresh) => {
     refreshPostMedia(fresh.posts, fresh.media)
   },
+  abandon: abandonThumbnailLinks,
   markChallenge: (platform) => writeAccount(platform, { lastSyncStatus: 'challenge' }),
   pause: () => new Promise((resolve) => setTimeout(resolve, 2500 + Math.random() * 2500)),
   now: () => Date.now()

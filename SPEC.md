@@ -331,7 +331,9 @@ Dans les deux cas :
   périmé ou un disque plein ne coûtent aucune des trois tentatives d'une vignette. Ce qui est
   à l'écran se renouvelle par une file courte — quarante posts, une requête à la fois, au plus
   cent vingt par heure —, et tout lien neuf, rapporté par une synchronisation ou un
-  renouvellement, rend ses tentatives à une vignette qui n'existe pas encore.
+  renouvellement, rend ses tentatives à une vignette qui n'existe pas encore. Un post supprimé
+  ou devenu privé (réponse vide, 404) passe en échec et n'est plus redemandé avant un jour ; un
+  compte déconnecté n'est revérifié qu'une fois par minute.
 - **Un lien resigné ne doit pas invalider le cache.** C'est le piège qui a coûté le plus cher :
   l'identité d'un média avait été dérivée de son URL, donc une URL resignée produisait un nouveau
   nom de fichier, et chaque synchronisation effaçait vignettes et clips pour les refaire. L'identité
@@ -757,8 +759,11 @@ déclencher un schéma applicatif arbitraire.
   Réimporter le même fichier ne change rien.
 - **Il est annulable.** Chaque paquet écrit son journal (`last-import.jsonl`, à côté de la base)
   après sa transaction ; l'annulation défait exactement ce qui y est listé, et seulement si la
-  valeur est encore celle que l'import avait posée. Un import arrêté en route, ou interrompu par
-  une fermeture, s'annule pareil. `npm run check:library-file` tient l'aller-retour, l'idempotence,
+  valeur est encore celle que l'import avait posée : un post retrouvé depuis par une
+  synchronisation (`synced_at`), une transcription corrigée, une liste recréée sur le même
+  identifiant restent. Un import arrêté en route, ou interrompu par une fermeture, s'annule
+  pareil ; un import qui n'a rien écrit ne remplace pas le journal du précédent. Déplacer la
+  bibliothèque attend la fin d'un import ou d'un export. `npm run check:library-file` tient l'aller-retour, l'idempotence,
   la fusion, l'annulation et le refus des fichiers hostiles.
 - **La base est sauvegardée chaque jour**, dans `backups/` à l'intérieur de la bibliothèque —
   le déplacement l'emporte. Au démarrage si la dernière copie a plus d'un jour, puis toutes les

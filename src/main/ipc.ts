@@ -74,6 +74,7 @@ import {
 import {
   exportLibraryJson,
   IMPORT_JOURNAL,
+  holdTransfers,
   importLibrary,
   lastLibraryImport,
   previewLibraryImport,
@@ -764,6 +765,8 @@ export function registerIpc({
     if (syncEngine.current().running) {
       throw new Error(say('library.syncRunning'))
     }
+    /* Ni export ni import pendant la copie, et aucun ne peut démarrer avant la relance. */
+    const releaseTransfers = holdTransfers()
 
     const targetDb = join(target, 'magpie.db')
     const targetMedia = join(target, 'media')
@@ -827,8 +830,11 @@ export function registerIpc({
 
       /* Le journal du dernier import décrit la base qu'on déplace : sans lui, un déplacement
          faisait perdre l'annulation de cet import. Quelques kilo-octets, copiés avec elle. */
-      const sourceJournal = join(source, IMPORT_JOURNAL)
-      if (existsSync(sourceJournal)) await copyFile(sourceJournal, join(target, IMPORT_JOURNAL))
+      /* Le `.part` aussi : celui d'un import interrompu est le plus récent des deux. */
+      for (const name of [IMPORT_JOURNAL, `${IMPORT_JOURNAL}.part`]) {
+        const sourceJournal = join(source, name)
+        if (existsSync(sourceJournal)) await copyFile(sourceJournal, join(target, name))
+      }
 
       let copiedBackupBytes = 0
       if (backupFiles.length > 0) {
@@ -897,12 +903,14 @@ export function registerIpc({
       if (startedWriting) {
         await rm(targetDb, { force: true }).catch(() => {})
         await rm(join(target, IMPORT_JOURNAL), { force: true }).catch(() => {})
+        await rm(join(target, `${IMPORT_JOURNAL}.part`), { force: true }).catch(() => {})
         await rm(targetMedia, { recursive: true, force: true }).catch(() => {})
         await rm(targetModels, { recursive: true, force: true }).catch(() => {})
         await rm(targetBackups, { recursive: true, force: true }).catch(() => {})
       }
       resumeMedia()
       resumeBackups()
+      releaseTransfers()
       throw error
     }
   })

@@ -478,6 +478,40 @@ async function main(): Promise<void> {
       assert(dump(c) === before, 'et rend la bibliothèque d’avant, ligne pour ligne')
     }
 
+    console.log('\nl’annulation épargne ce qui a changé depuis l’import')
+    {
+      const f = library()
+      seed(f, [{ platform: 'instagram', native: '111', kind: 'image', transcript: null }])
+      const later = collect()
+      await importLibraryFile(f, fileA, { journal: later.journal })
+      /* Après l'import : une synchronisation retrouve un post, l'utilisateur corrige une
+         transcription comblée, supprime une liste créée par l'import et en crée une autre,
+         qui reprend son identifiant. */
+      const resynced = f.prepare("SELECT id FROM posts WHERE id <> 'instagram:111' ORDER BY id LIMIT 1").pluck().get() as string
+      f.prepare('UPDATE posts SET synced_at = ? WHERE id = ?').run(T0, resynced)
+      f.prepare("UPDATE posts SET transcript = 'corrigée à la main' WHERE id = 'instagram:111'").run()
+      const vide = f.prepare("SELECT id FROM collections WHERE name = 'Vide'").pluck().get() as number
+      f.prepare('DELETE FROM collections WHERE id = ?').run(vide)
+      f.prepare("INSERT INTO collections (id, name, kind) VALUES (?, 'Perso', 'manual')").run(vide)
+      await undoImport(f, later.entries)
+      assert(
+        (f.prepare('SELECT COUNT(*) FROM posts WHERE id = ?').pluck().get(resynced) as number) === 1,
+        'un post retrouvé par une synchronisation reste'
+      )
+      assert(
+        (f.prepare("SELECT transcript FROM posts WHERE id = 'instagram:111'").pluck().get() as string) === 'corrigée à la main',
+        'une transcription corrigée depuis n’est pas effacée'
+      )
+      assert(
+        (f.prepare("SELECT COUNT(*) FROM collections WHERE name = 'Perso'").pluck().get() as number) === 1,
+        'une liste créée depuis, sur un identifiant réutilisé, n’est pas supprimée'
+      )
+      assert(
+        (f.prepare('SELECT COUNT(*) FROM posts').pluck().get() as number) === 2,
+        'le reste de l’import, lui, est bien défait'
+      )
+    }
+
     console.log('\nun arrêt laisse une bibliothèque cohérente, et annulable')
     {
       const d = library()

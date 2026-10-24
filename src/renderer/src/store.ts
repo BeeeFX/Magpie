@@ -86,8 +86,20 @@ function withoutPosts(
   before: Post[],
   gone: (post: Post) => boolean
 ): Pick<State, 'posts' | 'layoutRevision' | 'resultTotal' | 'nextOffset'> {
-  const posts = before.filter((post) => !gone(post))
-  const removed = before.length - posts.length
+  return shrunkTo(state, before.length, before.filter((post) => !gone(post)))
+}
+
+/**
+ * Pareil, pour une liste déjà retouchée : un tag ou une étiquette modifiés réécrivent leur post
+ * et le sortent du filtre d'un même geste. Ces gestes oubliaient de reculer `nextOffset`, et la
+ * page suivante sautait autant de posts.
+ */
+function shrunkTo(
+  state: Pick<State, 'layoutRevision' | 'resultTotal' | 'nextOffset'>,
+  beforeCount: number,
+  posts: Post[]
+): Pick<State, 'posts' | 'layoutRevision' | 'resultTotal' | 'nextOffset'> {
+  const removed = beforeCount - posts.length
   if (removed === 0) {
     const { layoutRevision, resultTotal, nextOffset } = state
     return { posts, layoutRevision, resultTotal, nextOffset }
@@ -755,12 +767,7 @@ export const useStore = create<State>()(
                 : post
             )
             .filter((post) => !(get().query.untaggedOnly && selected.has(post.id)))
-          set({
-            posts,
-            layoutRevision:
-              posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
-          })
+          set(shrunkTo(get(), before.length, posts))
           notifySuccess('bulk.tagged', { count: ids.length, name })
           refreshStatsSoon()
       } catch (error) {
@@ -982,12 +989,7 @@ export const useStore = create<State>()(
                 : post
             )
             .filter((post) => !(get().query.untaggedOnly && post.id === postId))
-          set({
-            posts,
-            layoutRevision:
-              posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
-          })
+          set(shrunkTo(get(), before.length, posts))
           refreshStatsSoon()
       } catch (error) {
           notifyError('notice.tagFailed', error)
@@ -1016,12 +1018,7 @@ export const useStore = create<State>()(
                   !post.tags.some((tag) => selectedTags.has(tagKey(tag.name)))
                 )
             )
-          set({
-            posts,
-            layoutRevision:
-              posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
-          })
+          set(shrunkTo(get(), before.length, posts))
           refreshStatsSoon()
       } catch (error) {
           notifyError('notice.tagRemoveFailed', error)
@@ -1037,12 +1034,7 @@ export const useStore = create<State>()(
             .filter(
               (post) => !(post.id === postId && get().query.label && get().query.label !== label)
             )
-          set({
-            posts,
-            layoutRevision:
-              posts.length !== before.length ? get().layoutRevision + 1 : get().layoutRevision,
-            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length))
-          })
+          set(shrunkTo(get(), before.length, posts))
           refreshStatsSoon()
       } catch (error) {
           notifyError('notice.labelFailed', error)

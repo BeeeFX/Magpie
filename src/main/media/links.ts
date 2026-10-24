@@ -1,6 +1,6 @@
 import type { Platform } from '@shared/types'
 import { PLATFORMS } from '@shared/types'
-import { AuthExpired, ChallengeRequired, RateLimited } from '../adapters/http'
+import { AuthExpired, ChallengeRequired, HttpError, RateLimited } from '../adapters/http'
 import type { NormalizedPage } from '../adapters/types'
 import { THUMB_AWAITING_LINK } from '../db/media-upsert'
 import type { ThumbnailLinkRow } from '../db/queries'
@@ -46,6 +46,20 @@ const REQUEST_WINDOW = 120
 export const LINK_FAILURE_COOLDOWN_MS = 2 * 60 * 1000
 /** Un lien tout juste renouvelé qui paraîtrait encore périmé ne se redemande pas en boucle. */
 const SUCCESS_COOLDOWN_MS = 30 * 60 * 1000
+/**
+ * Un post supprimé ou devenu privé ne reviendra pas d'ici la prochaine synchronisation.
+ *
+ * Il retombait sur la temporisation d'échec : deux minutes, après quoi la grille, qui le voit
+ * toujours « en préparation », le redemandait — un appel du plafond horaire toutes les deux
+ * minutes pour chaque carte morte à l'écran, au détriment des vignettes qui, elles, pouvaient
+ * revenir.
+ */
+const GONE_COOLDOWN_MS = 24 * 60 * 60 * 1000
+/**
+ * Compte déconnecté : la grille redemande ce qu'elle montre à chaque défilement, et chaque
+ * demande revérifiait la connexion pour rien. Une minute, pour qu'une reconnexion se voie vite.
+ */
+const UNAVAILABLE_RETRY_MS = 60 * 1000
 /** Session expirée : chaque appel échouerait pareil, jusqu'à ce que l'utilisateur reconnecte. */
 const AUTH_BACKOFF_MS = 10 * 60 * 1000
 const RATE_BACKOFF_MIN_MS = 60 * 1000
@@ -66,6 +80,8 @@ export interface LinkRefresherDeps {
   thumbnailLinks(postIds: string[]): ThumbnailLinkRow[]
   /** Réenregistre les liens, sans rien toucher d'autre du post. */
   save(fresh: FreshPost): void
+  /** Le post n'existe plus : ses vignettes manquantes ne viendront pas, elles passent en échec. */
+  abandon(postId: string): void
   /** Retient la vérification de sécurité, pour que rien d'automatique ne revienne la heurter. */
   markChallenge(platform: Platform): void
   /** La pause entre deux renouvellements de fond. */
@@ -76,6 +92,16 @@ export interface LinkRefresherDeps {
 /** Une vignette attend-elle un lien neuf ? Soit on l'a déjà mise de côté, soit son lien a passé. */
 export function needsFreshLink(row: ThumbnailLinkRow, now: number): boolean {
   return row.thumb_attempts === THUMB_AWAITING_LINK || isMediaUrlExpired(row.remote_url, 60_000, now)
+}
+
+/**
+ * Instagram répond 404 à un média supprimé, 400 « Media not found or unavailable » à un média
+ * devenu privé ou retiré. Le reste — réseau, 5xx — peut passer, et garde la temporisation courte.
+ */
+function postGone(error: unknown): boolean {
+  if (!(error instanceof HttpError)) return false
+  if (error.status === 404 || error.status === 410) return true
+  return error.status === 400 && /not found|unavailable|does not exist/i.test(error.body)
 }
 
 function platformOf(postId: string): Platform | null {
@@ -90,6 +116,7 @@ export class LinkRefresher {
   private readonly pumping = new Set<Platform>()
   private readonly calls = new Map<Platform, number[]>()
   private readonly blockedUntil = new Map<Platform, number>()
+  private readonly unavailableUntil = new Map<Platform, number>()
   private readonly timers = new Map<Platform, ReturnType<typeof setTimeout>>()
   private readonly listeners = new Set<(postIds: string[]) => void>()
   private warnings = 0
@@ -138,7 +165,8 @@ export class LinkRefresher {
     for (const id of candidates) {
       if (!wanted.has(id) || this.inFlight.has(id)) continue
       const platform = platformOf(id)
-      if (!platform || !this.allowed(platform, id)) continue
+      if (!platform || (this.unavailableUntil.get(platform) ?? 0) > now) continue
+      if (!this.allowed(platform, id)) continue
       const list = byPlatform.get(platform) ?? []
       if (!list.includes(id)) list.push(id)
       byPlatform.set(platform, list)
@@ -180,8 +208,10 @@ export class LinkRefresher {
         }
         if (!(await this.deps.available(platform))) {
           this.queues.delete(platform)
+          this.unavailableUntil.set(platform, this.deps.now() + UNAVAILABLE_RETRY_MS)
           return
         }
+        this.unavailableUntil.delete(platform)
         const postId = queue.shift()!
         if (!this.allowed(platform, postId) || this.inFlight.has(postId)) continue
         /* Une synchronisation a pu rapporter un lien neuf pendant que le post attendait. */
@@ -236,7 +266,12 @@ export class LinkRefresher {
           this.cooldown.set(postId, this.deps.now() + LINK_FAILURE_COOLDOWN_MS)
           return false
         }
-        if (fresh.posts.length > 0) this.deps.save(fresh)
+        if (fresh.posts.length === 0) {
+          /* Une réponse sans le post : il a disparu. Ce n'est pas un renouvellement réussi. */
+          this.giveUp(postId)
+          return false
+        }
+        this.deps.save(fresh)
         this.cooldown.set(postId, this.deps.now() + SUCCESS_COOLDOWN_MS)
         for (const listener of this.listeners) listener([postId])
         return true
@@ -256,6 +291,9 @@ export class LinkRefresher {
           this.blockedUntil.set(platform, now + backoff)
         } else if (error instanceof AuthExpired) {
           this.blockedUntil.set(platform, now + AUTH_BACKOFF_MS)
+        } else if (postGone(error)) {
+          this.giveUp(postId)
+          return false
         }
         this.warn(postId, error)
         return false
@@ -265,6 +303,11 @@ export class LinkRefresher {
     })()
     this.inFlight.set(postId, pending)
     return pending
+  }
+
+  private giveUp(postId: string): void {
+    this.cooldown.set(postId, this.deps.now() + GONE_COOLDOWN_MS)
+    this.deps.abandon(postId)
   }
 
   /** Les premiers diagnostics, puis un échantillon : un réseau coupé ne remplit pas le journal. */

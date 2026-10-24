@@ -17,11 +17,20 @@ import { useStore } from './store'
  * Tous les tags, chargés quand on les demande.
  *
  * `enabled` retarde l'appel jusqu'au premier usage : la vue détaillée s'ouvre et se parcourt
- * post après post, et personne ne tape de tag sur la plupart d'entre eux. La liste se relit
- * quand les statistiques changent — un tag ajouté ou retiré les fait toujours recompter.
+ * post après post, et personne ne tape de tag sur la plupart d'entre eux.
+ *
+ * La liste se relit quand les tags changent, pas à chaque statistique : une synchronisation
+ * les recompte à chaque page, et chaque recompte relançait l'agrégat de tous les tags de la
+ * bibliothèque, pour une liste identique. La signature retenue — le nombre de tags et les
+ * quarante premiers avec leurs comptes — bouge dès qu'un tag naît, disparaît ou change de
+ * place en tête. Les comptes au-delà peuvent retarder ; ils se relisent à la réouverture.
  */
 export function useAllTags(enabled: boolean): TagTally[] | null {
-  const stats = useStore((state) => state.stats)
+  const signature = useStore((state) =>
+    state.stats
+      ? `${state.stats.tagCount}|${state.stats.topTags.map((tag) => `${tag.name}:${tag.count}`).join('|')}`
+      : ''
+  )
   const [tags, setTags] = useState<TagTally[] | null>(null)
   useEffect(() => {
     if (!enabled) return
@@ -37,7 +46,7 @@ export function useAllTags(enabled: boolean): TagTally[] | null {
     return () => {
       cancelled = true
     }
-  }, [enabled, stats])
+  }, [enabled, signature])
   return tags
 }
 
