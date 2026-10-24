@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ContentSource, Platform, PostQuery } from '../src/shared/types'
 import { DEFAULT_QUERY } from '../src/shared/types'
-import { MIGRATION_14_SQL, MIGRATION_30_SQL } from '../src/main/db/schema'
+import { MIGRATION_14_SQL, MIGRATION_30_SQL, SCHEMA_VERSION } from '../src/main/db/schema'
 import { decodeResumeCursor, encodeResumeCursor } from '../src/main/sync/resume'
 
 /**
@@ -196,12 +196,14 @@ assert(
   const db = getDb()
   db.exec(MIGRATION_14_SQL.slice(MIGRATION_14_SQL.indexOf('DROP TRIGGER')))
   db.exec('DROP INDEX idx_posts_author_folded; ALTER TABLE posts DROP COLUMN author_name_folded')
+  /* La v32 a ajouté `synced_at` ; une base de v29 ne l'a pas encore. */
+  db.exec('ALTER TABLE posts DROP COLUMN synced_at')
   db.pragma('user_version = 29')
   closeDb()
   rmSync(join(dirLegacy, 'library-state.json'), { force: true })
 }
 const migrated = getDb()
-assert(migrated.pragma('user_version', { simple: true }) === 31, 'l’échelle a porté la base en v31')
+assert(migrated.pragma('user_version', { simple: true }) === SCHEMA_VERSION, 'l’échelle a porté la base à jour')
 assert(snapshot() === reference, 'la réparation rend, ligne pour ligne, ce que la nouvelle écriture produit')
 assert(same(order(), EXPECTED), 'et le mur retrouve l’ordre attendu', `reçu : ${order().join(' ')}`)
 assert(

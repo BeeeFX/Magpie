@@ -60,6 +60,21 @@ function claim(): void {
   stopRequested = false
 }
 
+/**
+ * Réserve les transferts pendant le déplacement de la bibliothèque. Un import qui tournait
+ * pendant la copie partait dans une base à moitié importée, sans son journal `.part`, puis la
+ * relance le tuait : des milliers de posts importés, et plus aucune annulation possible.
+ * Rend la fonction qui libère, à n'appeler que si le déplacement échoue.
+ */
+export function holdTransfers(): () => void {
+  if (busy) throw new Error(say('library.transferRunning'))
+  busy = true
+  stopRequested = false
+  return () => {
+    busy = false
+  }
+}
+
 /** Une erreur de fichier devient une phrase, dans la langue de l'interface. */
 function translated(error: unknown): unknown {
   if (error instanceof LibraryFileError) {
@@ -220,9 +235,30 @@ async function currentJournal(): Promise<{
     const report =
       journal.report ??
       summarise(journal.entries, { ...journal.header, stopped: true })
+    /* Un `.part` qui n'a rien changé — un import tombé avant son premier paquet — ne doit pas
+       cacher l'import d'avant, qui, lui, reste annulable. */
+    if (!changedSomething(report)) continue
     return { path, ...journal, report }
   }
   return null
+}
+
+/**
+ * Range le `.part` laissé par un import que l'application n'a pas vu finir : il devient le
+ * dernier import connu s'il a changé quelque chose, et disparaît sinon. Le renommer tel quel
+ * écrasait l'annulation de l'import précédent par un journal vide.
+ */
+async function settlePartial(): Promise<void> {
+  const partial = `${journalPath()}.part`
+  const journal = await readJournal(partial)
+  if (!journal) {
+    await rm(partial, { force: true })
+    return
+  }
+  const report =
+    journal.report ?? summarise(journal.entries, { ...journal.header, stopped: true })
+  if (changedSomething(report)) await rename(partial, journalPath())
+  else await rm(partial, { force: true })
 }
 
 function changedSomething(report: LibraryImportReport): boolean {
@@ -251,8 +287,9 @@ export async function importLibrary(token: string): Promise<LibraryImportReport>
   const at = Date.now()
   try {
     /* Un `.part` resté là est le journal d'un import que l'application n'a pas vu finir : il
-       devient le dernier import connu avant que le nouveau ne commence le sien. */
-    await rename(partial, journalPath()).catch(() => {})
+       devient le dernier import connu, s'il a changé quelque chose, avant que le nouveau ne
+       commence le sien. */
+    await settlePartial()
     await writeFile(partial, `${JSON.stringify({ kind: 'header', at, fileName: file.fileName })}\n`)
     backgroundTasks.update(IMPORT_TASK, {
       kind: 'import',
@@ -281,6 +318,8 @@ export async function importLibrary(token: string): Promise<LibraryImportReport>
     previewed = null
     return report
   } catch (error) {
+    /* Les paquets déjà écrits restent annulables ; un journal sans paquet, lui, s'en va. */
+    await settlePartial().catch(() => {})
     throw translated(error)
   } finally {
     backgroundTasks.clear(IMPORT_TASK)

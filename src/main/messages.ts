@@ -51,6 +51,8 @@ const FR = {
     'Le dossier choisi doit être vide afin de protéger les fichiers existants.',
   'library.syncRunning':
     'Attendez la fin de la synchronisation avant de déplacer la bibliothèque.',
+  'library.transferRunning':
+    'Attendez la fin de l’export ou de l’import avant de déplacer la bibliothèque.',
   'library.noSpace': 'Espace libre insuffisant dans le dossier choisi.',
   'library.nested': 'Le nouveau dossier ne peut pas se trouver dans la bibliothèque actuelle.',
   'library.unreachable': 'Bibliothèque Magpie inaccessible',
@@ -114,6 +116,7 @@ const EN: Record<MessageKey, string> = {
   'library.folderNotEmpty':
     'The chosen folder must be empty, so that existing files are left untouched.',
   'library.syncRunning': 'Wait for the sync to finish before moving the library.',
+  'library.transferRunning': 'Wait for the export or import to finish before moving the library.',
   'library.noSpace': 'Not enough free space in the chosen folder.',
   'library.nested': 'The new folder cannot sit inside the current library.',
   'library.unreachable': 'Magpie library unreachable',

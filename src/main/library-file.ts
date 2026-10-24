@@ -1224,9 +1224,19 @@ export interface ImportJournal {
   tags: string[]
   favourites: string[]
   labels: [string, LabelColor][]
-  /** L'état d'avant — `null` pas encore écouté, `''` écouté sans rien — pour y revenir. */
-  transcripts: [string, '' | null][]
+  /**
+   * L'état d'avant — `null` pas encore écouté, `''` écouté sans rien — pour y revenir, et le
+   * texte que l'import a posé : on ne revient en arrière que s'il est encore là. Absent des
+   * journaux écrits avant.
+   */
+  transcripts: [string, '' | null, string?][]
   collections: number[]
+  /**
+   * Le nom de chaque collection créée. Sans `AUTOINCREMENT`, l'identifiant d'une collection
+   * supprimée resservait à la suivante : l'annulation emportait alors une collection de
+   * l'utilisateur. Absent des journaux écrits avant.
+   */
+  collectionNames?: [number, string][]
   memberships: [number, string][]
   colours: [number, LabelColor][]
   mapLabels: string[]
@@ -1245,6 +1255,7 @@ export function emptyJournal(): ImportJournal {
     labels: [],
     transcripts: [],
     collections: [],
+    collectionNames: [],
     memberships: [],
     colours: [],
     mapLabels: []
@@ -1541,7 +1552,7 @@ class ImportWriter {
       if (post.transcript && post.transcript.trim()) {
         const before = local.transcript === '' ? '' : null
         if (setTranscript.run(post.transcript, post.id).changes > 0) {
-          journal.transcripts.push([post.id, before])
+          journal.transcripts.push([post.id, before, post.transcript])
           changed = true
         }
       }
@@ -1594,6 +1605,7 @@ class ImportWriter {
           ).lastInsertRowid
         )
         journal.collections.push(id)
+        journal.collectionNames!.push([id, collection.name])
         /* Sans vecteur : il se calcule à la prochaine analyse. D'ici là, `recompute` garde
            l'appartenance importée plutôt que de la vider — voir `tagging/collections.ts`. */
         collection.keywords.forEach((word, order) => keyword.run(id, word.word, word.weight, order))
@@ -1669,8 +1681,15 @@ export async function undoImport(
       reverted += dropMember.run(collectionId, postId).changes
     }
     const dropCollection = db.prepare('DELETE FROM collections WHERE id = ?')
+    const dropNamedCollection = db.prepare(
+      'DELETE FROM collections WHERE id = ? AND name = ? COLLATE NOCASE'
+    )
+    const names = new Map(all((entry) => entry.collectionNames ?? []))
     for (const id of all((entry) => entry.collections)) {
-      collectionsRemoved += dropCollection.run(id).changes
+      const name = names.get(id)
+      collectionsRemoved += (
+        name === undefined ? dropCollection.run(id) : dropNamedCollection.run(id, name)
+      ).changes
     }
     const uncolour = db.prepare('UPDATE collections SET color = NULL WHERE id = ? AND color = ?')
     for (const [id, colour] of all((entry) => entry.colours)) reverted += uncolour.run(id, colour).changes
@@ -1678,9 +1697,13 @@ export async function undoImport(
     for (const [id, value] of all((entry) => entry.labels)) reverted += unlabel.run(id, value).changes
     const unfavourite = db.prepare('UPDATE posts SET is_favorite = 0 WHERE id = ? AND is_favorite = 1')
     for (const id of all((entry) => entry.favourites)) reverted += unfavourite.run(id).changes
-    const untranscribe = db.prepare('UPDATE posts SET transcript = ? WHERE id = ?')
-    for (const [id, before] of all((entry) => entry.transcripts)) {
-      reverted += untranscribe.run(before, id).changes
+    /* Seulement si le texte est encore celui de l'import : une transcription refaite depuis, en
+       local, appartient à l'utilisateur. */
+    const untranscribe = db.prepare(
+      'UPDATE posts SET transcript = ? WHERE id = ? AND (? IS NULL OR transcript = ?)'
+    )
+    for (const [id, before, set] of all((entry) => entry.transcripts)) {
+      reverted += untranscribe.run(before, id, set ?? null, set ?? null).changes
     }
     const unlink = db.prepare(
       `DELETE FROM post_tags WHERE post_id = ?
@@ -1702,7 +1725,9 @@ export async function undoImport(
   /* Les posts par paquets : leur suppression déclenche l'index plein texte et les cascades, et
      soixante mille d'un bloc figeraient la fenêtre. */
   let postsRemoved = 0
-  const drop = db.prepare('DELETE FROM posts WHERE id = ?')
+  /* Un post qu'une synchronisation a retrouvé depuis existe sur la plateforme : il reste. La
+     synchronisation incrémentale ne remonte pas assez loin pour le rapporter une seconde fois. */
+  const drop = db.prepare('DELETE FROM posts WHERE id = ? AND synced_at IS NULL')
   for (let at = 0; at < posts.length; at += 500) {
     const slice = posts.slice(at, at + 500)
     db.transaction(() => {

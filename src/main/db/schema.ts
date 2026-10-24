@@ -5,7 +5,7 @@
  * colonne à une base vide ne coûte rien, la rétro-adapter une fois qu'elle contient
  * plusieurs milliers de posts coûte beaucoup plus.
  */
-export const SCHEMA_VERSION = 31
+export const SCHEMA_VERSION = 32
 
 /**
  * Les paliers 2 à 8, en SQL comme tous les autres.
@@ -715,6 +715,20 @@ ALTER TABLE posts ADD COLUMN author_name_folded TEXT;
 CREATE INDEX IF NOT EXISTS idx_posts_author_folded ON posts(author_name_folded);
 `
 
+/**
+ * Le dernier passage d'une synchronisation sur le post.
+ *
+ * L'annulation d'un import supprimait tous les posts qu'il avait insérés — y compris ceux qu'une
+ * synchronisation avait retrouvés depuis sur la plateforme. Ces signets existent bel et bien,
+ * mais la synchronisation incrémentale s'arrête aux premières pages connues : les plus anciens
+ * ne revenaient jamais. Un post vu par une synchronisation n'appartient plus à l'import.
+ *
+ * Sans remplissage : `NULL` sur les bases existantes, la prochaine synchronisation le pose.
+ */
+export const MIGRATION_32_SQL = /* sql */ `
+ALTER TABLE posts ADD COLUMN synced_at INTEGER;
+`
+
 export const SCHEMA_SQL = /* sql */ `
 CREATE TABLE IF NOT EXISTS posts (
   id              TEXT PRIMARY KEY,
@@ -750,7 +764,9 @@ CREATE TABLE IF NOT EXISTS posts (
   label           TEXT,
   tag_status      TEXT NOT NULL DEFAULT 'pending',
   raw             TEXT,
-  updated_at      INTEGER NOT NULL
+  updated_at      INTEGER NOT NULL,
+  -- Dernier passage d'une synchronisation : voir MIGRATION_32_SQL.
+  synced_at       INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_posts_platform  ON posts(platform);
@@ -1084,5 +1100,6 @@ export const MIGRATIONS: Record<number, string> = {
   28: MIGRATION_28_SQL,
   29: MIGRATION_29_SQL,
   30: MIGRATION_30_SQL,
-  31: MIGRATION_31_SQL
+  31: MIGRATION_31_SQL,
+  32: MIGRATION_32_SQL
 }
