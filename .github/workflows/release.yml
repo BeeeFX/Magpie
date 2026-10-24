@@ -51,11 +51,76 @@ jobs:
           npm run check:ci
           npm run verify
 
+      # Signature Windows — voir « Signing » dans le README. Elle s'allume toute seule dès que
+      # les secrets existent, et la build part non signée, comme avant, tant qu'ils manquent.
+      #
+      # Deux voies, au choix :
+      # - un certificat classique : `WINDOWS_CSC_LINK` (le .pfx en base64) et
+      #   `WINDOWS_CSC_KEY_PASSWORD`, qu'electron-builder lit sous les noms `CSC_LINK` et
+      #   `CSC_KEY_PASSWORD` ;
+      # - Azure Trusted Signing : les secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
+      #   `AZURE_CLIENT_SECRET` d'un principal de service, et les variables
+      #   `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE`.
+      #
+      # `WINDOWS_PUBLISHER_NAME` — le CN du certificat — est ce qu'electron-updater exigera des
+      # mises à jour suivantes. Obligatoire avec Azure, qui ne sait pas le déduire ; facultatif
+      # avec un .pfx, dont electron-builder lit le CN. Plusieurs noms séparés par `;` pour une
+      # version de transition, signée par l'ancien certificat (voir le README).
+      #
+      # `REQUIRE_SIGNING=true` (variable du dépôt), à poser après la première version signée : une
+      # installation signée **refuse** une mise à jour non signée, donc une release partie sans
+      # ses secrets bloquerait tout le monde. Mieux vaut qu'elle échoue ici.
       - name: Build installer and update manifest
         shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+          REQUIRE_SIGNING: ${{ vars.REQUIRE_SIGNING }}
         run: |
+          $publishers = @(($env:WINDOWS_PUBLISHER_NAME ?? '') -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          $win = $null
+          if ($env:AZURE_CLIENT_ID) {
+            foreach ($name in 'AZURE_TENANT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT', 'AZURE_SIGNING_PROFILE') {
+              if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Azure Trusted Signing: $name is missing." }
+            }
+            if ($publishers.Count -eq 0) { throw 'Azure Trusted Signing: set WINDOWS_PUBLISHER_NAME to the certificate CN.' }
+            # `azureSignOptions` ne peut pas vivre dans electron-builder.yml : sa seule présence
+            # fait passer toute build Windows par Azure, secrets ou non.
+            $win = @{ azureSignOptions = @{
+              endpoint = $env:AZURE_SIGNING_ENDPOINT
+              codeSigningAccountName = $env:AZURE_SIGNING_ACCOUNT
+              certificateProfileName = $env:AZURE_SIGNING_PROFILE
+              publisherName = $publishers
+            } }
+            # Une seule voie : un .pfx laissé à côté ne servirait pas.
+            $env:CSC_LINK = ''
+          } elseif ($env:CSC_LINK) {
+            if ($publishers.Count -gt 0) { $win = @{ signtoolOptions = @{ publisherName = $publishers } } }
+          } elseif ($env:REQUIRE_SIGNING -eq 'true') {
+            throw 'REQUIRE_SIGNING is set but no signing secret is available: signed installations would refuse this update.'
+          } else {
+            Write-Host 'No signing secrets: building an unsigned installer.'
+          }
+
+          $signing = @()
+          if ($win) {
+            # Un fichier plutôt que des `--config.win.…=` : le nom d'un éditeur a des espaces,
+            # et il traverserait npm puis cmd.exe avant d'arriver.
+            $config = Join-Path $env:RUNNER_TEMP 'electron-builder.signing.json'
+            @{ extends = 'electron-builder.yml'; win = $win } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $config
+            $signing = @('--config', $config)
+          }
+          if ($win -or $env:CSC_LINK) { "MAGPIE_SIGNED=true" >> $env:GITHUB_ENV }
+
           for ($attempt = 1; $attempt -le 3; $attempt++) {
-            npm run dist:win -- --publish never
+            npm run dist:win -- --publish never @signing
             if ($LASTEXITCODE -eq 0) { exit 0 }
             if ($attempt -lt 3) {
               Write-Host "Packaging download failed; retrying ($attempt/3)..."
@@ -63,6 +128,26 @@ jobs:
             }
           }
           exit 1
+
+      # Une signature annoncée doit être là, et `app-update.yml` doit nommer celui qui a signé :
+      # c'est contre ce nom qu'electron-updater vérifiera chaque mise à jour suivante. Un nom
+      # qui ne correspond pas enfermerait les utilisateurs dans cette version.
+      - name: Verify signature
+        if: env.MAGPIE_SIGNED == 'true'
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $installer = "release/Magpie-Setup-$version.exe"
+          foreach ($file in @($installer, 'release/win-unpacked/Magpie.exe')) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file
+            if ($signature.Status -ne 'Valid') { throw "$file is not validly signed: $($signature.Status) $($signature.StatusMessage)" }
+          }
+          $signer = (Get-AuthenticodeSignature -LiteralPath $installer).SignerCertificate
+          $cn = $signer.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+          $updateConfig = Get-Content -Raw 'release/win-unpacked/resources/app-update.yml'
+          if ($updateConfig -notmatch 'publisherName') { throw 'app-update.yml has no publisherName: updates would not be verified.' }
+          if (-not $updateConfig.Contains($cn)) { throw "app-update.yml does not name the signer ($cn): later updates would be refused." }
+          Write-Host "Signed by $cn; app-update.yml pins it."
 
       - name: Publish stable GitHub release
         shell: pwsh

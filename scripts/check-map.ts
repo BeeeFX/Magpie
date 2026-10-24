@@ -42,7 +42,8 @@ async function main(): Promise<void> {
   console.log('\nrésolution du fil')
   const packaged = workerScriptPath('C:\\Programs\\Magpie\\resources\\app.asar')
   assert(
-    packaged === 'C:\\Programs\\Magpie\\resources\\app.asar.unpacked\\out\\main\\projection.worker.js',
+    packaged ===
+      join('C:\\Programs\\Magpie\\resources\\app.asar.unpacked', 'out', 'main', 'projection.worker.js'),
     'en version installée, le chemin vise la copie déballée'
   )
   assert(

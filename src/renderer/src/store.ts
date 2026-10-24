@@ -26,6 +26,7 @@ import type {
 } from '@shared/types'
 import type { Language, LanguageChoice } from '@shared/types'
 import { AFTER_SYNC_STEPS, DEFAULT_QUERY, idleSyncState } from '@shared/types'
+import { normalizeTagName, tagKey } from '@shared/tags'
 import { magpie } from './bridge'
 import { describeError, notifyError, notifySuccess, reportFailure, useNotices } from './notices'
 import { afterPageFailure } from './paging'
@@ -68,6 +69,35 @@ function refreshStatsSoon(): void {
         // Un décompte manqué se rattrape au prochain rafraîchissement de la grille.
       })
   }, 150)
+}
+
+/**
+ * Ce qui change quand des posts déjà chargés quittent le résultat affiché.
+ *
+ * Les retirer de `posts` ne suffit pas : la mise en page n'est recalculée qu'au changement de
+ * `layoutRevision`, et `alignItemsToPosts` garde un élément dont le post a disparu. Sans ce
+ * saut de révision, un post retiré ou sorti des favoris restait au mur avec ses anciennes
+ * données, et un clic dessus ne trouvait plus rien à ouvrir. Le décalage de pagination recule
+ * d'autant : les lignes suivantes sont remontées dans SQLite, et `loadMore` écarte déjà les
+ * doublons si l'on recule un peu trop.
+ */
+function withoutPosts(
+  state: Pick<State, 'layoutRevision' | 'resultTotal' | 'nextOffset'>,
+  before: Post[],
+  gone: (post: Post) => boolean
+): Pick<State, 'posts' | 'layoutRevision' | 'resultTotal' | 'nextOffset'> {
+  const posts = before.filter((post) => !gone(post))
+  const removed = before.length - posts.length
+  if (removed === 0) {
+    const { layoutRevision, resultTotal, nextOffset } = state
+    return { posts, layoutRevision, resultTotal, nextOffset }
+  }
+  return {
+    posts,
+    layoutRevision: state.layoutRevision + 1,
+    resultTotal: Math.max(0, state.resultTotal - removed),
+    nextOffset: Math.max(0, state.nextOffset - removed)
+  }
 }
 
 /**
@@ -183,8 +213,15 @@ interface State {
   /** Son des aperçus au survol dans la grille. Coupé par défaut : un mur qui se met à
    *  parler quand la souris le traverse serait insupportable. */
   hoverAudio: boolean
-  /** Index du post ouvert en vue détaillée, ou null quand on est sur la grille. */
-  detailIndex: number | null
+  /**
+   * Identifiant du post ouvert en vue détaillée, ou null quand on est sur la grille.
+   *
+   * Un identifiant, et non plus une position dans `posts` : la liste bouge sous la vue ouverte
+   * — retirer un favori dans « Favoris », taguer dans « Sans tag », changer d'étiquette sous un
+   * filtre d'étiquette —, et la même position désignait alors silencieusement un autre post.
+   * La position n'est recalculée que pour avancer d'un cran.
+   */
+  detailId: string | null
   selectionMode: boolean
   selectedIds: string[]
 
@@ -282,9 +319,25 @@ interface State {
 
   /** Rectangle de la carte cliquée, pour que la vue détaillée s'ouvre depuis elle. */
   detailOrigin: { x: number; y: number; width: number; height: number } | null
-  openDetail: (index: number, origin?: DOMRect) => void
+  openDetail: (id: string, origin?: DOMRect) => void
   closeDetail: () => void
   stepDetail: (delta: number) => void
+
+  /**
+   * La carte active du mur, au clavier.
+   *
+   * Dans le store plutôt que dans le DOM : le mur est virtualisé, la carte active sort donc du
+   * document dès qu'on la fait défiler hors de vue. L'identifiant survit, et la carte reprend le
+   * focus en revenant. Chaque carte n'écoute que « est-ce moi ? » : déplacer le focus ne
+   * redessine que les deux cartes concernées.
+   */
+  focusedId: string | null
+  setFocusedId: (id: string | null) => void
+  /** La carte dont l'aperçu tourne sans la souris — `Espace`, l'équivalent clavier du survol. */
+  previewId: string | null
+  setPreviewId: (id: string | null) => void
+  /** Ajoute des posts à la sélection, et passe en mode sélection : `Maj`+clic, `Ctrl`+clic. */
+  selectIds: (ids: string[]) => void
   addTag: (postId: string, name: string) => Promise<void>
   removeTag: (postId: string, name: string) => Promise<void>
   setLabel: (postId: string, label: LabelColor | null) => Promise<void>
@@ -337,11 +390,13 @@ export const useStore = create<State>()(
       volume: 0.7,
       muted: false,
       hoverAudio: false,
-      detailIndex: null,
+      detailId: null,
       selectionMode: false,
       selectedIds: [],
       selecting: false,
       detailOrigin: null,
+      focusedId: null,
+      previewId: null,
       scrollTop: 0,
 
       accounts: [],
@@ -516,7 +571,7 @@ export const useStore = create<State>()(
         /* Une sélection appartient au jeu de résultats qui l'a produite : changer de filtre la
            vide, sans quoi la barre annonçait « 40 sélectionnés » alors qu'aucun des quarante
            n'était à l'écran — et les actions groupées s'appliquaient bien à ces quarante-là. */
-        set({ query: { ...get().query, ...patch }, scrollTop: 0, detailIndex: null, selectedIds: [] })
+        set({ query: { ...get().query, ...patch }, scrollTop: 0, detailId: null, selectedIds: [] })
         flushDeferredUiStorage()
         void get().refresh(true)
       },
@@ -536,7 +591,7 @@ export const useStore = create<State>()(
             collectionIds: []
           },
           scrollTop: 0,
-          detailIndex: null,
+          detailId: null,
           selectedIds: []
         })
         flushDeferredUiStorage()
@@ -555,7 +610,7 @@ export const useStore = create<State>()(
         set({
           query: clearedQuery(get().query),
           scrollTop: 0,
-          detailIndex: null,
+          detailId: null,
           selectedIds: []
         })
         flushDeferredUiStorage()
@@ -617,7 +672,15 @@ export const useStore = create<State>()(
         try {
           const ids = get().selectedIds
           for (const slice of chunk(ids)) await magpie.archivePosts(slice, archived)
-          set({ selectedIds: [] })
+          /* `refresh` sans remise à zéro garde les cartes déjà à l'écran : les posts retirés
+             y restaient, alors que la notification les annonçait partis. On les ôte d'abord
+             de la liste — ils quittent la vue courante dès que leur état n'est plus le sien. */
+          const selected = new Set(ids)
+          const leaving = archived !== get().query.archived
+          set({
+            selectedIds: [],
+            ...withoutPosts(get(), get().posts, (post) => leaving && selected.has(post.id))
+          })
           await get().refresh()
           notifySuccess(archived ? 'bulk.archived' : 'bulk.restored', { count: ids.length }, {
             key: 'notice.undo',
@@ -643,7 +706,7 @@ export const useStore = create<State>()(
           await magpie.archivePosts([id], archived)
           /* Le post quitte la liste en place : recharger la page entière ferait sauter le mur
              sous les yeux pour un seul élément. */
-          set({ posts: get().posts.filter((post) => post.id !== id) })
+          set(withoutPosts(get(), get().posts, (post) => post.id === id))
           notifySuccess(archived ? 'bulk.archived' : 'bulk.restored', { count: 1 }, {
             key: 'notice.undo',
             run: () => {
@@ -675,15 +738,19 @@ export const useStore = create<State>()(
           notifyError('notice.favoriteFailed', error)
         }
       },
-      tagSelection: async (name) => {
+      tagSelection: async (typed) => {
+        /* Le nom tel que la base l'écrira, et non tel qu'il a été tapé : « #chats » posait une
+           puce « #chats » qui filtrait sur un tag inexistant. Voir `@shared/tags`. */
+        let name = normalizeTagName(typed)
+        if (!name) return
         try {
           const ids = get().selectedIds
-          for (const slice of chunk(ids)) await magpie.addTagMany(slice, name)
+          for (const slice of chunk(ids)) name = (await magpie.addTagMany(slice, name)) ?? name
           const selected = new Set(ids)
           const before = get().posts
           const posts = before
             .map((post) =>
-              selected.has(post.id) && !post.tags.some((tag) => tag.name === name)
+              selected.has(post.id) && !post.tags.some((tag) => tagKey(tag.name) === tagKey(name))
                 ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
                 : post
             )
@@ -703,7 +770,9 @@ export const useStore = create<State>()(
 
       /** Le pendant de `tagSelection`, qui n'existait pas : un tag posé par erreur sur trois
        *  cents posts ne se retirait qu'un post à la fois, depuis la vue détaillée. */
-      untagSelection: async (name) => {
+      untagSelection: async (typed) => {
+        const name = normalizeTagName(typed)
+        if (!name) return
         try {
           const ids = get().selectedIds
           for (const slice of chunk(ids)) await magpie.removeTagMany(slice, name)
@@ -711,12 +780,7 @@ export const useStore = create<State>()(
           set({
             posts: get().posts.map((post) =>
               selected.has(post.id)
-                ? {
-                    ...post,
-                    tags: post.tags.filter(
-                      (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
-                    )
-                  }
+                ? { ...post, tags: post.tags.filter((tag) => tagKey(tag.name) !== tagKey(name)) }
                 : post
             )
           })
@@ -881,23 +945,39 @@ export const useStore = create<State>()(
 
       setIsDark: (isDark) => set({ isDark }),
 
-      openDetail: (detailIndex, origin) =>
+      openDetail: (detailId, origin) =>
         set({
-          detailIndex,
+          detailId,
           detailOrigin: origin
             ? { x: origin.x, y: origin.y, width: origin.width, height: origin.height }
             : null
         }),
 
-      closeDetail: () => set({ detailIndex: null, detailOrigin: null }),
+      closeDetail: () => set({ detailId: null, detailOrigin: null }),
 
-      addTag: async (postId, name) => {
+      setFocusedId: (focusedId) => {
+        if (get().focusedId !== focusedId) set({ focusedId })
+      },
+      setPreviewId: (previewId) => {
+        if (get().previewId !== previewId) set({ previewId })
+      },
+      selectIds: (ids) => {
+        const selected = new Set(get().selectedIds)
+        for (const id of ids) selected.add(id)
+        set({ selectionMode: true, selectedIds: [...selected] })
+      },
+
+      addTag: async (postId, typed) => {
+        const typedName = normalizeTagName(typed)
+        if (!typedName) return
         try {
-          await magpie.addTag(postId, name)
+          /* La base rend la forme qu'elle garde : la casse d'un tag déjà connu l'emporte sur la
+             frappe, et la puce doit dire ce qui est écrit. */
+          const name = (await magpie.addTag(postId, typedName)) ?? typedName
           const before = get().posts
           const posts = before
             .map((post) =>
-              post.id === postId && !post.tags.some((tag) => tag.name === name)
+              post.id === postId && !post.tags.some((tag) => tagKey(tag.name) === tagKey(name))
                 ? { ...post, tags: [...post.tags, { name, source: 'user' as const }] }
                 : post
             )
@@ -918,16 +998,14 @@ export const useStore = create<State>()(
         try {
           await magpie.removeTag(postId, name)
           const before = get().posts
-          const selectedTags = new Set(get().query.tags.map((tag) => tag.toLocaleLowerCase()))
+          /* La comparaison de SQLite, pas celle de la langue : `NOCASE` ne replie que l'ASCII, et
+             retirer « été » ne retire pas « Été » en base — la puce ne doit pas prétendre
+             l'inverse. */
+          const selectedTags = new Set(get().query.tags.map(tagKey))
           const posts = before
             .map((post) =>
               post.id === postId
-                ? {
-                    ...post,
-                    tags: post.tags.filter(
-                      (tag) => tag.name.toLocaleLowerCase() !== name.toLocaleLowerCase()
-                    )
-                }
+                ? { ...post, tags: post.tags.filter((tag) => tagKey(tag.name) !== tagKey(name)) }
                 : post
             )
             .filter(
@@ -935,7 +1013,7 @@ export const useStore = create<State>()(
                 !(
                   post.id === postId &&
                   selectedTags.size > 0 &&
-                  !post.tags.some((tag) => selectedTags.has(tag.name.toLocaleLowerCase()))
+                  !post.tags.some((tag) => selectedTags.has(tagKey(tag.name)))
                 )
             )
           set({
@@ -971,20 +1049,25 @@ export const useStore = create<State>()(
         }
       },
 
-      /** Navigation dans la vue détaillée, bornée aux extrémités plutôt que circulaire. */
+      /** Navigation dans la vue détaillée, bornée aux extrémités plutôt que circulaire. La
+       *  position est relue à chaque pas : c'est l'identifiant qui fait foi. */
       stepDetail: (delta) => {
-        const { detailIndex, posts, hasMore } = get()
-        if (detailIndex === null || posts.length === 0) return
-        if (delta > 0 && detailIndex === posts.length - 1 && hasMore) {
-          const currentId = posts[detailIndex].id
+        const { detailId, posts, hasMore } = get()
+        if (detailId === null) return
+        const at = posts.findIndex((post) => post.id === detailId)
+        if (at < 0) return
+        if (delta > 0 && at === posts.length - 1 && hasMore) {
           void get().loadMore().then(() => {
-            const current = get().posts.findIndex((post) => post.id === currentId)
-            if (current >= 0 && current + 1 < get().posts.length) set({ detailIndex: current + 1 })
+            /* On a pu fermer, ou passer à un autre post, pendant le chargement. */
+            if (get().detailId !== detailId) return
+            const current = get().posts.findIndex((post) => post.id === detailId)
+            const next = current >= 0 ? get().posts[current + 1] : undefined
+            if (next) set({ detailId: next.id })
           })
           return
         }
-        const next = Math.min(posts.length - 1, Math.max(0, detailIndex + delta))
-        if (next !== detailIndex) set({ detailIndex: next })
+        const next = posts[Math.min(posts.length - 1, Math.max(0, at + delta))]
+        if (next && next.id !== detailId) set({ detailId: next.id })
       },
 
       loadAccounts: async (): Promise<void> => {
@@ -1045,13 +1128,13 @@ export const useStore = create<State>()(
       toggleFavorite: async (id) => {
         try {
           const isFavorite = await magpie.toggleFavorite(id)
-          const before = get().posts
-          const posts = before
-            .map((p) => (p.id === id ? { ...p, isFavorite } : p))
-            .filter((post) => !(get().query.favoritesOnly && post.id === id && !isFavorite))
+          const posts = get().posts.map((p) => (p.id === id ? { ...p, isFavorite } : p))
           set({
-            posts,
-            resultTotal: Math.max(0, get().resultTotal - (before.length - posts.length)),
+            ...withoutPosts(
+              get(),
+              posts,
+              (post) => get().query.favoritesOnly && post.id === id && !isFavorite
+            ),
             stats: get().stats
               ? {
                   ...get().stats!,

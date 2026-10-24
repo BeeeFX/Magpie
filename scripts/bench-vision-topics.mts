@@ -67,7 +67,8 @@ const items: OrganizationItem[] = posts.map((p) => ({
   text: p.text,
   authorHandle: p.author,
   tags: p.tags ? p.tags.split(',') : [],
-  thumbPath: null
+  thumbPath: null,
+  transcript: null
 }))
 
 const tf = await import('@huggingface/transformers')

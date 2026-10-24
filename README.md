@@ -94,7 +94,7 @@ Magpie writes out a folder that Claude, ChatGPT or any other assistant can read 
 
 ## Private by default
 
-Your posts, tags, collections, database and cached thumbnails stay on your computer. Platform sessions live in separate Chromium partitions, and Magpie never sees the password entered on the platform's real login page.
+Your posts, tags, collections, database and cached thumbnails stay on your computer. Platform sessions live in separate Chromium partitions, their cookies encrypted with your system's key, and Magpie never sees the password entered on the platform's real login page.
 
 Reading your images, transcribing your videos, grouping them and drawing the map all run locally. No captions, thumbnails or account data are sent to an external AI service.
 
@@ -144,6 +144,22 @@ npm run dist:win
 - electron-builder + electron-updater for NSIS releases and differential updates.
 
 A tag matching the `package.json` version triggers the Windows release workflow. It publishes the installer, blockmap and `latest.yml` update manifest to GitHub Releases.
+
+### Signing
+
+The release workflow signs the Windows build as soon as signing credentials exist in the repository, and builds unsigned (as today) when they don't. Either:
+
+- a classic certificate: secrets `WINDOWS_CSC_LINK` (the `.pfx`, base64) and `WINDOWS_CSC_KEY_PASSWORD`;
+- or Azure Trusted Signing: secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` for a service principal, and variables `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE`, `WINDOWS_PUBLISHER_NAME` (the certificate's CN).
+
+Once a release is signed, electron-builder writes the publisher name into `app-update.yml`, and every later update must be signed by that same name. Installations of unsigned versions carry no publisher name, so they accept the first signed update normally. The rules that follow from it:
+
+- after the first signed release, set the repository variable `REQUIRE_SIGNING=true`: a release built without its secrets would be refused by every signed installation, so the workflow fails instead;
+- to change certificate identity (CN), ship one transition release **still signed with the old certificate** but listing both names in `WINDOWS_PUBLISHER_NAME` (separated by `;`); installations check an update against the names of the version they run, so only the release after that can be signed with the new certificate. Plan it before the old certificate expires. (Azure Trusted Signing renews its short-lived certificates daily under the same CN: that is not a change of identity.)
+
+The workflow checks, after packaging, that the installer and `Magpie.exe` are validly signed and that `app-update.yml` names the signer.
+
+The packaged app is also hardened with Electron fuses (`electronFuses` in `electron-builder.yml`): cookies are encrypted with the OS key, `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` are ignored, and only the integrity-checked `app.asar` is loaded. A development run uses the stock Electron binary and separate `magpie-dev-*` session partitions, so it never touches the installed app's encrypted sessions — you log in to the platforms once for development.
 
 </details>
 

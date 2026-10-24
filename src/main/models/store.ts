@@ -1,7 +1,8 @@
+import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { modelsDir } from '../db'
-import { USED_MODELS } from '../tagging/models'
+import { isCommit, USED_MODELS } from '../tagging/models'
 
 /**
  * Le dossier des modèles, traité comme une ressource et non comme un détail.
@@ -126,5 +127,117 @@ export async function pruneUnusedModels(): Promise<{ removed: string[]; freed: n
       // Un modèle verrouillé par un processus qui tourne encore reste : on le reprendra.
     }
   }
+  return { removed, freed }
+}
+
+/**
+ * Les révisions que chaque modèle a réellement téléchargées.
+ *
+ * Rangées **dans** le dossier des modèles, à côté des fichiers qu'elles décrivent : le
+ * déplacement de bibliothèque copie ce dossier entier, donc le registre voyage avec les poids.
+ * Un fichier plutôt que la base, parce que le fil d'inférence n'ouvre pas la base et que ce
+ * registre ne concerne que ce dossier.
+ *
+ * Écrit par le processus principal sur annonce du fil d'inférence (`kind: 'pinned'`), juste
+ * avant le premier octet téléchargé — voir `chooseRevision` pour l'ordre des raisons.
+ */
+function revisionsFile(): string {
+  return join(modelsDir(), 'revisions.json')
+}
+
+export function modelRevisions(): Record<string, string> {
+  try {
+    const raw = JSON.parse(readFileSync(revisionsFile(), 'utf8')) as Record<string, unknown>
+    const out: Record<string, string> = {}
+    for (const [model, revision] of Object.entries(raw)) {
+      if (typeof revision === 'string' && isCommit(revision)) out[model] = revision
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Range la révision d'un modèle — une fois : la première réponse fait foi.
+ *
+ * Synchrone et atomique, parce que l'annonce précède le téléchargement de quelques
+ * millisecondes : un fichier à moitié écrit perdrait tous les modèles déjà épinglés.
+ */
+export function recordModelRevision(model: string, revision: string): void {
+  if (!isCommit(revision)) return
+  const known = modelRevisions()
+  if (known[model]) return
+  known[model] = revision
+  const destination = revisionsFile()
+  const temporary = `${destination}.writing`
+  writeFileSync(temporary, JSON.stringify(known, null, 2))
+  renameSync(temporary, destination)
+}
+
+/**
+ * Les restes d'un téléchargement interrompu, tels que `FileCache` les nomme.
+ *
+ * `@huggingface/transformers` écrit chaque fichier sous `<nom>.tmp.<pid>.<aléa>` puis le renomme.
+ * Quand le processus meurt en route — arrêt de l'application, minuterie d'inactivité, chien de
+ * garde —, le partiel reste, compté par `listModels` et jamais repris : le téléchargement
+ * suivant écrit sous un autre nom.
+ */
+const PARTIAL = /\.tmp\.(\d+)\.[0-9a-z]+$/
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM : le processus existe, il n'est simplement pas à nous.
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Efface les partiels dont le processus n'existe plus.
+ *
+ * Le numéro de processus est dans le nom : un partiel dont l'auteur tourne encore est un
+ * téléchargement en cours, et on n'y touche pas. Appelé au lancement, avant que le processus des
+ * modèles ne démarre, et à chaque fois que celui-ci s'arrête.
+ */
+export async function sweepPartialDownloads(
+  isAlive: (pid: number) => boolean = alive,
+  root: string = modelsDir()
+): Promise<{ removed: number; freed: number }> {
+  let removed = 0
+  let freed = 0
+  const walk = async (dir: string): Promise<void> => {
+    let entries: string[]
+    try {
+      entries = await readdir(dir)
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry)
+      let info
+      try {
+        info = await stat(path)
+      } catch {
+        continue
+      }
+      if (info.isDirectory()) {
+        await walk(path)
+        continue
+      }
+      const match = PARTIAL.exec(entry)
+      if (!match || isAlive(Number(match[1]))) continue
+      try {
+        await rm(path, { force: true })
+        removed += 1
+        freed += info.size
+      } catch {
+        // Verrouillé : on le reprendra au prochain passage.
+      }
+    }
+  }
+  await walk(root)
   return { removed, freed }
 }

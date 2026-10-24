@@ -1,5 +1,19 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { captionLanguage, listeningLanguage, tidyTranscript } from '../src/main/tagging/transcript-text'
-import { audioLevel, looksMute, MuteStreak, MUTE_STREAK } from '../src/main/tagging/transcript-guard'
+import {
+  audioLevel,
+  EXTRACTION_GRACE_MS,
+  EXTRACTION_SLOWNESS,
+  extractionOverdue,
+  looksMute,
+  MuteStreak,
+  MUTE_STREAK
+} from '../src/main/tagging/transcript-guard'
+/* Le seul import qui touche au module d'Electron : le chien de garde de l'extraction y vit, à
+   côté de ffmpeg. Rien n'y est appelé qui demande l'application. */
+import { collectAudio, ExtractionFault } from '../src/main/tagging/transcribe'
 
 /**
  * Ce que la transcription doit savoir avant d'écouter.
@@ -166,5 +180,76 @@ console.log('\nUne bibliothèque muette, ou un modèle muet')
   )
 }
 
-console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} échec(s).`)
-process.exit(failures === 0 ? 0 : 1)
+/**
+ * L'extraction ne peut plus attendre pour toujours.
+ *
+ * ffmpeg lisait une URL de CDN sans délai, et son lecteur HTTP attend indéfiniment un serveur
+ * muet : une seule URL figée arrêtait la transcription, et `runAfterSyncSteps` rendait ensuite la
+ * même promesse en suspens à chaque synchronisation — plus aucun rangement automatique jusqu'au
+ * redémarrage. On l'éprouve sur un vrai processus qui ne rend rien, à la place de ffmpeg.
+ */
+async function extraction(): Promise<void> {
+  console.log('\nL’extraction sous chien de garde')
+  assert(!extractionOverdue(EXTRACTION_GRACE_MS - 1, 0), 'une minute pour rendre le premier son')
+  assert(extractionOverdue(EXTRACTION_GRACE_MS + 1, 0), 'rien après une minute, c’est l’abandon')
+  assert(
+    !extractionOverdue(EXTRACTION_GRACE_MS + 300_000, 60),
+    'une minute de son en six minutes est encore de la patience'
+  )
+  assert(
+    extractionOverdue(EXTRACTION_GRACE_MS + 60_000 * (EXTRACTION_SLOWNESS + 1), 60),
+    'un son qui cesse d’arriver finit par faire tomber le délai'
+  )
+
+  const hung = (): ChildProcessWithoutNullStreams =>
+    spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'])
+  const outcome = (promise: Promise<Float32Array>): Promise<unknown> =>
+    promise.then(
+      (audio) => audio,
+      (error: unknown) => error
+    )
+
+  const stuck = hung()
+  const started = Date.now()
+  const late = await outcome(collectAudio(stuck, undefined, (elapsed) => elapsed > 300))
+  assert(late instanceof ExtractionFault, 'un ffmpeg qui ne rend rien est abandonné')
+  assert(Date.now() - started < 5_000, 'dès que son délai tombe')
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert(stuck.exitCode !== null || stuck.signalCode !== null, 'et le processus est tué, pas délaissé')
+
+  const stopped = hung()
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), 150)
+  const halted = await outcome(collectAudio(stopped, controller.signal))
+  assert(
+    halted instanceof Error && !(halted instanceof ExtractionFault),
+    'l’arrêt demandé interrompt l’extraction, sans la compter comme une panne de la machine'
+  )
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert(stopped.exitCode !== null || stopped.signalCode !== null, 'et tue ffmpeg')
+
+  const missing = await outcome(
+    collectAudio(spawn(join(tmpdir(), 'ffmpeg-introuvable-magpie'), []), undefined)
+  )
+  assert(
+    missing instanceof ExtractionFault,
+    'un ffmpeg introuvable n’est pas un verdict sur la vidéo'
+  )
+
+  /* Et le chemin ordinaire rend toujours le son qu'on lui donne, échantillon pour échantillon. */
+  const samples = [0.5, -0.25, 0.125]
+  const talking = spawn(process.execPath, [
+    '-e',
+    `const b = Buffer.alloc(${samples.length * 4}); ${JSON.stringify(samples)}.forEach((v, i) => b.writeFloatLE(v, i * 4)); process.stdout.write(b)`
+  ])
+  const heard = await outcome(collectAudio(talking))
+  assert(
+    heard instanceof Float32Array && Array.from(heard).join() === samples.join(),
+    'un ffmpeg qui répond rend son son intact'
+  )
+}
+
+void extraction().then(() => {
+  console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} échec(s).`)
+  process.exit(failures === 0 ? 0 : 1)
+})

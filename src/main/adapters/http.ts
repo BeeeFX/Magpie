@@ -430,14 +430,15 @@ export async function getJson<T>(
 ): Promise<T> {
   const { status, headers, body } = await request(platform, url, options)
 
-  if (status === 401 || status === 403) {
-    // Instagram répond parfois 403 avec un corps signalant une vérification plutôt qu'une
-    // session invalide : les deux appellent des réactions opposées, d'où le test.
-    if (/challenge_required|checkpoint_required/i.test(body)) {
-      throw new ChallengeRequired(platform, body.slice(0, 200))
-    }
-    throw new AuthExpired(platform)
+  // Instagram signale une vérification de sécurité dans le corps, et le plus souvent avec un
+  // **400** — pas seulement un 401 ou un 403. Lue seulement sur ces deux-là, elle devenait une
+  // `HttpError` ordinaire : ni « à débloquer » à l'écran, ni arrêt des synchronisations
+  // automatiques, qui retapaient alors un compte déjà sous surveillance.
+  if (status >= 400 && status !== 429 && /challenge_required|checkpoint_required/i.test(body)) {
+    throw new ChallengeRequired(platform, body.slice(0, 200))
   }
+
+  if (status === 401 || status === 403) throw new AuthExpired(platform)
 
   if (status === 429) {
     const header = headers['retry-after']

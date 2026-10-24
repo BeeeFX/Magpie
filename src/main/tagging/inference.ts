@@ -1,8 +1,16 @@
 import { join } from 'node:path'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import { modelsDir } from '../db'
-import type { DownloadProgress, InferenceReply, InferenceRequest } from './inference.worker'
+import { modelRevisions, recordModelRevision, sweepPartialDownloads } from '../models/store'
+import type {
+  DownloadProgress,
+  Heartbeat,
+  InferenceReply,
+  InferenceRequest,
+  ModelPinned
+} from './inference.worker'
 import { backgroundTasks } from '../tasks'
+import { forwardOutput } from '../log'
 
 /**
  * Le guichet des modèles, vu du processus principal.
@@ -60,6 +68,44 @@ let nextId = 1
 let idleTimer: NodeJS.Timeout | null = null
 const pending = new Map<number, Pending>()
 
+/**
+ * Au bout de combien de silence, une demande en cours, le processus est tenu pour figé.
+ *
+ * Le processus bat toutes les cinq secondes pendant qu'il travaille (`Heartbeat`), et il rend
+ * compte de chaque téléchargement : deux minutes sans rien, c'est vingt-quatre battements
+ * manqués — un calcul natif qui ne rend plus la main, pas un modèle lent. Un premier
+ * téléchargement de 688 Mo ou une vidéo de dix minutes, eux, battent tout du long.
+ */
+const SILENCE_MS = 120_000
+let lastHeard = 0
+let silenceWatch: NodeJS.Timeout | null = null
+/** Pourquoi le processus a été arrêté, quand c'est nous qui l'avons tué. */
+let killedBecause: string | null = null
+
+/**
+ * Tue et oublie un processus qui ne répond plus.
+ *
+ * Il n'y avait aucune borne : `ask` attendait pour toujours, et avec lui la transcription, puis
+ * `runAfterSyncSteps`, qui rendait la même promesse en suspens à chaque synchronisation. Les
+ * demandes en vol échouent — la transcription les compte comme des refus, jamais comme des
+ * verdicts —, et la suivante repart sur un processus neuf.
+ */
+function watchSilence(): void {
+  if (silenceWatch) return
+  silenceWatch = setInterval(() => {
+    if (pending.size === 0 || !child) {
+      if (silenceWatch) clearInterval(silenceWatch)
+      silenceWatch = null
+      return
+    }
+    if (Date.now() - lastHeard < SILENCE_MS) return
+    killedBecause = `Le processus des modèles ne répondait plus depuis ${SILENCE_MS / 1000} s ; il a été relancé.`
+    console.warn(`[magpie] ${killedBecause}`)
+    child.kill()
+  }, 10_000)
+  silenceWatch.unref?.()
+}
+
 function armIdleTimer(): void {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
@@ -85,12 +131,28 @@ function spawn(): Promise<UtilityProcess> {
     const script = workerScriptPath(app.getAppPath())
     const process_ = utilityProcess.fork(script, [], {
       serviceName: 'Magpie models',
-      /* Hérité : ce que les modèles écrivent — un téléchargement, un avertissement d'ORT —
-         doit apparaître dans le même journal que le reste, sinon il n'existe pour personne. */
-      stdio: 'inherit'
+      /* Ce que les modèles écrivent — un téléchargement, un avertissement d'ORT — doit
+         apparaître dans le même journal que le reste, sinon il n'existe pour personne.
+         `inherit` l'envoyait sur la sortie standard, qui n'est reliée à rien dans la version
+         installée : on la recopie donc dans la console, et de là dans le fichier. */
+      stdio: 'pipe'
     })
+    forwardOutput(process_.stdout, 'modèles', 'info')
+    forwardOutput(process_.stderr, 'modèles', 'warn')
 
-    process_.on('message', (message: InferenceReply | DownloadProgress) => {
+    process_.on('message', (message: InferenceReply | DownloadProgress | Heartbeat | ModelPinned) => {
+      lastHeard = Date.now()
+      if ('kind' in message && message.kind === 'alive') return
+      /* Rangée avant que le premier octet n'arrive : c'est ce qui fera redemander le même
+         commit la prochaine fois, et non ce que `main` sera devenu. */
+      if ('kind' in message && message.kind === 'pinned') {
+        try {
+          recordModelRevision(message.model, message.revision)
+        } catch (error) {
+          console.warn('[magpie] Révision de modèle non rangée :', error)
+        }
+        return
+      }
       /* `id: 0` n'est la réponse à rien : c'est la diffusion du téléchargement. Un premier
          rangement rapatrie 688 Mo, et l'interface n'en disait rien — « Préparation en cours… »
          et huit minutes de silence, indiscernables d'une application figée. */
@@ -110,7 +172,12 @@ function spawn(): Promise<UtilityProcess> {
        repartira sur un processus neuf. */
     process_.on('exit', () => {
       if (child === process_) child = null
-      failAll('Le processus des modèles s’est arrêté. Relancez l’étape.')
+      /* Un processus arrêté en plein téléchargement — chien de garde, panne, fermeture — laisse
+         ses fichiers partiels. Son numéro ne tourne plus : ils partent maintenant. */
+      void sweepPartialDownloads().catch(() => undefined)
+      const reason = killedBecause ?? 'Le processus des modèles s’est arrêté. Relancez l’étape.'
+      killedBecause = null
+      failAll(reason)
     })
 
     process_.once('spawn', () => {
@@ -139,7 +206,9 @@ function spawn(): Promise<UtilityProcess> {
 /* Un discriminant plutôt qu'un `id === 0` : les deux formes ont un `id` de type `number`,
    donc le compilateur ne peut rien en déduire, et le cast qui rattrapait le coup masquait le
    jour où les formes divergeraient. */
-function isDownload(message: InferenceReply | DownloadProgress): message is DownloadProgress {
+function isDownload(
+  message: InferenceReply | DownloadProgress | Heartbeat | ModelPinned
+): message is DownloadProgress {
   return 'kind' in message && message.kind === 'download'
 }
 
@@ -171,8 +240,12 @@ async function ask(request: Ask<InferenceRequest>): Promise<InferenceReply> {
     idleTimer = null
   }
   const reply = await new Promise<InferenceReply>((resolve, reject) => {
+    /* Le silence se compte à partir de la demande quand rien n'était en cours : sinon le
+       dernier message, vieux de dix minutes, ferait tuer le processus aussitôt. */
+    if (pending.size === 0) lastHeard = Date.now()
     pending.set(id, { resolve, reject })
     worker.postMessage({ ...request, id } as InferenceRequest)
+    watchSilence()
   })
   armIdleTimer()
   if (!reply.ok) throw new Error(reply.message)
@@ -191,7 +264,7 @@ let configured: Promise<unknown> | null = null
 async function ready(): Promise<void> {
   const worker = await spawn()
   if (!configured) {
-    configured = ask({ kind: 'configure', cacheDir: modelsDir() })
+    configured = ask({ kind: 'configure', cacheDir: modelsDir(), revisions: modelRevisions() })
     worker.once('exit', () => {
       configured = null
     })

@@ -1,7 +1,15 @@
 import type { PlaybackQuality } from '@shared/types'
-import { playbackMediaSource, upsertPosts, type PlaybackMediaSource } from '../db/queries'
-import { ADAPTERS } from '../sync/engine'
+import {
+  playbackMediaSource,
+  readAccount,
+  refreshPostMedia,
+  thumbnailLinksForPosts,
+  writeAccount,
+  type PlaybackMediaSource
+} from '../db/queries'
+import { ADAPTERS, syncEngine } from '../sync/engine'
 import { isMediaUrlExpired } from './freshness'
+import { LinkRefresher } from './links'
 
 export interface RemoteMediaRequest {
   postId: string
@@ -13,6 +21,30 @@ export interface RemoteMediaRequest {
 const QUALITIES: PlaybackQuality[] = ['auto', '480p', '720p', '1080p', 'source']
 
 /**
+ * Le registre des renouvellements, branché sur les vrais adaptateurs. Voir `links.ts`.
+ *
+ * La pause reprend celle du moteur de synchronisation pour Instagram — la plateforme la plus
+ * prompte à réagir, et la seule dont les liens périment.
+ */
+export const linkRefresher = new LinkRefresher({
+  fetch: async (platform, nativeId) => {
+    const adapter = ADAPTERS[platform]
+    return adapter.refreshPost ? adapter.refreshPost(nativeId) : null
+  },
+  available: async (platform) =>
+    Boolean(ADAPTERS[platform].refreshPost) && (await ADAPTERS[platform].isConnected()),
+  accountStatus: (platform) => readAccount(platform)?.lastSyncStatus ?? null,
+  syncing: (platform) => syncEngine.isRunning(platform),
+  thumbnailLinks: thumbnailLinksForPosts,
+  save: (fresh) => {
+    refreshPostMedia(fresh.posts, fresh.media)
+  },
+  markChallenge: (platform) => writeAccount(platform, { lastSyncStatus: 'challenge' }),
+  pause: () => new Promise((resolve) => setTimeout(resolve, 2500 + Math.random() * 2500)),
+  now: () => Date.now()
+})
+
+/**
  * Résout un média en renouvelant son lien si celui-ci a expiré.
  *
  * Instagram signe ses URLs pour quelques jours seulement. Celles enregistrées à la
@@ -21,12 +53,11 @@ const QUALITIES: PlaybackQuality[] = ['auto', '480p', '720p', '1080p', 'source']
  * regénère un lien à chaque affichage. On fait désormais la même chose : on redemande le
  * post, on réenregistre ses liens, et la lecture part sur un lien valide.
  *
- * Les requêtes concurrentes pour un même post partagent le même renouvellement : ouvrir
- * une vidéo déclenche plusieurs résolutions, il n'y a aucune raison de solliciter la
- * plateforme plusieurs fois.
+ * Le renouvellement passe par `linkRefresher` : les requêtes concurrentes pour un même post le
+ * partagent, un échec n'est pas rejoué à chaque requête par plage du lecteur, et rien ne part
+ * vers un compte en vérification de sécurité. Un renouvellement raté laisse simplement l'ancien
+ * lien tenter sa chance : le lecteur affichera son erreur habituelle plutôt qu'un écran vide.
  */
-const refreshing = new Map<string, Promise<void>>()
-
 export async function resolveFreshMedia(
   request: RemoteMediaRequest
 ): Promise<PlaybackMediaSource | null> {
@@ -34,26 +65,7 @@ export async function resolveFreshMedia(
   const media = playbackMediaSource(postId, mediaIndex, kind, quality)
   if (!media?.source || !isMediaUrlExpired(media.source)) return media
 
-  const adapter = ADAPTERS[media.platform]
-  if (!adapter.refreshPost) return media
-
-  const nativeId = postId.slice(postId.indexOf(':') + 1)
-  let pending = refreshing.get(postId)
-  if (!pending) {
-    pending = (async () => {
-      const fresh = await adapter.refreshPost!(nativeId)
-      if (fresh.posts.length > 0) upsertPosts(fresh.posts, fresh.media)
-    })()
-      .catch((error: unknown) => {
-        // Un renouvellement raté laisse simplement l'ancien lien tenter sa chance : le
-        // lecteur affichera son erreur habituelle plutôt qu'un écran vide.
-        console.warn(`[magpie] Lien média non renouvelé pour ${postId}`, error)
-      })
-      .finally(() => refreshing.delete(postId))
-    refreshing.set(postId, pending)
-  }
-  await pending
-
+  if (!(await linkRefresher.refreshNow(postId))) return media
   return playbackMediaSource(postId, mediaIndex, kind, quality) ?? media
 }
 

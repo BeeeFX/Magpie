@@ -9,10 +9,13 @@ import type {
   PostPage,
   PostQuery,
   TagSource,
+  TagTally,
   VideoQuality
 } from '@shared/types'
 import { CONTENT_SOURCES, PLATFORMS, PUBLIC_PLATFORMS } from '@shared/types'
-import { MEDIA_UPSERT_SQL } from './media-upsert'
+import { normalizeTagName } from '@shared/tags'
+import { fold } from './functions'
+import { MEDIA_UPSERT_SQL, THUMB_AWAITING_LINK } from './media-upsert'
 import { getDb } from './index'
 import { searchClause } from './search'
 
@@ -326,15 +329,17 @@ function orderBy(sort: PostQuery['sort'], randomSeed: number): string {
     case 'author':
       return 'p.author_handle COLLATE NOCASE ASC, COALESCE(p.published_at, 0) DESC, p.id'
     case 'platform':
-      return 'p.platform ASC, COALESCE(p.saved_at, p.discovered_at) DESC, p.id'
+      return 'p.platform ASC, COALESCE(p.saved_at, p.discovered_at) DESC, p.saved_rank ASC, p.id'
     case 'random':
       // Ordre pseudo-aléatoire déterministe et paginable : la première tranche apparaît
       // immédiatement sans charger toute la bibliothèque avant de la mélanger.
       return `((p.rowid * 1103515245 + ${Math.max(1, Math.floor(randomSeed))}) & 2147483647), p.id`
     case 'added':
       /* Ce que Magpie a vu en dernier, indépendamment de la date que la plateforme annonce :
-         après une synchronisation, c'est le seul ordre qui remonte les nouveautés. */
-      return 'p.discovered_at DESC, p.id'
+         après une synchronisation, c'est le seul ordre qui remonte les nouveautés. Toute une
+         tournée partage le même `discovered_at` : le rang l'ordonne à l'intérieur, sans quoi
+         l'identifiant — un ordre sans aucun sens — en décidait. */
+      return 'p.discovered_at DESC, p.saved_rank ASC, p.id'
     case 'saved':
     default:
       return 'COALESCE(p.saved_at, p.discovered_at) DESC, p.saved_rank ASC, p.id'
@@ -399,9 +404,12 @@ function attachMedia(posts: Post[]): void {
       // déclarait pourtant « en préparation » : la carte tournait indéfiniment sur une
       // attente qui n'arriverait jamais. Mieux vaut annoncer qu'il n'y aura pas d'aperçu,
       // ce qui invite d'ailleurs à survoler pour lire.
+      /* Une vignette qui attend un lien neuf n'a pas échoué : « en préparation » est exact,
+         et c'est ce qui fait que la grille la redemande — donc que son lien se renouvelle. */
       thumbStatus: row.thumb_path
         ? 'ready'
-        : !(row.source_path || /^https?:/i.test(row.remote_url ?? '')) || row.thumb_attempts >= 3
+        : !(row.source_path || /^https?:/i.test(row.remote_url ?? '')) ||
+            (row.thumb_attempts >= 3 && row.thumb_attempts !== THUMB_AWAITING_LINK)
           ? 'failed'
           : 'pending',
       width: row.width,
@@ -504,13 +512,6 @@ export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): L
          WHERE aps.post_id = p.id AND aps.source IN (${sourceSlots}))`
     : ''
 
-  // Une ligne par *lien de tag* : la même sous-requête corrélée serait évaluée autant de
-  // fois qu'il existe de liens — 135 000 sur une bibliothèque réellement taguée, soit
-  // 350 ms à elle seule. Sous forme d'ensemble, elle n'est construite qu'une fois.
-  const activeTagged = filtersSources
-    ? ` AND p.id IN (SELECT post_id FROM post_sources WHERE source IN (${sourceSlots}))`
-    : ''
-
   // Plateformes, favoris et étiquettes en une seule passe : trois requêtes parcouraient
   // trois fois la même table pour trois découpages du même décompte.
   const rollup = db
@@ -558,31 +559,9 @@ export function getStats(activeSources: ContentSource[] = ['saved', 'liked']): L
     .all(...PUBLIC_PLATFORMS) as { source: ContentSource; n: number }[]
   for (const row of sourceRows) bySource[row.source] = row.n
 
-  const topTags = db
-    .prepare(
-      `SELECT t.name,
-              CASE
-                WHEN SUM(CASE WHEN pt.source = 'user' THEN 1 ELSE 0 END) > 0 THEN 'user'
-                WHEN SUM(CASE WHEN pt.source = 'ai' THEN 1 ELSE 0 END) > 0 THEN 'ai'
-                ELSE 'rule'
-              END AS source,
-              COUNT(*) AS count
-         FROM post_tags pt
-         JOIN tags t ON t.id = pt.tag_id
-         JOIN posts p ON p.id = pt.post_id AND p.is_archived = 0
-          AND p.platform IN (${PUBLIC_PLATFORM_SLOTS})
-        WHERE 1 = 1${activeTagged}
-        GROUP BY t.id
-        ORDER BY count DESC, t.name COLLATE NOCASE
-        LIMIT 40`
-    )
-    .all(...PUBLIC_PLATFORMS, ...sourceArgs) as {
-    name: string
-    count: number
-    source: TagSource
-  }[]
+  const { tags: topTags, distinct: tagCount } = tagTallies(sources as ContentSource[], TOP_TAGS)
 
-  return { total, favorites, archived, byPlatform, bySource, byLabel, topTags }
+  return { total, favorites, archived, byPlatform, bySource, byLabel, topTags, tagCount }
 }
 
 export function toggleFavorite(id: string): boolean {
@@ -622,22 +601,33 @@ export function setFavoriteMany(ids: string[], value: boolean): void {
   })()
 }
 
-export function addTagMany(ids: string[], name: string): void {
-  const clean = name.trim().slice(0, 80)
-  if (!clean || ids.length === 0) return
+/**
+ * Poser un tag sur un lot de posts. Rend le nom tel que la base le garde.
+ *
+ * Le nom passe par `normalizeTagName`, comme dans la vue détaillée : « #chats » tapé ici
+ * créait jusqu'alors un tag « #chats » distinct du « chats » que l'autre geste écrivait. Et la
+ * forme rendue est celle **déjà en base** quand le tag existe sous une autre casse — la colonne
+ * est `NOCASE`, donc « Chats » rejoint « chats » ; l'interface doit afficher ce qui est écrit,
+ * pas ce qui a été tapé.
+ */
+export function addTagMany(ids: string[], name: string): string | null {
+  const clean = normalizeTagName(name)
+  if (!clean || ids.length === 0) return null
   const db = getDb()
-  db.transaction(() => {
+  return db.transaction(() => {
     db.prepare(`INSERT INTO tags (name, source) VALUES (?, 'user') ON CONFLICT(name) DO NOTHING`).run(
       clean
     )
-    const tag = db.prepare('SELECT id FROM tags WHERE name = ? COLLATE NOCASE').get(clean) as {
+    const tag = db.prepare('SELECT id, name FROM tags WHERE name = ? COLLATE NOCASE').get(clean) as {
       id: number
+      name: string
     }
     const stmt = db.prepare(
       `INSERT INTO post_tags (post_id, tag_id, source) VALUES (?, ?, 'user')
        ON CONFLICT(post_id, tag_id) DO UPDATE SET source = 'user'`
     )
     for (const id of ids) stmt.run(id, tag.id)
+    return tag.name
   })()
 }
 
@@ -648,9 +638,9 @@ export function addTagMany(ids: string[], name: string): void {
  * ne se retirait qu'un post à la fois, depuis la vue détaillée, trois cents fois.
  */
 export function removeTagMany(ids: string[], name: string): void {
-  if (ids.length === 0 || !name.trim()) return
+  const clean = normalizeTagName(name)
+  if (ids.length === 0 || !clean) return
   const db = getDb()
-  const clean = name.trim()
   db.transaction(() => {
     const tag = db.prepare('SELECT id FROM tags WHERE name = ?').get(clean) as
       | { id: number }
@@ -661,6 +651,68 @@ export function removeTagMany(ids: string[], name: string): void {
   })()
 }
 
+/** Combien de tags la barre latérale montre d'emblée : au-delà, `listTags` prend le relais. */
+const TOP_TAGS = 40
+
+/**
+ * Chaque tag et le nombre de posts visibles qui le portent, du plus porté au moins porté.
+ *
+ * Une seule requête pour les deux usages — le haut de la barre latérale et la liste complète —
+ * pour que leurs chiffres ne puissent pas diverger. `distinct` compte **tous** les tags, limite
+ * ou non : c'est ce qui manquait pour dire « Voir les 137 tags » quand on n'en recevait que
+ * quarante, le bouton annonçant alors « les 40 » et le quarante et unième restant hors d'atteinte.
+ */
+function tagTallies(
+  sources: readonly ContentSource[],
+  limit: number | null
+): { tags: TagTally[]; distinct: number } {
+  const filtersSources = sources.length < CONTENT_SOURCES.length
+  // Une ligne par *lien de tag* : la même sous-requête corrélée serait évaluée autant de
+  // fois qu'il existe de liens — 135 000 sur une bibliothèque réellement taguée, soit
+  // 350 ms à elle seule. Sous forme d'ensemble, elle n'est construite qu'une fois.
+  const activeTagged = filtersSources
+    ? ` AND p.id IN (SELECT post_id FROM post_sources WHERE source IN (${sources.map(() => '?').join(', ')}))`
+    : ''
+  const rows = getDb()
+    .prepare(
+      /* `COUNT(*) OVER ()` est évalué après le regroupement et avant la limite : c'est le nombre
+         de tags distincts, obtenu dans la même passe que les quarante premiers. */
+      `SELECT t.name,
+              CASE
+                WHEN SUM(CASE WHEN pt.source = 'user' THEN 1 ELSE 0 END) > 0 THEN 'user'
+                WHEN SUM(CASE WHEN pt.source = 'ai' THEN 1 ELSE 0 END) > 0 THEN 'ai'
+                ELSE 'rule'
+              END AS source,
+              COUNT(*) AS count,
+              COUNT(*) OVER () AS distinct_tags
+         FROM post_tags pt
+         JOIN tags t ON t.id = pt.tag_id
+         JOIN posts p ON p.id = pt.post_id AND p.is_archived = 0
+          AND p.platform IN (${PUBLIC_PLATFORM_SLOTS})
+        WHERE 1 = 1${activeTagged}
+        GROUP BY t.id
+        ORDER BY count DESC, t.name COLLATE NOCASE${limit === null ? '' : `
+        LIMIT ${Math.max(1, Math.floor(limit))}`}`
+    )
+    .all(...PUBLIC_PLATFORMS, ...(filtersSources ? sources : [])) as (TagTally & {
+    distinct_tags: number
+  })[]
+  return {
+    tags: rows.map(({ name, source, count }) => ({ name, source, count })),
+    distinct: rows[0]?.distinct_tags ?? 0
+  }
+}
+
+/**
+ * Tous les tags, pour la complétion et pour « voir tout » dans la barre latérale.
+ *
+ * Mêmes règles que les compteurs voisins — ni les posts retirés, ni les origines décochées —
+ * parce qu'un tag proposé qui ne mène à aucun post visible serait une suggestion qui ment.
+ */
+export function listTags(activeSources: ContentSource[] = ['saved', 'liked']): TagTally[] {
+  const sources = activeSources.length > 0 ? activeSources : (['saved'] as ContentSource[])
+  return tagTallies(sources, null).tags
+}
 
 export interface AiCandidate {
   id: string
@@ -681,6 +733,12 @@ export interface OrganizationItem {
   authorHandle: string | null
   thumbPath: string | null
   tags: string[]
+  /**
+   * Ce que la vidéo dit, quand Whisper l'a écoutée. `null` : pas encore transcrite ; chaîne
+   * vide : écoutée, rien à en tirer. Elle était annoncée partout comme une entrée du
+   * regroupement et n'était pourtant lue nulle part ici — voir `embeddingText`.
+   */
+  transcript: string | null
 }
 
 export function videoAiCandidateIds(): string[] {
@@ -710,7 +768,7 @@ export function videoAiCandidateIds(): string[] {
 export function organizationItems(): OrganizationItem[] {
   const rows = getDb()
     .prepare(
-      `SELECT p.id, p.platform, p.kind, p.text, p.author_handle,
+      `SELECT p.id, p.platform, p.kind, p.text, p.author_handle, p.transcript,
               (SELECT m2.thumb_path FROM media m2
                 WHERE m2.post_id = p.id AND m2.thumb_path IS NOT NULL
                 ORDER BY m2.idx LIMIT 1) AS thumb_path,
@@ -733,6 +791,7 @@ export function organizationItems(): OrganizationItem[] {
     thumb_path: string | null
     sources: string | null
     tags: string | null
+    transcript: string | null
   }[]
   return rows.map((row) => ({
     id: row.id,
@@ -742,7 +801,8 @@ export function organizationItems(): OrganizationItem[] {
     text: row.text,
     authorHandle: row.author_handle,
     thumbPath: row.thumb_path,
-    tags: row.tags?.split(',').filter(Boolean) ?? []
+    tags: row.tags?.split(',').filter(Boolean) ?? [],
+    transcript: row.transcript
   }))
 }
 
@@ -951,6 +1011,9 @@ export function aiCandidates(postIds?: string[], limit = 500): AiCandidate[] {
     }))
 }
 
+/* À reprendre si l'étiquetage distant revient (`autoTagEnabled` est forcé à faux) :
+   `discovered_at` est l'horodatage d'une tournée, et la reprise d'un rattrapage garde celui du
+   début — ses posts tombent donc avant `since` et ne seraient pas proposés. */
 export function recentAiCandidateIds(platform: Platform, since: number): string[] {
   return (
     getDb()
@@ -1081,16 +1144,19 @@ export interface MediaInput {
 
 const upsertPostStmt = () =>
   getDb().prepare(/* sql */ `
-    INSERT INTO posts (id, platform, native_id, url, author_handle, author_name, text,
+    INSERT INTO posts (id, platform, native_id, url, author_handle, author_name,
+                       author_name_folded, text,
                        kind, media_count, published_at, saved_at, discovered_at,
                        saved_rank, raw, is_demo, updated_at)
-    VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name, @text,
+    VALUES (@id, @platform, @native_id, @url, @author_handle, @author_name,
+            @author_name_folded, @text,
             @kind, @media_count, @published_at, @saved_at, @discovered_at,
             @saved_rank, @raw, @is_demo, @updated_at)
     ON CONFLICT(id) DO UPDATE SET
       url          = excluded.url,
       author_handle= excluded.author_handle,
       author_name  = excluded.author_name,
+      author_name_folded = excluded.author_name_folded,
       text         = excluded.text,
       kind         = excluded.kind,
       media_count  = excluded.media_count,
@@ -1101,10 +1167,19 @@ const upsertPostStmt = () =>
       updated_at   = excluded.updated_at
   `)
 
+/**
+ * `discoveredAt` est l'horodatage de la tournée, pas de l'appel.
+ *
+ * Il valait `Date.now()` à chaque appel, donc à chaque page d'une synchronisation : la page deux
+ * — des signets plus anciens — passait devant la page un sur le mur. Le moteur passe désormais le
+ * même pour toute une tournée, reprise comprise, et `saved_rank` ordonne l'intérieur. Il ne
+ * s'écrit qu'à la première rencontre : un post déjà connu garde le sien.
+ */
 export function upsertPosts(
   posts: PostInput[],
   media: MediaInput[],
-  source: ContentSource = 'saved'
+  source: ContentSource = 'saved',
+  discoveredAt: number = Date.now()
 ): void {
   const db = getDb()
   const post = upsertPostStmt()
@@ -1136,18 +1211,20 @@ export function upsertPosts(
         url: p.url,
         author_handle: p.authorHandle ?? null,
         author_name: p.authorName ?? null,
+        // Replié ici, une fois, plutôt qu'à chaque frappe de recherche : voir MIGRATION_31_SQL.
+        author_name_folded: p.authorName ? fold(p.authorName) : null,
         text: p.text ?? null,
         kind: p.kind,
         media_count: p.mediaCount ?? 0,
         published_at: p.publishedAt ?? null,
         saved_at: p.savedAt ?? null,
-        discovered_at: now,
+        discovered_at: discoveredAt,
         saved_rank: p.savedRank ?? null,
         raw: p.raw === undefined ? null : JSON.stringify(p.raw),
         is_demo: p.isDemo ? 1 : 0,
         updated_at: now
       })
-      sourceStmt.run(p.id, source, p.savedRank ?? null, p.savedAt ?? null, now)
+      sourceStmt.run(p.id, source, p.savedRank ?? null, p.savedAt ?? null, discoveredAt)
 
       // Une plateforme peut retirer un élément d'un carrousel ou remplacer une vidéo.
       // Les anciennes lignes ne doivent alors pas survivre au nouveau payload.
@@ -1182,6 +1259,78 @@ export function upsertPosts(
 }
 
 /**
+ * Réenregistre les liens média de posts déjà connus, et rien d'autre.
+ *
+ * Le renouvellement d'un lien expiré passait par `upsertPosts`, dont l'origine vaut `'saved'`
+ * par défaut : ouvrir la vidéo d'un post seulement liké lui ajoutait une ligne de signet. Le
+ * post apparaissait alors dans « Signets », gonflait leur décompte, et ne pouvait plus en
+ * sortir — la synchronisation suivante n'avait aucune raison de retirer une origine qu'elle
+ * n'avait pas écrite. Un renouvellement ne dit rien de l'endroit où le post a été rangé : on ne
+ * touche donc ni à `post_sources`, ni à `discovered_at`, ni aux rangs, ni au texte.
+ *
+ * Délibérément à part de `upsertPosts`, qui évolue de son côté : les deux partagent
+ * `MEDIA_UPSERT_SQL`, c'est-à-dire la seule règle qui compte ici — un lien resigné garde la
+ * vignette et le clip, et rend ses tentatives à une vignette qui n'existe pas encore.
+ *
+ * Un post inconnu est ignoré plutôt que recréé : retiré entre-temps, il n'a rien à renouveler.
+ * Rend le nombre de posts effectivement mis à jour.
+ */
+export function refreshPostMedia(posts: PostInput[], media: MediaInput[]): number {
+  const db = getDb()
+  const known = db.prepare('SELECT media_count FROM posts WHERE id = ?')
+  const setCount = db.prepare('UPDATE posts SET media_count = ? WHERE id = ?')
+  const mediaStmt = db.prepare(MEDIA_UPSERT_SQL)
+  const trimMedia = db.prepare('DELETE FROM media WHERE post_id = ? AND idx >= ?')
+  const trimVariants = db.prepare('DELETE FROM media_variants WHERE post_id = ? AND idx >= ?')
+  const deleteVariants = db.prepare('DELETE FROM media_variants WHERE post_id = ? AND idx = ?')
+  const variantStmt = db.prepare(/* sql */ `
+    INSERT INTO media_variants (post_id, idx, quality, source, width, height, bitrate)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const updated = new Set<string>()
+  db.transaction(() => {
+    for (const p of posts) {
+      const row = known.get(p.id) as { media_count: number } | undefined
+      if (!row) continue
+      updated.add(p.id)
+      const count = p.mediaCount ?? 0
+      /* Un carrousel peut avoir perdu une vue. Une réponse sans aucun média, elle, ne prouve
+         rien : on ne vide pas un post sur la foi d'un payload incomplet. */
+      if (count > 0) {
+        if (row.media_count !== count) setCount.run(count, p.id)
+        trimMedia.run(p.id, count)
+        trimVariants.run(p.id, count)
+      }
+    }
+    for (const m of media) {
+      if (!updated.has(m.postId)) continue
+      mediaStmt.run({
+        post_id: m.postId,
+        idx: m.idx,
+        kind: m.kind,
+        remote_url: m.remoteUrl ?? null,
+        source_path: m.sourcePath ?? null,
+        video_source: m.videoSource ?? null
+      })
+      deleteVariants.run(m.postId, m.idx)
+      for (const variant of m.videoVariants ?? []) {
+        variantStmt.run(
+          m.postId,
+          m.idx,
+          variant.quality,
+          variant.source,
+          variant.width ?? null,
+          variant.height ?? null,
+          variant.bitrate ?? null
+        )
+      }
+    }
+  })()
+  return updated.size
+}
+
+/**
  * Identifiants déjà connus pour une plateforme. Le moteur de sync s'en sert pour savoir
  * quand il a rejoint l'historique déjà rapatrié, et s'arrêter là plutôt que de tout
  * reparcourir à chaque fois.
@@ -1192,6 +1341,31 @@ export function knownPostIds(platform: Platform, source: ContentSource = 'saved'
       WHERE p.platform = ? AND ps.source = ?`)
     .all(platform, source) as { id: string }[]
   return new Set(rows.map((row) => row.id))
+}
+
+/**
+ * L'horodatage de la tournée qu'un curseur de reprise interrompt, relu dans la base.
+ *
+ * Seulement pour les curseurs écrits avant qu'ils ne portent leur `epoch` : sans lui, la reprise
+ * aurait pris une date neuve et fait passer la suite de l'historique devant son début. La
+ * dernière ligne rangée avant le point de reprise appartient à la tournée interrompue — la
+ * migration 30 a déjà rendu à chaque tournée un horodatage unique.
+ */
+export function runEpochBefore(
+  platform: Platform,
+  source: ContentSource,
+  rank: number
+): number | null {
+  const row = getDb()
+    .prepare(
+      `SELECT ps.discovered_at AS at
+         FROM post_sources ps JOIN posts p ON p.id = ps.post_id
+        WHERE p.platform = ? AND ps.source = ? AND ps.source_rank < ?
+        ORDER BY ps.source_rank DESC, ps.discovered_at DESC
+        LIMIT 1`
+    )
+    .get(platform, source, rank) as { at: number } | undefined
+  return row?.at ?? null
 }
 
 export interface PlaybackMediaSource {
@@ -1454,10 +1628,15 @@ export function setTags(postId: string, tags: { name: string; source: TagSource 
   })()
 }
 
-export function addTag(postId: string, name: string, source: TagSource = 'user'): void {
-  const clean = name.trim().replace(/^#/, '')
-  if (!clean) return
+/** Rend le nom tel que la base le garde — voir `addTagMany`. */
+export function addTag(postId: string, name: string, source: TagSource = 'user'): string | null {
+  const clean = normalizeTagName(name)
+  if (!clean) return null
   setTags(postId, [{ name: clean, source }])
+  const stored = getDb().prepare('SELECT name FROM tags WHERE name = ? COLLATE NOCASE').get(clean) as
+    | { name: string }
+    | undefined
+  return stored?.name ?? clean
 }
 
 export function removeTag(postId: string, name: string): void {
@@ -1467,7 +1646,7 @@ export function removeTag(postId: string, name: string): void {
         WHERE post_id = ?
           AND tag_id = (SELECT id FROM tags WHERE name = ? COLLATE NOCASE)`
     )
-    .run(postId, name)
+    .run(postId, normalizeTagName(name))
 }
 
 export interface CollectionRow {
@@ -1991,6 +2170,52 @@ export function markThumbnailFailure(postId: string, idx: number): void {
     .run(postId, idx)
 }
 
+/**
+ * Sort une vignette de la file jusqu'à ce qu'un lien neuf arrive, sans lui compter d'échec.
+ *
+ * Conditionnée au lien qu'on a vu périmer : un renouvellement peut s'être glissé entre la
+ * lecture de la file et cette écriture, et poser l'attente sur un lien déjà neuf la laisserait
+ * dormir jusqu'au renouvellement suivant.
+ */
+export function awaitFreshThumbnailLink(postId: string, idx: number, remoteUrl: string | null): void {
+  getDb()
+    .prepare(
+      `UPDATE media SET thumb_attempts = ?
+        WHERE post_id = ? AND idx = ? AND thumb_path IS NULL AND remote_url IS ?`
+    )
+    .run(THUMB_AWAITING_LINK, postId, idx, remoteUrl)
+}
+
+export interface ThumbnailLinkRow {
+  post_id: string
+  platform: Platform
+  remote_url: string
+  thumb_attempts: number
+}
+
+/**
+ * Les vignettes manquantes de ces posts, avec leur lien : de quoi décider lesquelles attendent
+ * un renouvellement. La décision elle-même vit dans `media/links.ts`, qui sait lire une date
+ * d'expiration dans une URL ; ici, on ne fait que la matière.
+ */
+export function thumbnailLinksForPosts(postIds: string[]): ThumbnailLinkRow[] {
+  const ids = [...new Set(postIds)].filter(Boolean).slice(0, 500)
+  if (ids.length === 0) return []
+  const placeholders = ids.map(() => '?').join(',')
+  return getDb()
+    .prepare(
+      `SELECT m.post_id, p.platform, m.remote_url, m.thumb_attempts
+         FROM media m JOIN posts p ON p.id = m.post_id
+        WHERE m.post_id IN (${placeholders})
+          AND p.is_demo = 0
+          AND m.thumb_path IS NULL
+          AND m.source_path IS NULL
+          AND m.remote_url LIKE 'http%'
+          AND (m.thumb_attempts < 3 OR m.thumb_attempts = ?)`
+    )
+    .all(...ids, THUMB_AWAITING_LINK) as ThumbnailLinkRow[]
+}
+
 export function setVideo(postId: string, idx: number, videoPath: string): void {
   getDb()
     .prepare(
@@ -2000,13 +2225,19 @@ export function setVideo(postId: string, idx: number, videoPath: string): void {
     .run(videoPath, postId, idx)
 }
 
+/**
+ * `skipped` veut dire « pas de place », pas « clip impossible » : il sort le clip de la file
+ * jusqu'à la prochaine purge ou le prochain plafond relevé, sans lui coûter de tentative. Il en
+ * coûtait une, si bien qu'au troisième cache plein un clip était abandonné pour de bon.
+ */
 export function markVideoCacheResult(postId: string, idx: number, state: 'skipped' | 'pending'): void {
   getDb()
     .prepare(
-      `UPDATE media SET video_cache_state = ?, video_attempts = video_attempts + 1
+      `UPDATE media SET video_cache_state = ?,
+              video_attempts = video_attempts + CASE WHEN ? = 'skipped' THEN 0 ELSE 1 END
        WHERE post_id = ? AND idx = ?`
     )
-    .run(state, postId, idx)
+    .run(state, state, postId, idx)
 }
 
 export function pendingVideos(rawLimit = 150): PendingMedia[] {

@@ -1,5 +1,17 @@
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { code, read } from './source'
-import { STRUCTURE_MODEL, MEANING_MODEL, TEXT_MODEL, SPEECH_MODEL, USED_MODELS } from '../src/main/tagging/models'
+import {
+  chooseRevision,
+  pinnedUrl,
+  STRUCTURE_MODEL,
+  MEANING_MODEL,
+  TEXT_MODEL,
+  SPEECH_MODEL,
+  USED_MODELS
+} from '../src/main/tagging/models'
 
 /**
  * Les modèles sont une ressource gérée : `npm run check:models`
@@ -50,11 +62,17 @@ console.log('la liste des modèles en service est dérivée, pas recopiée')
   /* Le nom d'un modèle ne doit exister qu'à un endroit. Un second littéral quelque part est
      une copie qui se désynchronisera, et c'est la copie qui décide alors ce que la purge
      épargne. */
-  const sources = [
-    'src/main/tagging/inference.worker.ts',
-    'src/main/models/store.ts',
-    'src/main/ipc.ts'
-  ]
+  /* Tout le processus principal, et plus trois fichiers choisis : les deux copies qui restaient —
+     `embeddings.ts` et `vision.ts` — vivaient justement hors de la liste. */
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? walk(join(dir, entry.name))
+        : entry.name.endsWith('.ts')
+          ? [join(dir, entry.name)]
+          : []
+    )
+  const sources = walk('src/main').filter((file) => !file.endsWith(join('tagging', 'models.ts')))
   const strays: string[] = []
   for (const file of sources) {
     const text = code(read(file))
@@ -145,5 +163,112 @@ console.log('\nl’écran de stockage montre ce que les modèles occupent')
   else pass('la purge des modèles a son propre bouton')
 }
 
-console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} manquement(s).`)
-process.exitCode = failures === 0 ? 0 : 1
+console.log('\nles téléchargements sont épinglés')
+{
+  const sha = (seed: string): string => createHash('sha1').update(seed).digest('hex')
+  const a = sha('a')
+  const none = { recorded: null, legacy: false, pinned: null }
+  const expect = (label: string, got: { revision: string | null; source: string }, revision: string | null, source: string): void => {
+    if (got.revision === revision && got.source === source) pass(label)
+    else fail(`${label} — rendu ${got.source} ${got.revision}`)
+  }
+  expect('une installation neuve résout main une fois', chooseRevision(none), null, 'resolve')
+  expect('la révision rangée passe avant tout', chooseRevision({ ...none, recorded: a, pinned: sha('b'), legacy: true }), a, 'recorded')
+  expect(
+    'des fichiers d’avant l’épinglage restent ceux qui ont fait les vecteurs',
+    chooseRevision({ ...none, legacy: true, pinned: a }),
+    'main',
+    'legacy'
+  )
+  expect('un SHA écrit à la main vaut pour une installation neuve', chooseRevision({ ...none, pinned: a }), a, 'pinned')
+  expect('une révision rangée qui n’est pas un SHA ne compte pas', chooseRevision({ ...none, recorded: 'main' }), null, 'resolve')
+
+  /* L'épingle se pose sur l'adresse, pas en option : `pipeline()` oubliait l'option dans sa
+     découverte des fichiers, qui relisait `main` — constaté sur le fil construit. */
+  const pins = new Map([[TEXT_MODEL, a]])
+  const host = 'https://huggingface.co/'
+  const pinned = pinnedUrl(`${host}${TEXT_MODEL}/resolve/main/onnx/model_quantized.onnx`, host, pins)
+  if (pinned === `${host}${TEXT_MODEL}/resolve/${a}/onnx/model_quantized.onnx`) {
+    pass('une requête vers main vise le commit épinglé')
+  } else fail(`adresse réécrite inattendue : ${pinned}`)
+  const other = `${host}${SPEECH_MODEL}/resolve/main/config.json`
+  if (pinnedUrl(other, host, pins) === other) pass('un modèle sans épingle garde son adresse')
+  else fail('un modèle sans épingle a été réécrit')
+  if (pinnedUrl(`${host}${TEXT_MODEL}-v2/resolve/main/config.json`, host, pins).includes('/resolve/main/')) {
+    pass('un modèle au nom voisin n’hérite pas de l’épingle')
+  } else fail('un modèle au nom voisin a hérité de l’épingle')
+
+  /* Qu'un chargeur oublie sa révision, et ce modèle-là retire `main` en silence. Le relais du
+     téléchargement ne se donne donc qu'avec elle, par `sourceOf`, et nulle part ailleurs. */
+  const worker = code(read('src/main/tagging/inference.worker.ts'))
+  const relays = worker.match(/progress_callback: watchDownload/g)?.length ?? 0
+  if (relays === 1 && /await revisionOf\(model\)\s*return \{ progress_callback: watchDownload \}/.test(worker)) {
+    pass('le relais du téléchargement ne se donne qu’une fois la révision décidée')
+  } else fail(`le relais du téléchargement est posé ${relays} fois, hors de sourceOf`)
+  /* Et la révision s'applique à l'adresse, pour toutes les requêtes de la bibliothèque : passée
+     en option, `pipeline()` l'oubliait dans sa découverte des fichiers. */
+  if (/env\.fetch = \(input: string \| URL, init\?: RequestInit\) =>\s*original\(pinnedUrl\(/.test(worker)) {
+    pass('toutes les requêtes du hub passent par l’épingle')
+  } else fail('le fetch de la bibliothèque n’est plus enveloppé : les requêtes visent main')
+  /* Chaque chargement reçoit ce que `sourceOf` rend — directement, ou par la variable qui le
+     garde pour les chargeurs d'un même modèle. */
+  const loaders = [...worker.matchAll(/\b(?:from_pretrained|pipeline)\(\s*[^,]+,\s*([^)]*)/g)]
+  const bare = loaders.filter((match) => !/sourceOf\(|\bstructure\b|\bmeaning\b/.test(match[1]))
+  if (loaders.length > 0 && bare.length === 0) {
+    pass(`les ${loaders.length} chargements passent par sourceOf`)
+  } else fail(`${bare.length} chargement(s) sans révision sur ${loaders.length}`)
+  if (/DOWNLOAD_REPORT_MS/.test(worker)) pass('l’avancement du téléchargement est espacé')
+  else fail('chaque paquet téléchargé redevient un message, un instantané et un menu reconstruit')
+}
+
+console.log('\nles empreintes de vecteurs n’ont pas bougé')
+{
+  /* Les noms ont quitté `embeddings.ts` et `vision.ts` pour `models.ts`. Les empreintes les
+     contiennent : si la chaîne changeait, toute la bibliothèque repasserait par les modèles. */
+  const vision = read('src/main/tagging/vision.ts')
+  if (/const VERSION = `\$\{STRUCTURE_MODEL\}\|\$\{MEANING_MODEL\}\|q8\|v1`/.test(vision)) {
+    pass('l’empreinte des images porte toujours les deux mêmes noms')
+  } else fail('l’empreinte des images a changé de forme')
+}
+
+async function runtime(): Promise<void> {
+  const { embeddingHash } = await import('../src/main/tagging/embeddings')
+  const expected = createHash('sha1').update('Xenova/multilingual-e5-small blender donut').digest('hex').slice(0, 16)
+  if (embeddingHash('blender donut') === expected) pass('l’empreinte du texte est celle d’avant, à l’octet près')
+  else fail('l’empreinte du texte a changé : toute la bibliothèque serait réencodée')
+
+  console.log('\nle registre des révisions et les partiels')
+  const root = mkdtempSync(join(tmpdir(), 'magpie-models-'))
+  process.env.MAGPIE_DATA_DIR = root
+  const store = await import('../src/main/models/store')
+  const models = join(root, 'models')
+  const a = createHash('sha1').update('a').digest('hex')
+  store.recordModelRevision(TEXT_MODEL, a)
+  store.recordModelRevision(TEXT_MODEL, createHash('sha1').update('b').digest('hex'))
+  store.recordModelRevision(SPEECH_MODEL, 'main')
+  const known = store.modelRevisions()
+  if (known[TEXT_MODEL] === a && Object.keys(known).length === 1) {
+    pass('la première révision rangée fait foi, et seul un SHA se range')
+  } else fail(`registre inattendu : ${JSON.stringify(known)}`)
+  mkdirSync(join(models, 'Xenova', 'whisper-base', 'onnx'), { recursive: true })
+  const dead = 2 ** 22 + 12345
+  writeFileSync(join(models, 'Xenova', 'whisper-base', 'onnx', `decoder.onnx.tmp.${dead}.k3x9`), 'x'.repeat(64))
+  writeFileSync(join(models, 'Xenova', 'whisper-base', 'onnx', `encoder.onnx.tmp.${process.pid}.a1b2`), 'y')
+  writeFileSync(join(models, 'Xenova', 'whisper-base', 'config.json'), '{}')
+  const swept = await store.sweepPartialDownloads((pid) => pid === process.pid, models)
+  const left = readdirSync(join(models, 'Xenova', 'whisper-base', 'onnx'))
+  if (swept.removed === 1 && swept.freed === 64 && left.length === 1 && left[0].includes(String(process.pid))) {
+    pass('un partiel sans auteur vivant part, celui d’un téléchargement en cours reste')
+  } else fail(`balayage inattendu : ${JSON.stringify(swept)}, restent ${left.join(', ')}`)
+  const listed = await store.listModels()
+  if (listed.every((entry) => entry.id.includes('/')) && listed.some((entry) => entry.id === SPEECH_MODEL)) {
+    pass('le registre ne passe pas pour un modèle dans l’inventaire')
+  } else fail(`inventaire inattendu : ${listed.map((entry) => entry.id).join(', ')}`)
+}
+
+void runtime()
+  .catch((error: unknown) => fail(`contrôle d’exécution impossible : ${error instanceof Error ? error.message : String(error)}`))
+  .finally(() => {
+    console.log(failures === 0 ? '\nTout est vert.' : `\n${failures} manquement(s).`)
+    process.exitCode = failures === 0 ? 0 : 1
+  })

@@ -152,7 +152,11 @@ export const backgroundTasks = {
       done: patch.done ?? existing?.done ?? 0,
       total: patch.total ?? existing?.total ?? 0,
       etaMs: null,
-      paused: patch.paused ?? paused,
+      /* La pause propre à la tâche survit à ses mises à jour. Retomber sur la pause globale
+         défaisait « suspendre cette tâche » au prochain avancement publié — la transcription
+         publie après chaque clip, donc presque aussitôt. `setPaused` recopie déjà la pause
+         globale dans chaque tâche : la lire ici ne perd rien. */
+      paused: patch.paused ?? existing?.paused ?? paused,
       message: patch.message ?? existing?.message ?? null,
       startedAt: existing?.startedAt ?? now,
       startedDone: existing?.startedDone ?? patch.done ?? 0

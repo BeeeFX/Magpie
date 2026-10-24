@@ -40,8 +40,12 @@ const MIN_FOR_DEEPER = 220
  * fréquents, pas des endroits. Le rendement double et la moitié ne veut rien dire, ce qui est
  * pire que rien : un nom sur la carte est une promesse qu'il y a quelque chose à voir.
  *
- * Six est donc maigre à dessein. Et ça montera tout seul : ces noms viennent des mots des
- * posts, et quatre mille cinq cents vidéos retrouvent les leurs avec la transcription réparée.
+ * Six est donc maigre à dessein. On avait écrit que ça monterait tout seul avec la
+ * transcription réparée ; ce n'est pas le cas, et c'est voulu : ces noms viennent des mots de la
+ * légende et des tags, et la parole n'entre que dans les vecteurs (`embeddingText`). Whisper
+ * produit des mots faux et des tics de langage qu'aucun des deux seuils ci-dessous ne sait
+ * écarter — un sous-amas de vidéos parlées aurait « gonna » pour nom, porté par un cinquième de
+ * ses membres et bien plus fréquent que chez un parent muet.
  */
 const MIN_SUPPORT = 0.2
 const MIN_LIFT = 2

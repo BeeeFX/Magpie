@@ -1,9 +1,25 @@
-import type { VideoQuality } from '../src/shared/types'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { Platform, VideoQuality } from '../src/shared/types'
 import { parseByteRange } from '../src/main/media/range'
 import { createRemoteMediaUrl, parseRemoteMediaUrl } from '../src/main/media/remote'
 import { resolvePreferredQuality } from '../src/shared/quality'
 import { isMediaUrlExpired, mediaUrlExpiry } from '../src/main/media/freshness'
 import { mediaIdentity } from '../src/main/media/identity'
+import { CacheQuotaReached, thumbnailFailure, thumbnailLinkExpired } from '../src/main/media/cache'
+import {
+  LINK_REFRESH_HOURLY_CAP,
+  LINK_REFRESH_QUEUE,
+  LINK_FAILURE_COOLDOWN_MS,
+  LinkRefresher,
+  type LinkRefresherDeps
+} from '../src/main/media/links'
+import { ChallengeRequired, HttpError } from '../src/main/adapters/http'
+import { THUMB_AWAITING_LINK } from '../src/main/db/media-upsert'
+import * as queries from '../src/main/db/queries'
+import type { ThumbnailLinkRow } from '../src/main/db/queries'
+import { closeDb, getDb } from '../src/main/db/index'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Échec : ${message}`)
@@ -175,4 +191,303 @@ assert(
 )
 assert(mediaIdentity('pas une url') === 'pas une url', 'une URL illisible ne fait pas échouer l’upsert')
 
-console.log('\nTout est vert.')
+/**
+ * Ce qui suit attend des promesses : le banc est compilé en CommonJS, qui n'a pas d'`await` au
+ * premier niveau.
+ */
+async function main(): Promise<void> {
+  /*
+   * Le compte des tentatives d'une vignette.
+   *
+   * Trois échecs, et une vignette est abandonnée. Or deux causes d'échec ne disaient rien du
+   * média : un lien de CDN périmé — Instagram signe ses liens pour quelques jours — et un disque
+   * plein. Les compter faisait finir l'historique ancien en carrés vides, pour toujours : une
+   * synchronisation qui rapportait ensuite un lien valide gardait les tentatives perdues, puisque
+   * le média, lui, n'avait pas changé.
+   */
+  console.log('\nTentatives d’une vignette')
+
+  const now = Date.now()
+  const oe = (ms: number): string => Math.floor(ms / 1000).toString(16).toUpperCase()
+  const PHOTO_PATH = 'https://scontent-lhr6-1.cdninstagram.com/v/t51.82787-15/555_1854_n.webp'
+  const EXPIRED = `${PHOTO_PATH}?_nc_ohc=a&oh=00_A&oe=${oe(now - 86_400_000)}`
+  const FRESH = `${PHOTO_PATH}?_nc_ohc=b&oh=00_B&oe=${oe(now + 3 * 86_400_000)}`
+  const TWEET = 'https://pbs.twimg.com/media/Gabc.jpg?name=small'
+
+  assert(thumbnailLinkExpired(null, EXPIRED, now), 'un lien signé périmé n’est pas téléchargé')
+  assert(!thumbnailLinkExpired(null, FRESH, now), 'un lien signé encore valide l’est')
+  assert(!thumbnailLinkExpired(null, TWEET, now), 'un lien sans signature ne périme jamais')
+
+  const scratch = mkdtempSync(join(tmpdir(), 'magpie-media-'))
+  const localCopy = join(scratch, 'source.jpg')
+  writeFileSync(localCopy, 'x')
+  assert(!thumbnailLinkExpired(localCopy, EXPIRED, now), 'une copie locale passe devant le lien périmé')
+
+  assert(thumbnailFailure(new CacheQuotaReached(), EXPIRED) === 'quota', 'un disque plein ne coûte pas de tentative')
+  assert(
+    thumbnailFailure(new HttpError(403, EXPIRED), EXPIRED) === 'link',
+    'un 403 sur un lien signé attend un lien neuf'
+  )
+  assert(
+    thumbnailFailure(new HttpError(403, FRESH), FRESH) === 'link',
+    'même quand la date inscrite dans le lien court encore'
+  )
+  assert(thumbnailFailure(new HttpError(403, TWEET), TWEET) === 'attempt', 'un 403 sans signature compte')
+  assert(thumbnailFailure(new HttpError(404, EXPIRED), EXPIRED) === 'attempt', 'un 404 compte')
+  assert(thumbnailFailure(new Error('image illisible'), FRESH) === 'attempt', 'une image illisible compte')
+  assert(THUMB_AWAITING_LINK >= 3, 'l’attente d’un lien sort bien la vignette de la file')
+
+  /* La base réelle, sur un dossier jetable : ce sont les mêmes instructions que l'application. */
+  process.env.MAGPIE_DATA_DIR = scratch
+
+  const POST = 'instagram:777'
+  const POST_INPUT = {
+    id: POST,
+    platform: 'instagram' as const,
+    nativeId: '777',
+    url: 'https://www.instagram.com/p/x/',
+    kind: 'carousel' as const,
+    mediaCount: 2
+  }
+  queries.upsertPosts(
+    [{ ...POST_INPUT, savedRank: 41 }],
+    [
+      { postId: POST, idx: 0, kind: 'image', remoteUrl: EXPIRED },
+      { postId: POST, idx: 1, kind: 'image', remoteUrl: EXPIRED.replace('555_', '556_') }
+    ],
+    'liked'
+  )
+  const attempts = (idx: number): number =>
+    (
+      getDb().prepare('SELECT thumb_attempts n FROM media WHERE post_id = ? AND idx = ?').get(POST, idx) as {
+        n: number
+      }
+    ).n
+  const status = (idx: number): string | undefined =>
+    queries.getPostsByIds([POST])[0]?.media.find((media) => media.idx === idx)?.thumbStatus
+
+  queries.awaitFreshThumbnailLink(POST, 0, EXPIRED)
+  assert(attempts(0) === THUMB_AWAITING_LINK, 'un lien périmé met la vignette en attente, sans échec compté')
+  assert(
+    !queries.pendingThumbnailsForPosts([POST]).some((row) => row.idx === 0),
+    'la vignette en attente quitte la file'
+  )
+  assert(status(0) === 'pending', 'et reste « en préparation » : la grille la redemandera')
+  for (let i = 0; i < 3; i += 1) queries.markThumbnailFailure(POST, 1)
+  assert(status(1) === 'failed', 'trois vrais échecs, eux, déclarent la vignette impossible')
+
+  const placed = (): { discovered_at: number; saved_rank: number } =>
+    getDb().prepare('SELECT discovered_at, saved_rank FROM posts WHERE id = ?').get(POST) as {
+      discovered_at: number
+      saved_rank: number
+    }
+  const before = placed()
+  const updated = queries.refreshPostMedia(
+    [{ ...POST_INPUT, savedRank: 0 }],
+    [
+      { postId: POST, idx: 0, kind: 'image', remoteUrl: FRESH },
+      { postId: POST, idx: 1, kind: 'image', remoteUrl: FRESH.replace('555_', '556_') }
+    ]
+  )
+  assert(updated === 1, 'le renouvellement réenregistre le post connu')
+  assert(attempts(0) === 0 && attempts(1) === 0, 'un lien neuf rend leurs tentatives aux deux vignettes')
+  const sources = (
+    getDb().prepare('SELECT source FROM post_sources WHERE post_id = ?').all(POST) as { source: string }[]
+  ).map((row) => row.source)
+  assert(sources.join() === 'liked', `un post seulement liké le reste après renouvellement (${sources.join()})`)
+  const after = placed()
+  assert(
+    after.discovered_at === before.discovered_at && after.saved_rank === before.saved_rank,
+    'ni sa date de découverte ni son rang ne bougent'
+  )
+
+  queries.awaitFreshThumbnailLink(POST, 0, EXPIRED)
+  assert(attempts(0) === 0, 'une attente posée sur un lien déjà remplacé ne s’applique pas')
+
+  for (let i = 0; i < 3; i += 1) queries.markThumbnailFailure(POST, 0)
+  queries.refreshPostMedia([POST_INPUT], [{ postId: POST, idx: 0, kind: 'image', remoteUrl: FRESH }])
+  assert(attempts(0) === 3, 'le même lien, rapporté une seconde fois, ne rend rien')
+
+  queries.upsertPosts(
+    [POST_INPUT],
+    [
+      { postId: POST, idx: 0, kind: 'image', remoteUrl: FRESH.replace('oh=00_B', 'oh=00_C') },
+      { postId: POST, idx: 1, kind: 'image', remoteUrl: FRESH.replace('555_', '556_') }
+    ],
+    'liked'
+  )
+  assert(attempts(0) === 0, 'une synchronisation qui rapporte un lien neuf rend aussi les tentatives')
+
+  const GONE = 'instagram:disparu'
+  assert(
+    queries.refreshPostMedia(
+      [{ ...POST_INPUT, id: GONE, nativeId: 'disparu', mediaCount: 1 }],
+      [{ postId: GONE, idx: 0, kind: 'image', remoteUrl: FRESH }]
+    ) === 0 && queries.getPostsByIds([GONE]).length === 0,
+    'un post retiré entre-temps n’est pas recréé par un renouvellement'
+  )
+
+  getDb()
+    .prepare(`INSERT INTO media (post_id, idx, kind, remote_url, video_source) VALUES (?, 2, 'video', ?, ?)`)
+    .run(POST, FRESH, 'https://scontent.cdninstagram.com/o1/v/clip.mp4?oe=FFFFFFFF')
+  const clipAttempts = (): number =>
+    (getDb().prepare('SELECT video_attempts n FROM media WHERE post_id = ? AND idx = 2').get(POST) as { n: number }).n
+  queries.markVideoCacheResult(POST, 2, 'skipped')
+  assert(clipAttempts() === 0, 'un clip refusé faute de place ne perd pas de tentative')
+  queries.markVideoCacheResult(POST, 2, 'pending')
+  assert(clipAttempts() === 1, 'un clip qui échoue vraiment, si')
+
+  closeDb()
+  rmSync(scratch, { recursive: true, force: true })
+
+  /*
+   * Le rythme des renouvellements.
+   *
+   * Le lecteur vidéo rejouait `/media/info` à chaque requête par plage après un échec, hors de
+   * toute temporisation — y compris sur un compte en vérification de sécurité, ce qui est
+   * exactement ce qui transforme une vérification en blocage. Et faire défiler un mur ancien ne
+   * devait pas partir en centaines d'appels.
+   */
+  console.log('\nRenouvellement des liens')
+  /* Les échecs simulés ci-dessous se journalisent comme les vrais : on ne les montre pas. */
+  const warn = console.warn
+  console.warn = () => {}
+
+  interface Scene {
+    refresher: LinkRefresher
+    fetched: string[]
+    clock: { now: number }
+    state: { status: string | null; challenged: boolean }
+  }
+
+  function scene(overrides: (fetched: string[]) => Partial<LinkRefresherDeps> = () => ({})): Scene {
+    const fetched: string[] = []
+    const clock = { now }
+    const state = { status: null as string | null, challenged: false }
+    const refresher = new LinkRefresher({
+      fetch: async (_platform: Platform, nativeId: string) => {
+        fetched.push(nativeId)
+        return { posts: [], media: [] }
+      },
+      available: async () => true,
+      accountStatus: () => state.status,
+      syncing: () => false,
+      thumbnailLinks: (postIds: string[]): ThumbnailLinkRow[] =>
+        postIds.map((id) => ({
+          post_id: id,
+          platform: 'instagram',
+          remote_url: id.endsWith('frais') ? FRESH : EXPIRED,
+          thumb_attempts: 0
+        })),
+      save: () => {},
+      markChallenge: () => {
+        state.challenged = true
+        state.status = 'challenge'
+      },
+      pause: async () => {},
+      now: () => clock.now,
+      ...overrides(fetched)
+    })
+    return { refresher, fetched, clock, state }
+  }
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
+  const postIds = (count: number, from = 0): string[] =>
+    Array.from({ length: count }, (_, index) => `instagram:${from + index}`)
+
+  {
+    const { refresher, fetched, state } = scene()
+    state.status = 'challenge'
+    refresher.request(postIds(10))
+    const played = await refresher.refreshNow('instagram:1')
+    await settle()
+    assert(fetched.length === 0 && !played, 'un compte en vérification de sécurité n’est jamais sollicité')
+  }
+  {
+    const { refresher, fetched } = scene()
+    const [a, b] = await Promise.all([refresher.refreshNow('instagram:9'), refresher.refreshNow('instagram:9')])
+    assert(a && b && fetched.length === 1, 'deux requêtes du lecteur partagent un seul renouvellement')
+  }
+  {
+    const failing = scene((fetched) => ({
+      fetch: async (_platform: Platform, nativeId: string) => {
+        fetched.push(nativeId)
+        throw new Error('réseau coupé')
+      }
+    }))
+    const calls = (): number => failing.fetched.length
+    for (let i = 0; i < 3; i += 1) await failing.refresher.refreshNow('instagram:5')
+    assert(calls() === 1, 'après un échec, les requêtes par plage ne relancent pas l’appel')
+    failing.clock.now += LINK_FAILURE_COOLDOWN_MS + 1000
+    await failing.refresher.refreshNow('instagram:5')
+    assert(calls() === 2, 'passé le délai, un nouvel essai est permis')
+  }
+  {
+    const { refresher, fetched } = scene()
+    refresher.request([...postIds(3), 'instagram:frais'])
+    await settle()
+    assert(
+      fetched.length === 3 && !fetched.includes('frais'),
+      'seules les vignettes dont le lien a passé sont renouvelées'
+    )
+  }
+  {
+    const { refresher, fetched } = scene()
+    refresher.request(postIds(100))
+    await settle()
+    assert(
+      fetched.length === LINK_REFRESH_QUEUE,
+      `un mur entier ne renouvelle que ce qui est à l’écran (${fetched.length})`
+    )
+    assert(fetched[0] === '0', 'le plus proche d’abord')
+  }
+  {
+    const { refresher, fetched } = scene()
+    for (let batch = 0; batch < 8; batch += 1) {
+      refresher.request(postIds(LINK_REFRESH_QUEUE, batch * LINK_REFRESH_QUEUE))
+      await settle()
+    }
+    assert(
+      fetched.length === LINK_REFRESH_HOURLY_CAP,
+      `un long défilement s’arrête au plafond horaire (${fetched.length} appels)`
+    )
+  }
+  {
+    const { refresher, fetched } = scene(() => ({ syncing: () => true }))
+    refresher.request(postIds(5))
+    await settle()
+    assert(fetched.length === 0, 'rien ne part pendant une synchronisation de la même plateforme')
+  }
+  {
+    const challenged = scene((fetched) => ({
+      fetch: async (_platform: Platform, nativeId: string) => {
+        fetched.push(nativeId)
+        if (nativeId === '2') throw new ChallengeRequired('instagram')
+        return { posts: [], media: [] }
+      }
+    }))
+    challenged.refresher.request(postIds(10))
+    await settle()
+    assert(challenged.state.challenged, 'une vérification rencontrée est retenue sur le compte')
+    assert(
+      challenged.fetched.length === 3 && challenged.refresher.queued('instagram') === 0,
+      `et la file s’arrête net (${challenged.fetched.length} appels)`
+    )
+  }
+  {
+    const { refresher } = scene()
+    let heard: string[] = []
+    refresher.onRefreshed((ids) => {
+      heard = ids
+    })
+    await refresher.refreshNow('instagram:42')
+    assert(heard.join() === 'instagram:42', 'un renouvellement réussi relance la file média pour ce post')
+  }
+
+  console.warn = warn
+  console.log('\nTout est vert.')
+}
+
+main().catch((error: unknown) => {
+  console.error(error)
+  process.exit(1)
+})

@@ -15,8 +15,11 @@ import type { GridMode, Post } from '../src/shared/types'
 import {
   alignItemsToPosts,
   computeLayout,
+  neighbourItem,
   visibleItems,
-  type Layout
+  type Direction,
+  type Layout,
+  type LayoutItem
 } from '../src/renderer/src/layout'
 
 let failures = 0
@@ -219,6 +222,84 @@ check(
   'un post disparu du lot conserve la place que la mise en page lui connaît',
   alignItemsToPosts(alignLayout, alignPosts.slice(0, 100)).size === alignLayout.items.length
 )
+
+/*
+ * Le parcours aux flèches. Un mur en colonnes n'a pas de rangées : la voisine se cherche dans
+ * la géométrie, et c'est là que se cachent les défauts qu'on ne voit qu'en tenant une touche —
+ * une colonne sautée, une carte qu'aucune flèche n'atteint, un aller-retour qui ne revient pas.
+ */
+console.log('\nparcours au clavier')
+const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right']
+for (const mode of ['masonry', 'cards'] as const) {
+  const gap = 12
+  const layout = computeLayout(makePosts(400), {
+    containerWidth: 1200,
+    targetColumnWidth: 240,
+    gap,
+    mode
+  })
+  const column = (item: LayoutItem): number => Math.round(item.x / (layout.columnWidth + gap))
+  let notBeyond = 0
+  let skippedColumn = 0
+  let leftColumn = 0
+  let noReturn = 0
+  for (const item of layout.items) {
+    for (const direction of DIRECTIONS) {
+      const next = neighbourItem(layout, item, direction)
+      if (!next) continue
+      const beyond =
+        direction === 'down'
+          ? next.y >= item.y + item.height - 0.5
+          : direction === 'up'
+            ? next.y + next.height <= item.y + 0.5
+            : direction === 'right'
+              ? next.x >= item.x + item.width - 0.5
+              : next.x + next.width <= item.x + 0.5
+      if (!beyond) notBeyond++
+      if ((direction === 'left' || direction === 'right') && Math.abs(column(next) - column(item)) !== 1) {
+        skippedColumn++
+      }
+    }
+    const below = layout.items
+      .filter((other) => column(other) === column(item) && other.y > item.y)
+      .sort((a, b) => a.y - b.y)[0]
+    const down = neighbourItem(layout, item, 'down')
+    if (below && down !== below) leftColumn++
+    if (below && down && neighbourItem(layout, down, 'up') !== item) noReturn++
+  }
+  check(`${mode} : la voisine est toujours au-delà du bord`, notBeyond === 0, `${notBeyond} écarts`)
+  check(`${mode} : ← et → ne sautent jamais une colonne`, skippedColumn === 0, `${skippedColumn} sauts`)
+  check(`${mode} : ↓ suit la colonne tant qu'elle continue`, leftColumn === 0, `${leftColumn} écarts`)
+  check(`${mode} : ↓ puis ↑ revient à la même carte`, noReturn === 0, `${noReturn} écarts`)
+
+  const start = layout.items.reduce((best, item) =>
+    item.x < best.x || (item.x === best.x && item.y < best.y) ? item : best
+  )
+  const reached = new Set([start.post.id])
+  const queue = [start]
+  while (queue.length > 0) {
+    const item = queue.shift()!
+    for (const direction of DIRECTIONS) {
+      const next = neighbourItem(layout, item, direction)
+      if (next && !reached.has(next.post.id)) {
+        reached.add(next.post.id)
+        queue.push(next)
+      }
+    }
+  }
+  check(
+    `${mode} : toutes les cartes sont joignables aux flèches`,
+    reached.size === layout.items.length,
+    `${reached.size}/${layout.items.length}`
+  )
+}
+
+// Une touche tenue en répétition : trente pas par seconde sur dix mille cartes chargées.
+const stepStarted = performance.now()
+let walker: LayoutItem | null = largeLayout.items[0]
+for (let i = 0; i < 300 && walker; i++) walker = neighbourItem(largeLayout, walker, 'down')
+const stepElapsed = (performance.now() - stepStarted) / 300
+check('un pas au clavier reste sous 2 ms sur 10 000 cartes', stepElapsed < 2, `${stepElapsed.toFixed(2)} ms`)
 
 const empty = computeLayout([], { containerWidth: 1200, targetColumnWidth: 240, gap: 12, mode: 'masonry' })
 console.log('\ncas limites')

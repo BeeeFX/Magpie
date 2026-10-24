@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
+import { devCsp } from './scripts/dev-csp'
 
 const shared = resolve('src/shared')
 
@@ -42,7 +43,8 @@ export default defineConfig({
   },
   renderer: {
     root: resolve('src/renderer'),
-    plugins: [react()],
+    // Le socket du rechargement à chaud n'entre dans la CSP que servi par Vite, jamais livré.
+    plugins: [react(), devCsp()],
     resolve: { alias: { '@shared': shared, '@': resolve('src/renderer/src') } },
     // Sert `fixtures/preview/` au serveur de dev pour l'aperçu navigateur. `copyPublicDir`
     // à false garde ces images de développement hors de la build packagée.

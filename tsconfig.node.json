@@ -33,17 +33,9 @@
     // Même cas : la couverture du tampon de la carte est de la géométrie pure, et
     // `scripts/bench-map-zoom.mts` la rejoue sous Node pour compter les retracés.
     "src/renderer/src/map-coverage.ts",
-    // Même cas encore : les contours de collections sont de la géométrie pure, vérifiée par
-    // `scripts/check-boundaries.ts`.
-    "src/renderer/src/map-boundaries.ts",
-    // Idem : le maillage des cellules est de la géométrie pure, vérifiée par
-    // `scripts/check-cells.ts`.
-    "src/renderer/src/map-cells.ts",
     // Idem : le réglage de la toile n'est qu'une fonction de l'empan et du nombre d'arêtes,
     // vérifiée par `scripts/check-map-density.ts`.
     "src/renderer/src/map-render.ts",
-    // Idem : le rangement en damier n'est qu'une affectation, mesurée par `bench:map-grid`.
-    "src/renderer/src/map-grid.ts",
     // Idem : le voisinage de la toile n'est qu'un calcul sur des coordonnées, et c'est le plus
     // cher de l'ouverture de la carte. `check:map-links` le rejoue contre sa version d'origine.
     "src/renderer/src/map-links.ts",

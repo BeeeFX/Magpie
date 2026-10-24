@@ -124,7 +124,7 @@ c'est une propriété qu'on peut vérifier mécaniquement, et pas seulement une 
 
 ## 4. Modèle de données
 
-SQLite, schéma en version **26**, une échelle de migrations dont l'invariant est tenu par
+SQLite, schéma en version **31**, une échelle de migrations dont l'invariant est tenu par
 `npm run check:schema` : une installation neuve exécute `SCHEMA_SQL` seul, donc `SCHEMA_SQL`
 doit déjà contenir tout ce que l'échelle produit. Le détail vit dans `src/main/db/schema.ts`,
 qui est commenté table par table ; ce qui suit dit **à quoi sert chaque groupe**.
@@ -142,7 +142,12 @@ qui est commenté table par table ; ce qui suit dit **à quoi sert chaque groupe
 - `media`, `media_variants` — un rang par média d'un carrousel ; les variantes portent les
   qualités de lecture disponibles et, le cas échéant, leur copie locale.
 - `posts_fts` — FTS5 sur légende, description, auteur **et transcription**, en
-  `unicode61 remove_diacritics 2` : « cafe » trouve « café ».
+  `unicode61 remove_diacritics 2` : « cafe » trouve « café ». Son déclencheur de mise à jour ne
+  réindexe que quand l'une de ces colonnes change — pas à chaque favori ni à chaque upsert d'un
+  post déjà connu.
+- `author_name_folded` — le nom affiché de l'auteur, replié à l'écriture comme la recherche le
+  compare (accents et casse retirés). Le replier à la lecture coûtait une fonction JavaScript
+  par post et par frappe.
 
 **Le rangement**
 
@@ -218,6 +223,13 @@ page regénère un lien à chaque affichage. On fait la même chose (§7).
   qui arrive après le premier backfill. Le tri « par date de sauvegarde » est donc exact pour ce
   qui est capté après l'installation, et seulement *ordonné* pour l'historique antérieur. C'est
   une limite de la plateforme, pas de l'implémentation.
+- **`discovered_at` est l'horodatage d'une tournée, pas d'une page** : un seul par
+  synchronisation (plateforme × origine), gardé par la reprise d'un rattrapage à travers son
+  curseur, et le rang ordonne l'intérieur. Horodatée page par page, la page deux — plus ancienne
+  — passait devant la page un, et un import complet finissait avec les plus vieux signets en
+  haut du mur. Deux plateformes importées ensemble se rangent donc en deux blocs, l'une après
+  l'autre : sans date, il n'y a rien pour les entrelacer honnêtement. La migration 30 a rendu
+  cet ordre aux bibliothèques existantes.
 - **La plateforme la plus sensible** : c'est ici que la temporisation compte le plus.
 
 ### 5.2 X
@@ -312,7 +324,14 @@ Dans les deux cas :
   garder une CSP stricte sans jamais ouvrir `file://`. Il gère les requêtes par plage, donc le
   déplacement dans une vidéo fonctionne.
 - **Les liens expirés sont renouvelés** à la volée (§5). Les requêtes concurrentes pour un même
-  post partagent le même renouvellement.
+  post partagent le même renouvellement, un échec n'est pas rejoué avant deux minutes, et rien
+  ne part vers un compte en vérification de sécurité. Le renouvellement ne réécrit que les
+  médias : un post seulement liké ne devient pas un signet parce qu'on a lu sa vidéo.
+- **Une vignette dont le lien a expiré attend un lien neuf**, elle n'échoue pas. Un lien
+  périmé ou un disque plein ne coûtent aucune des trois tentatives d'une vignette. Ce qui est
+  à l'écran se renouvelle par une file courte — quarante posts, une requête à la fois, au plus
+  cent vingt par heure —, et tout lien neuf, rapporté par une synchronisation ou un
+  renouvellement, rend ses tentatives à une vignette qui n'existe pas encore.
 - **Un lien resigné ne doit pas invalider le cache.** C'est le piège qui a coûté le plus cher :
   l'identité d'un média avait été dérivée de son URL, donc une URL resignée produisait un nouveau
   nom de fichier, et chaque synchronisation effaçait vignettes et clips pour les refaire. L'identité
@@ -374,7 +393,9 @@ Effet mesuré sur le classement : **1 299 posts sans légende correctement rang�
 exploitable et la légende médiane fait douze mots. La langue est devinée depuis la légende et
 depuis la bibliothèque autour : un reel français entendu comme de l'anglais n'en sort pas
 approximatif, il en sort inventé. Le transcript sert au regroupement, à la recherche plein texte
-et à l'export.
+et à l'export. Au regroupement par le **vecteur** seulement : il entre dans le texte encodé après
+la légende, sans jamais l'évincer (`embeddingText`), mais pas dans les mots qui nomment catégories
+et régions — un mot mal entendu se dilue dans un vecteur et s'affiche sur une étiquette.
 
 **Deux gardes, parce qu'une panne ne lève pas toujours.** Écrire « rien à entendre » est un
 verdict définitif — `pendingTranscripts` ne regarde que les posts dont le transcript est `NULL`,
@@ -454,7 +475,8 @@ fois qu'on est entré dedans.
 **Les positions sont figées** (`post_positions` + `map_state`). Un post arrivé à la
 synchronisation suivante est placé contre la carte existante, pas au terme d'une reprojection
 générale. Un lieu dont on se souvient reste où il était — c'est la propriété qui fait qu'une carte
-est un endroit et pas un graphique.
+est un endroit et pas un graphique. Un post **réencodé** ne bouge pas davantage : sa transcription
+arrivée change sa catégorie, pas sa place, jusqu'à ce que la carte soit refaite.
 
 Un **zoom minimum de ×2** est imposé : plus loin, cent trente mille arêtes se superposent au point
 que la carte redevient une nappe informe. Mieux vaut interdire l'échelle que la montrer.
@@ -470,6 +492,11 @@ soit un demi-million de jetons. Il est donc découpé en tranches d'environ 1 20
 demande de fouiller par motif de texte avant de lire quoi que ce soit.
 
 Découplé du reste : utilisable sans avoir jamais créé une collection ni transcrit une vidéo.
+
+À ne pas confondre avec l'**export JSON** du §10 : celui-ci est fait pour être lu par un
+assistant, l'autre pour être repris par Magpie. Le premier distille — un résumé par ligne, une
+fiche par post, rien de ce qui ne se lit pas — ; le second transporte tout ce que l'utilisateur a
+posé, dans un format qui se réimporte sans perte.
 
 **Ce que l'export ne transporte pas, et c'est sa limite structurelle.** Les fiches contiennent la
 légende, la transcription, l'auteur, les tags et les collections — c'est-à-dire du **texte**. Or ce
@@ -524,6 +551,17 @@ troisième dessine sur un canevas.
 - Un **carrousel défile** ses vues en fondu, avec des points de position, et revient à la première
   image quand la souris sort. Les vues suivantes ne sont chargées qu'au survol.
 
+**Le mur se parcourt aussi au clavier.** Les flèches passent d'une carte à sa voisine. Un mur en
+colonnes n'a pas de rangées, donc la voisine se cherche dans la géométrie de la mise en page :
+`↑` et `↓` suivent la colonne, `←` et `→` passent à la colonne d'à côté, jamais plus loin, sur la
+carte la mieux alignée. La carte active est tenue par son identifiant et non par le DOM — le mur
+est virtualisé, elle en sort dès qu'on la fait défiler hors de vue — et reprend le focus en
+revenant ; au bas de ce qui est chargé, `↓` charge la suite. `Espace` lance l'**aperçu**, c'est-à-
+dire ce que fait le survol : la vidéo se lit, le carrousel défile, et l'aperçu suit ensuite le
+focus comme il suit la souris. `Entrée` ouvre le post, `Échap` arrête l'aperçu, puis quitte la
+sélection. Le focus clavier montre les actions de la carte, que la souris seule faisait
+apparaître.
+
 ### La carte, gestes compris
 
 Survoler un point le lit ; cliquer l'ouvre dans un **panneau redimensionnable à côté de la carte**,
@@ -544,7 +582,9 @@ propre amas, donc viser le nom devenait un jeu d'adresse.
 - Filtres : plateforme, type de média, « sans tag », liens, tag(s), collection(s), étiquette.
 - Tri : date de sauvegarde (ou rang en repli), date de publication, auteur, plateforme, aléatoire.
 - Recherche plein texte instantanée via FTS5, sur la légende, l'auteur et la transcription,
-  insensible aux accents.
+  insensible aux accents. Le nom affiché de l'auteur et les tags répondent aussi, par
+  sous-chaîne (« hibli » trouve « Studio Ghibli »). Aucun des trois ne s'évalue post par post :
+  une frappe ne coûte pas au prorata de la bibliothèque.
 - L'état complet — recherche, filtres, tri, défilement — **est conservé entre les sessions**.
 
 ### Étiquettes de couleur
@@ -559,9 +599,25 @@ rapide de l'interface — on le voit sans lire, ce qu'aucun tag ne permet.
 ### Tags et collections
 
 - Tags multiples par post, filtrage par combinaison.
+- **Un nom de tag est normalisé des deux côtés** (`src/shared/tags.ts`) : dièse de tête retiré,
+  espaces resserrés, forme Unicode composée, 80 caractères. Taper « #chats » posait une puce
+  « #chats » qui ne filtrait rien, la base ayant écrit « chats » ; le geste groupé, lui, gardait
+  le dièse en base. La comparaison suit `NOCASE` — qui ne replie que l'ASCII — et la casse d'un tag
+  déjà connu l'emporte sur la frappe.
+- **Complétion** : le champ de la vue détaillée et les formulaires « Tag » et « Retirer un tag »
+  de la barre de sélection proposent les tags existants, du plus porté au moins porté. Le retrait
+  propose les tags **de la sélection** quand tous ses posts sont chargés, tous les tags sinon.
+- La barre latérale montre huit tags ; « Voir les N tags » les montre **tous** — N est le vrai
+  nombre, et non plus les quarante que recevaient les statistiques. Au-delà de trente, un filtre ;
+  au-delà de trois cents lignes dessinées, le filtre est le seul chemin, et la liste le dit.
 - Collections : un post peut appartenir à plusieurs ; création par une phrase depuis le rail de la
   carte, ou à la main depuis la barre latérale.
 - **Sélection en masse** : mode sélection, puis « Ajouter à la collection », tags, favoris.
+  `Ctrl+A` prend **tout le résultat** — pas seulement la tranche chargée —, `Maj`+clic une plage
+  depuis la dernière carte touchée, dans l'ordre du mur, et `Ctrl`+clic une seule carte. Les
+  trois font entrer en mode sélection : une sélection qu'on ne voit pas n'en est pas une. La
+  plage s'ajoute à ce qui est coché plutôt que de le remplacer. Dans un champ, `Ctrl+A` garde son
+  sens : sélectionner le texte.
 - **Doublons** : la contrainte de clé primaire les rend impossibles. Quand une partie de la
   sélection est déjà dans la collection, un dialogue annonce le décompte et propose d'ajouter le
   reste.
@@ -578,6 +634,16 @@ arrière-plan si on ferme, et le dernier classement appliqué s'annule en un cli
 Une vue modale par-dessus la grille : média plein, carrousel, lecteur vidéo avec choix de qualité,
 plein écran, texte complet, tags éditables, collections, favori, copie du lien, ouverture sur la
 plateforme. Flèches pour passer d'un post à l'autre, `Échap` pour sortir.
+
+La molette passe aussi d'un post à l'autre, **sauf au-dessus d'un texte qui défile encore** — une
+légende longue, une transcription : elle le fait défiler, et arrivée au bout ne rend la main
+qu'à un nouveau geste, pour que l'inertie d'un trackpad ne saute pas au post suivant à la
+dernière ligne lue.
+
+La vue suit **le post**, pas une position dans la liste. Quand le post quitte la liste sous elle —
+favori retiré dans « Favoris », tag posé dans « Sans tag », autre étiquette sous un filtre
+d'étiquette —, elle se referme plutôt que de passer au voisin : le champ de tag garde le focus,
+et le deuxième tag tapé pour ce post partirait sur un post qu'on n'a pas encore regardé.
 
 ### Copie — l'usage central
 
@@ -620,15 +686,90 @@ déclencher un schéma applicatif arbitraire.
 - Aucun serveur, aucune télémétrie, aucun service de modèle. Les seules requêtes sortantes vont
   aux plateformes connectées, au dépôt GitHub pour les mises à jour, et au CDN de Hugging Face au
   premier téléchargement d'un modèle.
-- Les sessions vivent dans des partitions Electron isolées, une par plateforme, dans le stockage
-  chiffré de Chromium. Magpie ne voit jamais le mot de passe saisi sur la vraie page de connexion.
+- Les sessions vivent dans des partitions Electron isolées, une par plateforme. Magpie ne voit
+  jamais le mot de passe saisi sur la vraie page de connexion.
+- **Les cookies sont chiffrés sur le disque** avec la clé du système (DPAPI sous Windows), par le
+  fusible `EnableCookieEncryption` que pose l'empaquetage. Ce paragraphe l'affirmait déjà
+  jusqu'à la 0.44, et c'était faux : Electron écrit ses cookies en clair tant que le fusible
+  n'est pas posé, et il ne l'était pas — le `sessionid` d'Instagram et l'`auth_token` de X se
+  lisaient dans `Partitions/magpie-*`. Chromium ne rechiffre pas de lui-même un cookie déjà en
+  clair : au premier lancement d'une version chiffrante, Magpie les repose une fois, à
+  l'identique, et ils sont écrits chiffrés (marqueur `cookies-encrypted` dans le profil). Passage
+  sans retour : un binaire sans le fusible efface les cookies d'un magasin chiffré. Le
+  développement, qui tourne sur l'Electron non modifié, a donc ses propres partitions
+  (`magpie-dev-*`, en clair) et ne touche jamais à celles de la version installée.
 - Bouton « Déconnecter » par plateforme, qui purge réellement la partition.
-- `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, IPC typée et restreinte,
-  CSP stricte, schéma `magpie://` privilégié plutôt que `file://`.
+- Fusibles d'Electron, gravés à l'empaquetage (`electron-builder.yml`) : pas de mode Node
+  (`ELECTRON_RUN_AS_NODE`), pas de `NODE_OPTIONS`, pas de `--inspect` ; l'archive `app.asar` est
+  vérifiée contre l'empreinte inscrite dans l'exécutable et c'est la seule que l'application
+  charge ; `file://` n'a plus ses privilèges historiques. Ce qui est déballé de l'archive —
+  modules natifs, ffmpeg, fil de projection — n'est pas couvert par la vérification.
+- Le renderer : `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, IPC typée et
+  restreinte. Il est servi par `app://magpie/`, qui ne rend que les fichiers de `out/renderer` ;
+  les médias passent par `magpie://`. CSP stricte : aucun socket dans la version livrée (celui
+  de Vite n'est ajouté qu'au service de développement), `font-src 'self' data:` pour le
+  sous-ensemble de police que Vite incruste.
+- **Permissions refusées par défaut.** Le renderer obtient le plein écran (lecteur) et l'écriture
+  du presse-papier, rien d'autre ; les partitions des plateformes n'obtiennent rien — ni
+  notification, ni caméra, ni ouverture d'un programme externe (`ms-msdt:`, `search-ms:`…) — et
+  n'y téléchargent rien.
+- **Navigations gardées**, pour chaque contenu web dès sa création : le renderer ne quitte pas son
+  origine et ouvre les liens web — `http(s)` seulement — dans le navigateur du système ; une
+  fenêtre de plateforme va où elle veut pourvu que ce soit du `https:`, popups compris, qui
+  restent dans sa partition. Pas de liste de domaines : Facebook, Google, Apple et la double
+  authentification la casseraient sans qu'on puisse l'éprouver. Faute de barre d'adresse, le
+  titre d'une fenêtre de connexion commence par l'hôte réel de la page.
 - Aucune page distante n'est chargée dans une fenêtre de Magpie en dehors des fenêtres de
-  connexion : « voir en vrai » ouvre le navigateur du système.
-- La bibliothèque entière est un dossier déplaçable : base, médias, réglages. Rien n'est captif —
-  sous la réserve du §14 sur l'import.
+  connexion, de leurs popups, et de la page cachée où X montre sa requête des signets (§5.2) :
+  « voir en vrai » ouvre le navigateur du système.
+- Un **journal** sur la machine, jamais envoyé : `logs/magpie.log` et son prédécesseur, un
+  mégaoctet chacun, qui recopient la console du processus principal, les erreurs du renderer et
+  la sortie du processus des modèles. Il est fait pour être joint à un ticket public : requêtes
+  d'URL signées, cookies, jetons et dossier personnel en sont masqués, et `check:log` interdit
+  de passer une légende ou un cookie à la console. Les réglages l'ouvrent (« Dépannage »), à
+  côté d'un diagnostic à copier — versions, système, nombre de posts, sans chemin ni compte.
+- Une fenêtre dont le renderer meurt se recharge seule ; à la seconde chute en moins d'une
+  minute, Magpie demande au lieu de boucler.
+- La bibliothèque entière est un dossier déplaçable : base, médias, réglages.
+- **Rien n'est captif.** Réglages → « Exporter ou importer la bibliothèque » écrit un fichier JSON
+  unique, `magpie-library` en version 1 (`src/main/library-file.ts`) : par post, identifiant,
+  plateforme, adresse, auteur, texte, transcription, type, dates, origines et leurs rangs, médias
+  (type, dimensions, **adresses web seulement**), tags et leur origine, favori, étiquette, retrait ;
+  par collection, nom, couleur, genre, phrase, mots-clés et poids, ampleur, membres — calculés et
+  signalés comme tels pour une collection à mots-clés — et retraits faits à la main ; plus les
+  étiquettes posées sur la carte. N'en sortent jamais : les chemins locaux, les vecteurs, les
+  sessions, les clés, les réglages. La réponse brute des plateformes (`raw`) est une case à cocher.
+  Le fichier s'écrit par tranches de cinq cents posts, un post par ligne, jamais en une chaîne.
+- **L'import traite ce fichier comme une entrée non fiable** : plateformes connues seulement,
+  identifiant égal à `<plateforme>:<id natif>`, adresses en `http(s)` uniquement, longueurs et
+  nombres bornés, n'importe quelle mise en page JSON lue par morceaux. Le rendu ne donne jamais de
+  chemin : la boîte de dialogue s'ouvre dans le processus principal, et seul le jeton de l'aperçu
+  déclenche l'écriture — sur le fichier même qu'on a vu, taille et date comprises.
+- **Il montre avant d'écrire** — N posts nouveaux, M déjà présents, K collections, dont combien
+  rejointes par leur nom — puis **fusionne sans rien détruire** : un post nouveau entre avec ses
+  origines, ses médias et ses tags, et ses vignettes suivent la file ordinaire ; un post présent
+  garde sa légende, ses médias et son état, et ne reçoit que ce qui lui manque — tags réunis,
+  favori s'il l'était d'un côté, étiquette ou transcription absentes comblées. Une collection
+  homonyme à la casse près garde sa définition ; une liste y reçoit les membres de la liste du
+  fichier. Une collection à mots-clés créée par l'import arrive **sans vecteurs** : elle garde les
+  membres du fichier, `recompute` refuse de la vider tant qu'un de ses mots ne sait pas noter,
+  et ses mots sont encodés au prochain rejeu d'après synchronisation ou au prochain mot ajouté.
+  Réimporter le même fichier ne change rien.
+- **Il est annulable.** Chaque paquet écrit son journal (`last-import.jsonl`, à côté de la base)
+  après sa transaction ; l'annulation défait exactement ce qui y est listé, et seulement si la
+  valeur est encore celle que l'import avait posée. Un import arrêté en route, ou interrompu par
+  une fermeture, s'annule pareil. `npm run check:library-file` tient l'aller-retour, l'idempotence,
+  la fusion, l'annulation et le refus des fichiers hostiles.
+- **La base est sauvegardée chaque jour**, dans `backups/` à l'intérieur de la bibliothèque —
+  le déplacement l'emporte. Au démarrage si la dernière copie a plus d'un jour, puis toutes les
+  heures à la même condition, par l'API de sauvegarde de SQLite, sans figer l'interface. On
+  garde une copie par jour sur les sept derniers jours, puis une par semaine sur les quatre
+  semaines d'avant : onze au plus, chacune du poids de la base. Les réglages montrent la date
+  de la dernière, et permettent d'en faire une ou d'ouvrir le dossier.
+- **Une base qui ne s'ouvre pas n'est pas forcément abîmée.** Un verrou ou un refus d'accès se
+  disent et ne touchent à rien ; seul un fichier que SQLite déclare abîmé, ou qui échoue à
+  `quick_check`, est mis de côté. Il est alors remplacé par la sauvegarde saine **la plus
+  récente**, régulière ou d'avant migration, et l'interface dit à quelle date on est revenu.
 
 ---
 
@@ -647,11 +788,12 @@ personne. Au 2026-08-26, en version 0.42.0 :
 | Compréhension locale : texte, images, parole | livré |
 | Collections-requêtes, carte sémantique, régions | livré |
 | Export pour assistant | livré |
+| Export JSON et import de bibliothèque, annulable | livré |
 | Tray, sync planifiée, réglages, mise à jour automatique | livré |
-| Build Windows NSIS + mises à jour différentielles | livré, **non signé** |
+| Build Windows NSIS + mises à jour différentielles | livré, **non signé** — signature branchée, inactive faute de certificat (§12) |
+| Fusibles, permissions, navigations gardées, journal sur disque (§10) | livré |
 | Reddit | en sommeil (§5.3) |
 | macOS, Linux | ni testés ni signés |
-| Import de bibliothèque | absent (§14) |
 
 Deux outils non prévus par la spec initiale, tous deux justifiés :
 
@@ -659,7 +801,8 @@ Deux outils non prévus par la spec initiale, tous deux justifiés :
   fenêtre de virtualisation à une recherche exhaustive à chaque position de scroll ;
   `check:schema` tient l'invariant des migrations ; `check:map`, `check:islands`, `check:map-*`
   exercent la carte ; `check:library-guard` vérifie qu'une base venue du futur n'est pas
-  « réparée ». Plus une famille de bancs (`bench:*`) dont les mesures sont citées dans ce document.
+  « réparée », qu'une base verrouillée n'est pas mise de côté, et que le secours restaure la
+  sauvegarde saine la plus récente. Plus une famille de bancs (`bench:*`) dont les mesures sont citées dans ce document.
 - Un **aperçu navigateur** sur `localhost:5173` pendant `npm run dev`, alimenté par un instantané
   que le processus principal dépose au démarrage. Sert à itérer sur le CSS avec de vraies devtools.
   Volontairement dégradé : filtres, tri et recherche y sont ignorés, pour ne pas dupliquer de
@@ -684,7 +827,24 @@ Deux outils non prévus par la spec initiale, tous deux justifiés :
 3. **Comptes multiples par plateforme.** Le modèle suppose un compte par plateforme. Le supporter
    coûte une colonne ; le rétro-adapter coûtera davantage à mesure que la base grossit.
 4. **Signature du binaire Windows.** SmartScreen avertit à chaque installation, et c'est le premier
-   frein à l'adoption qu'un utilisateur rencontre.
+   frein à l'adoption qu'un utilisateur rencontre. **Il ne manque plus que le certificat** : le
+   workflow de publication signe dès que ses secrets existent — un `.pfx` classique ou Azure
+   Trusted Signing, voir « Signing » dans le README — et construit non signé sinon, comme
+   aujourd'hui. Il vérifie ensuite la signature de l'installateur et de `Magpie.exe`, et que
+   `app-update.yml` nomme bien le signataire.
+
+   Le piège est dans electron-updater : une version signée inscrit son éditeur
+   (`publisherName`) dans `app-update.yml`, et **refuse ensuite toute mise à jour qui n'est pas
+   signée de ce nom**. Le passage du non signé au signé est sans danger — une installation non
+   signée n'a pas d'éditeur et accepte la première version signée. Le retour ne l'est pas : une
+   seule release partie sans ses secrets bloquerait toutes les installations signées. D'où la
+   variable `REQUIRE_SIGNING=true` à poser après la première version signée, qui fait échouer
+   la publication plutôt que de la laisser partir. Changer d'identité (de CN) demande une
+   version de transition **encore signée par l'ancien certificat** et qui nomme les deux éditeurs
+   (`WINDOWS_PUBLISHER_NAME`, séparés par `;`) : une installation juge une mise à jour avec les
+   noms de la version qu'elle fait tourner, donc seule la suivante peut changer de certificat —
+   et il faut s'y prendre avant que l'ancien expire. Le renouvellement quotidien d'Azure Trusted
+   Signing garde le même CN : ce n'est pas un changement d'identité.
 5. **Reddit.** Le remettre suppose de décider ce qu'un post textuel devient dans un mur d'images et
    dans la carte, pas seulement de rallumer l'adaptateur.
 
@@ -707,7 +867,8 @@ Deux outils non prévus par la spec initiale, tous deux justifiés :
 
 ## 14. Ce que ce document décrit et que l'application ne fait pas
 
-*Relevé le 2026-08-26, à la version 0.42.0. Vérifié dans le code, pas de mémoire.*
+*Relevé le 2026-08-26, à la version 0.42.0 ; revu le 2026-09-23, après les raccourcis du mur,
+l'import JSON et les suggestions de tags. Vérifié dans le code, pas de mémoire.*
 
 Les intentions ci-dessous gardent leur raison d'être — elles restent écrites plus haut, avec leur
 justification — mais elles ne sont **pas** livrées, et aucune n'est en cours.
@@ -720,22 +881,24 @@ sélection, comme promis.
 **§9 — « Voir en vrai ».** Aucune webview, et le renderer tourne en bac à sable. Le bouton ouvre
 la page dans le navigateur du système. C'est la position la plus sûre, et elle est assumée.
 
-**§9 — Raccourcis de la grille.** `Ctrl+B`, `Ctrl+,` et `Ctrl+K` existent. Les flèches, `Espace`
-pour l'aperçu, `F`, `T`, `C`, `Ctrl+A` et `Maj`+clic pour une plage n'existent pas : la sélection
-se fait une carte à la fois.
+**§9 — Raccourcis de la grille.** `F`, `T` et `C` sur la carte active — favori, tag, copie du
+lien — n'existent pas, ni `Ctrl+C` pour copier les liens de la sélection : il faut passer par la
+barre de sélection. Ce que la fiche des raccourcis annonce pour le mur est tenu par
+`check:shortcuts`, qui refuse une ligne dont il ne trouve pas le câblage.
 
 **§9 — Doublons.** L'avertissement est une boîte système avec un décompte, sans « voir lesquels »
 ni « ajouter les autres » séparément.
 
 **§9 — Nitrate en sélection multiple.** Un post à la fois.
 
-**§9 — Complétion des tags.** Le champ est libre, sans suggestions.
-
 **§9 — Couverture de collection.** `collections.cover_post_id` existe en base, et rien ne le pose.
 
-**§10 — Import.** L'export Markdown pour assistant existe ; il n'y a **aucun import**, et aucun
-export JSON structuré. C'est la seule absence qui contredise un principe énoncé — « rien n'est
-captif » — et donc la première à reprendre si la liste doit se raccourcir.
+**§10 — Ce que l'export JSON laisse derrière lui.** Les vecteurs, les positions de la carte, les
+règles apprises par l'organisateur et les réglages ne voyagent pas : les premiers se recalculent,
+les règles désignent des collections par leur identifiant local, et les réglages portent des
+choix propres à une machine. Une bibliothèque importée demande donc une analyse pour retrouver sa
+carte. L'import ne fusionne pas non plus deux collections à mots-clés homonymes : celle qui est
+déjà là garde sa définition.
 
 **§8.7 — La richesse de l'export.** Voir le point ouvert n° 1 : le dossier ne transporte que du
 texte, alors que l'essentiel de ce que Magpie a compris d'une image est un vecteur. Ce n'est pas

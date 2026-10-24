@@ -85,7 +85,7 @@ function readRows(): Row[] {
                  JOIN collections c ON c.id = cp.collection_id WHERE cp.post_id = p.id) AS collections
          FROM posts p
         WHERE p.is_archived = 0
-        ORDER BY COALESCE(p.saved_at, p.discovered_at) DESC`
+        ORDER BY COALESCE(p.saved_at, p.discovered_at) DESC, p.saved_rank ASC, p.id`
     )
     .all() as Row[]
 }

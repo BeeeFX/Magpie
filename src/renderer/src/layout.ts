@@ -253,3 +253,60 @@ export function visibleItems(
   }
   return visible
 }
+
+export type Direction = 'up' | 'down' | 'left' | 'right'
+
+/**
+ * La carte voisine dans une direction, pour le parcours du mur aux flèches.
+ *
+ * Un mur en colonnes n'a pas de rangées : les cartes d'une colonne ne s'alignent pas sur
+ * celles de la suivante, et « la carte d'à côté » ne se lit pas dans un index. On la cherche
+ * donc dans la géométrie, que la mise en page connaît pour **toutes** les cartes chargées — y
+ * compris celles que la virtualisation n'a pas montées.
+ *
+ * Verticalement, la carte qui suit dans la même colonne, puis, au pied d'une colonne plus
+ * courte, la plus proche en dessous dans les autres. Horizontalement, la colonne voisine
+ * d'abord — jamais une plus lointaine, même mieux alignée —, et dans celle-ci la carte dont
+ * le centre est le plus près de la hauteur qu'on quitte.
+ */
+export function neighbourItem(
+  layout: Layout,
+  from: LayoutItem,
+  direction: Direction
+): LayoutItem | null {
+  const centreX = from.x + from.width / 2
+  const centreY = from.y + from.height / 2
+  const vertical = direction === 'up' || direction === 'down'
+  let best: LayoutItem | null = null
+  let bestPrimary = Infinity
+  let bestSecondary = Infinity
+
+  for (const item of layout.items) {
+    if (item.post.id === from.post.id) continue
+    let primary: number
+    let secondary: number
+    if (vertical) {
+      const gap =
+        direction === 'down' ? item.y - (from.y + from.height) : from.y - (item.y + item.height)
+      // Entièrement au-delà du bord : une carte d'une autre colonne qui chevauche la hauteur
+      // de celle qu'on quitte n'est pas « en dessous ».
+      if (gap < -0.5) continue
+      const overlap = Math.min(item.x + item.width, from.x + from.width) - Math.max(item.x, from.x)
+      primary = overlap > 0 ? 0 : 1
+      secondary = gap + Math.abs(item.x + item.width / 2 - centreX)
+    } else {
+      const gap =
+        direction === 'right' ? item.x - (from.x + from.width) : from.x - (item.x + item.width)
+      if (gap < -0.5) continue
+      // Les colonnes tombent sur des positions exactes : arrondir suffit à les distinguer.
+      primary = Math.round(gap)
+      secondary = Math.abs(item.y + item.height / 2 - centreY)
+    }
+    if (primary < bestPrimary || (primary === bestPrimary && secondary < bestSecondary)) {
+      best = item
+      bestPrimary = primary
+      bestSecondary = secondary
+    }
+  }
+  return best
+}

@@ -1,11 +1,12 @@
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { createServer } from 'vite'
+import { devCsp } from './dev-csp'
 
 async function main(): Promise<void> {
   const server = await createServer({
     root: resolve('src/renderer'),
-    plugins: [react()],
+    plugins: [react(), devCsp()],
     resolve: {
       alias: {
         '@shared': resolve('src/shared'),

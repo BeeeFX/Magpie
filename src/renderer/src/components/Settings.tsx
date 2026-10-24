@@ -3,6 +3,7 @@ import { useClosing } from '../useClosing'
 import { useModalFocus } from '../useModalFocus'
 import type {
   AiProvider,
+  BackupStatus,
   LanguageChoice,
   LibraryInfo,
   LibraryMoveProgress,
@@ -14,13 +15,14 @@ import type {
 } from '@shared/types'
 import { ACCENTS, LANGUAGES } from '@shared/types'
 import { magpie, magpieEvents } from '../bridge'
-import { formatBytes } from '../format'
+import { formatBytes, formatDate, formatTime } from '../format'
 import { LANGUAGE_LABEL, type TranslationKey } from '../i18n'
 import { notifyError, notifySuccess, reportFailure } from '../notices'
 import { DENSITY_MAX, DENSITY_MIN, useStore, useT } from '../store'
 import { Accounts } from './Accounts'
 import { ConfirmButton } from './ConfirmButton'
 import { IconCards, IconClose, IconMap, IconMasonry } from './Icons'
+import { LibraryTransfer } from './LibraryTransfer'
 
 const THEMES: { key: ThemeChoice; label: TranslationKey }[] = [
   { key: 'system', label: 'settings.system' },
@@ -95,6 +97,8 @@ export function Settings(): React.JSX.Element | null {
   const [libraryMove, setLibraryMove] = useState<LibraryMoveProgress | null>(null)
   const [choosingLibrary, setChoosingLibrary] = useState(false)
   const [libraryMoveError, setLibraryMoveError] = useState<string | null>(null)
+  const [backups, setBackups] = useState<BackupStatus | null>(null)
+  const [backingUp, setBackingUp] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   /* Le store se ferme tout de suite, mais le panneau reste monté le temps de revenir
      doucement vers l'arrière-plan. */
@@ -103,6 +107,7 @@ export function Settings(): React.JSX.Element | null {
   useEffect(() => {
     if (!open) return
     void magpie.getLibraryInfo().then(setInfo)
+    void magpie.getBackupStatus().then(setBackups)
     void magpie.getUpdateState().then(setUpdateState)
     void loadAccounts()
   }, [open, loadAccounts])
@@ -176,6 +181,24 @@ export function Settings(): React.JSX.Element | null {
       // Sans ce `finally`, la moindre erreur laissait le bouton désactivé sur « Purge… »
       // définitivement, sans le moindre message.
       setClearing(false)
+    }
+  }
+
+  /** Une copie de la base tout de suite, en plus de celle du jour. */
+  const backUpNow = async (): Promise<void> => {
+    setBackingUp(true)
+    try {
+      const status = await magpie.backupNow()
+      setBackups(status)
+      if (status.lastAt) {
+        notifySuccess('notice.backupDone', {
+          date: `${formatDate(status.lastAt)}, ${formatTime(status.lastAt)}`
+        })
+      }
+    } catch (reason) {
+      notifyError('notice.backupFailed', reason)
+    } finally {
+      setBackingUp(false)
     }
   }
 
@@ -602,6 +625,54 @@ export function Settings(): React.JSX.Element | null {
               <span>{t('settings.libraryLocation')}</span>
               <code title={info?.dataPath}>{info?.dataPath ?? '…'}</code>
             </div>
+            {/* Les sauvegardes régulières de la base : c'est ce que le secours d'ouverture
+                remet en place si elle devient illisible. Leur date se lit ici plutôt que dans
+                un dossier qu'on n'ouvre jamais — une sauvegarde qui échoue tous les jours en
+                silence se découvre le jour où l'on en a besoin. */}
+            <div className="library-backups">
+              <span>
+                {t('settings.backups')}
+                <em>
+                  {backups?.lastAt
+                    ? t('settings.backupsLast', {
+                        date: `${formatDate(backups.lastAt)}, ${formatTime(backups.lastAt)}`,
+                        count: backups.count,
+                        size: formatBytes(backups.bytes)
+                      })
+                    : t('settings.backupsNone')}
+                </em>
+                <em>{t('settings.backupsPolicy')}</em>
+              </span>
+              <div className="library-backups__actions">
+                <button
+                  type="button"
+                  className="btn btn--quiet"
+                  disabled={
+                    backingUp ||
+                    Boolean(backups?.running) ||
+                    choosingLibrary ||
+                    (libraryMove !== null && libraryMove.phase !== 'error')
+                  }
+                  onClick={() => void backUpNow()}
+                >
+                  {backingUp || backups?.running ? t('settings.backingUp') : t('settings.backupNow')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--quiet"
+                  onClick={() =>
+                    void magpie.openBackupsFolder().catch(reportFailure('notice.openFailed'))
+                  }
+                >
+                  {t('settings.openBackups')}
+                </button>
+              </div>
+            </div>
+            {backups?.lastError ? (
+              <p className="setting__error" role="alert">
+                {t('settings.backupsFailed', { detail: backups.lastError })}
+              </p>
+            ) : null}
             {libraryMove && libraryMove.phase !== 'error' ? (
               <div className="library-move" aria-live="polite">
                 <div className="library-move__status">
@@ -686,6 +757,11 @@ export function Settings(): React.JSX.Element | null {
 
           <div className="modal__sep" />
 
+          {/* La bibliothèque dans un fichier, et le chemin du retour : SPEC §10. */}
+          <LibraryTransfer />
+
+          <div className="modal__sep" />
+
           <section className="setting setting--stack">
             <div className="setting__label">
               <h3>{t('settings.updates')}</h3>
@@ -744,6 +820,38 @@ export function Settings(): React.JSX.Element | null {
                           percent: Math.round(updateState.percent ?? 0)
                         })
                       : t('update.check')}
+              </button>
+            </div>
+          </section>
+
+          <div className="modal__sep" />
+
+          {/* Dépannage : ce qu'on joint à un signalement. La version installée n'a pas de
+              console, et le journal n'était écrit nulle part — puis nulle part où le trouver. */}
+          <section className="setting setting--stack">
+            <div className="setting__label">
+              <h3>{t('settings.support')}</h3>
+              <p>{t('settings.supportHint')}</p>
+            </div>
+            <div className="setting__actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void magpie.openLogsFolder().catch(reportFailure('notice.openFailed'))}
+              >
+                {t('settings.openLogs')}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  void magpie
+                    .copyDiagnostics()
+                    .then(() => notifySuccess('notice.diagnosticsCopied'))
+                    .catch(reportFailure('notice.copyFailed'))
+                }
+              >
+                {t('settings.copyDiagnostics')}
               </button>
             </div>
           </section>
